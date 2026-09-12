@@ -147,7 +147,7 @@ def test_the_warehouse_itself_cannot_be_downloaded(client, exports, settings):
     """The single most valuable file on the machine, and it holds restricted_
     tables of personal data."""
     response = client.get("/api/admin/exports/file",
-                           params={"path": str(settings.database_path)})
+                           params={"path": settings.database_url})
     assert response.status_code == 404
 
 
@@ -155,8 +155,10 @@ def test_a_symlink_out_of_the_export_tree_is_not_an_export(client, exports, sett
     """A link planted inside exports/output resolves to somewhere it does not
     belong, so it is dropped from the listing -- and therefore undownloadable."""
     link = exports / "sheets" / "escape.db"
+    target = exports.parent / "warehouse-sentinel.db"
+    target.write_text("not an export", encoding="utf-8")
     try:
-        link.symlink_to(settings.database_path)
+        link.symlink_to(target)
     except (OSError, NotImplementedError):
         pytest.skip("this platform/user cannot create symlinks")
 
@@ -196,8 +198,10 @@ def _touch(path, when: str) -> None:
 def _fetched_at(conn, when: str) -> None:
     """A row in the conditional-request cache: the pipeline spoke to a source."""
     conn.execute(
-        "INSERT OR REPLACE INTO http_cache (url, host, updated_at) "
-        "VALUES ('https://find.example/a', 'find.example', ?)", (when,))
+        "INSERT INTO http_cache (url, host, updated_at) "
+        "VALUES ('https://find.example/a', 'find.example', %s) "
+        "ON CONFLICT (url) DO UPDATE SET host = excluded.host, updated_at = excluded.updated_at",
+        (when,))
     conn.commit()
 
 

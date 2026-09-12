@@ -1,0 +1,9 @@
+[Unit]
+Description=Run sectortrace-archive-audit.service daily
+
+[Timer]
+OnCalendar=*-*-* {{ archive_audit_time }}:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

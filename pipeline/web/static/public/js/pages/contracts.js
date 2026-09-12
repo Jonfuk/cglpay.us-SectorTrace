@@ -8,23 +8,62 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, filterParams, num, gbp, pct, isoDate } from '/app.js';
+import { el, replace, fetchJSON, filterParams, setFilterResultCount,
+          num, gbp, pct, isoDate } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
-          exportButton, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
+          exportButton, shareButton, findingBlock, evidenceMeta, evidenceHealthStrip } from '/js/components.js';
 
-export async function render(main) {
+/* BETA-040. The first window the page asks for; "show more" pages the rest by
+ * offset. The charts on this page are computed server-side over the whole
+ * matching corpus regardless of this number (as BETA-029 established for the
+ * overview), so a small first page costs nothing but the table's own tail. */
+const PAGE_SIZE = 100;
+
+/* The contracts page owns two query keys of its own, alongside the global
+ * provider/year filters: a buyer/supplier name search and a retrieved-since
+ * bound. They live in the hash like compare.js's selection, so a searched
+ * view is a shareable link. `offset` is deliberately not URL state — how far
+ * a reader has paged is nobody else's business. */
+function pageQuery(params) {
+  const source = params || new URLSearchParams(location.hash.split('?')[1] || '');
+  return {
+    q: (source.get('q') || '').trim(),
+    since: (source.get('since_retrieved_at') || '').trim(),
+  };
+}
+
+export async function render(main, { params = null } = {}) {
   const charts = [];
+
+  // BETA-050: `#/contracts?ocid=…` is the procurement lifecycle view — the
+  // notices that share one OCDS id, grouped by the stage each notice's own
+  // tag names. The whole page is the process, so it replaces the dashboard.
+  const ocid = (params ? params.get('ocid') : null)
+    || new URLSearchParams(location.hash.split('?')[1] || '').get('ocid');
+  if (ocid) {
+    return renderProcess(main, ocid);
+  }
+
+  const { q, since } = pageQuery(params);
+  const search = { q, since };
   let data, spending;
   try {
     [data, spending] = await Promise.all([
-      fetchJSON('contracts', filterParams({ limit: 1000 })),
+      fetchJSON('contracts', filterParams({
+        q: q || undefined, since_retrieved_at: since || undefined,
+        limit: PAGE_SIZE, offset: 0,
+      })),
       fetchJSON('council_spend', filterParams({ limit: 500 })),
     ]);
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main, { params })));
     return () => {};
   }
+
+  // BETA-072: the shared filter summary shows how many notices this query
+  // returns, beside the active-filter chips.
+  setFilterResultCount(data.total, 'notice');
 
   const concentration = data.value_concentration || {};
   const page = el('div', {},
@@ -44,6 +83,18 @@ export async function render(main) {
         }))),
     (() => {
       const meta = evidenceMeta(data);
+      return evidenceHealthStrip({
+        scope: 'Procurement notices matching the sector keyword set, England-wide. Includes health and care awards beyond substance misuse.',
+        retrievedAt: meta.retrievedAt,
+        verification: 'n/a',
+        coverage: 'partial',
+        licence: { name: 'Open Government Licence v3.0', url: 'https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/' },
+        limitation: data.caveats?.value_sum || 'Published values can include framework ceilings and are not sector spend.',
+        catalogueSlug: 'procurement-notices',
+      });
+    })(),
+    (() => {
+      const meta = evidenceMeta(data);
       return findingBlock({
         finding: 'The contracts workbench locates published procurement activity; notice values are not a clean measure of sector spend and council payments are a separate evidence layer.',
         value: `${num(data.total)} published notices`, evidenceStatus: meta.sources.length || meta.retrievedAt ? 'Published' : null,
@@ -56,6 +107,7 @@ export async function render(main) {
       el('summary', { text: 'How to read a notice' }),
       el('p', { text: 'A published notice is not a payment or a clean sector-spend total. Values can be ceilings, framework values or missing; buyer, provider and date context matters.' }),
       el('p', { text: 'The full filtered notice set is available as a download near the table. Council payment files are shown separately because they record a different kind of published evidence.' })),
+    searchPanel(search),
     el('div', { id: 'shape' }),
     el('div', { id: 'corpus' }),
     el('div', { id: 'breakdown' }),
@@ -67,10 +119,48 @@ export async function render(main) {
   renderCorpus(page.querySelector('#corpus'), data, charts);
   renderBreakdown(page.querySelector('#breakdown'), data, charts);
   renderBuyers(page.querySelector('#buyers'), data, charts);
-  renderNotices(page.querySelector('#notices'), data);
+  renderNotices(page.querySelector('#notices'), data, search);
   renderCouncilSpend(page.querySelector('#notices').parentNode, spending);
 
   return () => disposeCharts(charts);
+}
+
+/* Buyer/supplier name search over the whole matching corpus, server-side, so
+ * the result set is reproducible from the URL — distinct from the table's own
+ * per-column header filters, which only sift the rows already on the page.
+ * Submitting rewrites the hash query, preserving the global provider/year
+ * filters that live there too. */
+function searchPanel(search) {
+  const input = el('input', {
+    type: 'search', name: 'q', value: search.q, autocomplete: 'off',
+    placeholder: 'Search buyer or supplier name',
+    'aria-label': 'Search notices by buyer or supplier name',
+  });
+  const apply = () => {
+    const params = new URLSearchParams(location.hash.split('?')[1] || '');
+    const term = input.value.trim();
+    if (term) params.set('q', term); else params.delete('q');
+    const query = params.toString();
+    location.hash = `#/contracts${query ? `?${query}` : ''}`;
+  };
+  const form = el('form', {
+    class: 'row wrap', style: 'gap:8px;align-items:center;',
+    onsubmit: (event) => { event.preventDefault(); apply(); },
+  },
+    input,
+    el('button', { class: 'btn', type: 'submit', text: 'Search' }),
+    search.q
+      ? el('button', {
+          class: 'btn ghost', type: 'button',
+          onclick: () => { input.value = ''; apply(); },
+        }, 'Clear')
+      : null);
+  return el('div', { class: 'panel' },
+    form,
+    search.since
+      ? el('p', { class: 'small muted' },
+          `Limited to notices retrieved on or after ${search.since}.`)
+      : null);
 }
 
 function renderCouncilSpend(container, data) {
@@ -342,32 +432,38 @@ function renderBuyers(container, data, charts) {
   }));
 }
 
-function renderNotices(container, data) {
-  const notices = data.notices || [];
-  // Not "every notice", which is what this section used to be called: the page
-  // asks for 1,000 of a corpus that is currently 98,636. The count in the
-  // toolbar says which, and the description says why there is a limit at all.
-  replace(container, section(
-    'The notices',
-    notices.length < (data.total || 0)
-      ? 'The most recent notices behind the charts above. The charts are '
-        + 'computed over the whole corpus; this list is the page\'s share of '
-        + 'it. Search a column, or narrow the filters, to reach the rest — or '
-        + 'download the CSV, which carries every row these filters match.'
-      : 'The full list behind the charts above, downloadable with its provenance.',
-    el('div', { class: 'section-action' },
-      exportButton('contracts', filterParams(), 'Download complete filtered set', {
-        total: data.total,
-      })),
-    tableCard('Published notices', [
-      { title: 'Published', field: 'date_published', width: 110,
+function renderNotices(container, data, search = { q: '', since: '' }) {
+  // The charts above are computed over the whole matching corpus; this list is
+  // a window onto it, paged by "show more" (BETA-040). `search.q` narrows both.
+  const exportParams = filterParams({
+    q: search.q || undefined,
+    since_retrieved_at: search.since || undefined,
+  });
+  const session = {
+    notices: [...(data.notices || [])],
+    total: Number(data.total) || 0,
+  };
+
+  const describe = () => session.notices.length < session.total
+    ? 'The most recent notices behind the charts above, newest first. The '
+      + 'charts are computed over the whole matching corpus; this list is the '
+      + 'page\'s share of it. Use "show more", the search above, or the CSV '
+      + 'download, which carries every row these filters match.'
+    : 'The full list behind the charts above, downloadable with its provenance.';
+
+  // BETA-071: `priority` is collapse order as the viewport narrows (0 stays
+  // longest). On a phone this table reads as a card per notice — title,
+  // supplier, value, date — with buyer, procedure and the link columns behind
+  // the row's expand toggle. The data and the CSV are unchanged.
+  const columns = [
+      { title: 'Published', field: 'date_published', width: 110, priority: 1,
         formatter: (c) => isoDate(c.getValue()) },
-      { title: 'Buyer', field: 'buyer_name' },
-      { title: 'Title', field: 'title' },
-      { title: 'Supplier', field: 'supplier_name_raw' },
-      { title: 'Value', field: 'value_core', width: 120,
+      { title: 'Buyer', field: 'buyer_name', priority: 4 },
+      { title: 'Title', field: 'title', priority: 0 },
+      { title: 'Supplier', field: 'supplier_name_raw', priority: 2 },
+      { title: 'Value', field: 'value_core', width: 120, priority: 3,
         formatter: (c) => gbp(c.getValue(), { compact: false }) },
-      { title: 'Procedure', field: 'procedure_type', width: 130 },
+      { title: 'Procedure', field: 'procedure_type', width: 130, priority: 6 },
       // Two links, because they are two different things and the useful one
       // used to be missing. "Notice" is the notice's own page on Find a
       // Tender or Contracts Finder — what a reader wants. "Data" is
@@ -379,7 +475,7 @@ function renderNotices(container, data) {
       // notice id is verified but it is still not something the source said.
       // No header filter on the two link columns: the cell shows "notice ↗",
       // so a search box there would filter on a URL the reader cannot see.
-      { title: 'Notice', field: 'notice_link', width: 90, headerFilter: false,
+      { title: 'Notice', field: 'notice_link', width: 90, headerFilter: false, priority: 7,
         formatter: (c) => {
           const url = c.getValue();
           if (!url) return '';
@@ -394,16 +490,148 @@ function renderNotices(container, data) {
         // Tabulator renders this cell as HTML, so everything in it is escaped
         // above. Nothing here is concatenated from a value that was not.
         formatterParams: {}, htmlOutput: true },
-      { title: 'Data', field: 'source_url', width: 70, headerFilter: false,
+      { title: 'Data', field: 'source_url', width: 70, headerFilter: false, priority: 8,
         formatter: (c) => (c.getValue()
           ? `<a href="${escapeHtml(c.getValue())}" target="_blank" rel="noopener noreferrer"`
             + ` title="The API response this row was parsed from">api ↗</a>`
           : ''),
         formatterParams: {}, htmlOutput: true },
-    ], notices, {
+      // BETA-050: the other notices published under this OCID, grouped into
+      // their lifecycle stages. Same-page hash navigation, so it opens the
+      // process view rather than leaving the site.
+      { title: 'Lifecycle', field: 'ocid', width: 90, headerFilter: false, priority: 5,
+        formatter: (c) => (c.getValue()
+          ? `<a href="#/contracts?ocid=${encodeURIComponent(c.getValue())}"`
+            + ` title="The related notices for this procurement, by stage">stages</a>`
+          : ''),
+        formatterParams: {}, htmlOutput: true },
+  ];
+
+  const countLine = el('p', { class: 'small muted' });
+  const moreSlot = el('div', {});
+  const tableSlot = el('div', {});
+
+  const remaining = () => Math.max(0, session.total - session.notices.length);
+
+  const paint = () => {
+    replace(tableSlot, tableCard('Published notices', columns, session.notices, {
       height: 520,
-      total: data.total,
+      total: session.total,
       exportEndpoint: 'contracts',
-      exportParams: filterParams(),
-    })));
+      exportParams,
+    }));
+    countLine.textContent = remaining()
+      ? `Showing ${num(session.notices.length)} of ${num(session.total)} matching notices.`
+      : `${num(session.notices.length)} matching notice${session.notices.length === 1 ? '' : 's'}.`;
+    moreSlot.replaceChildren();
+    if (!remaining()) return;
+    moreSlot.append(el('button', {
+      class: 'btn ghost', type: 'button', onclick: () => loadMore(),
+    }, `Show ${num(Math.min(PAGE_SIZE, remaining()))} more`));
+  };
+
+  const loadMore = async () => {
+    // Replaced wholesale while the request runs so a second click cannot queue
+    // a duplicate window.
+    moreSlot.replaceChildren(el('span', { class: 'small muted', text: 'Loading…' }));
+    let next;
+    try {
+      next = await fetchJSON('contracts', filterParams({
+        q: search.q || undefined, since_retrieved_at: search.since || undefined,
+        limit: PAGE_SIZE, offset: session.notices.length,
+      }));
+    } catch (error) {
+      moreSlot.replaceChildren(errorCard(error, () => paint()));
+      return;
+    }
+    session.notices = session.notices.concat(next.notices || []);
+    session.total = Number(next.total) || session.total;
+    paint();
+  };
+
+  replace(container, section(
+    'The notices',
+    describe(),
+    el('div', { class: 'section-action' },
+      exportButton('contracts', exportParams, 'Download complete filtered set', {
+        total: session.total,
+      })),
+    countLine, tableSlot, moreSlot));
+  paint();
+}
+
+/* BETA-050: the procurement lifecycle view. One OCID, its notices grouped by
+ * the stage each notice's own OCDS tag names — never a stage inferred from
+ * what is missing, and no completion, performance or continuity computed. */
+async function renderProcess(main, ocid) {
+  replace(main, el('div', { class: 'section' },
+    el('div', { class: 'panel' }, el('div', { class: 'shimmer' }))));
+
+  let data;
+  try {
+    data = await fetchJSON(`contracts/process/${encodeURIComponent(ocid)}`);
+  } catch (error) {
+    replace(main, el('div', {},
+      el('div', { class: 'panel' },
+        el('a', { href: '#/contracts' }, '← All contracts')),
+      el('div', { class: 'section' }, errorCard(error, () => renderProcess(main, ocid)))));
+    return () => {};
+  }
+
+  const STAGE_LABEL = {
+    planning: 'Planning', tender: 'Tender', award: 'Award', contract: 'Contract',
+    amendment: 'Amendment', termination: 'Termination',
+    implementation: 'Implementation', other: 'Other / untagged',
+  };
+  const range = data.date_range || {};
+
+  const noticeCard = (notice) => el('article', { class: 'claim' },
+    el('div', { class: 'row wrap', style: 'justify-content:space-between;gap:8px;align-items:baseline;' },
+      el('strong', { text: notice.title || notice.notice_id }),
+      el('span', { class: 'small muted',
+        text: [notice.date_published ? isoDate(notice.date_published) : null,
+               ...(notice.ocds_tags || [])].filter(Boolean).join(' · ') })),
+    el('p', { class: 'small muted',
+      text: [
+        (notice.date_start || notice.date_end)
+          ? `period ${[notice.date_start, notice.date_end].filter(Boolean).join(' – ')}` : null,
+        notice.value_core != null
+          ? `published value ${gbp(notice.value_core, { compact: false })}` : null,
+        notice.procedure_type ? `procedure: ${notice.procedure_type}` : null,
+        (notice.suppliers || []).length
+          ? `supplier(s): ${notice.suppliers.map((s) => s.name + (s.is_tracked_provider ? ' ✓' : '')).join(', ')}`
+          : null,
+      ].filter(Boolean).join(' · ') }),
+    el('div', { class: 'row wrap', style: 'gap:8px;' },
+      notice.notice_web_url
+        ? el('a', { href: notice.notice_web_url, target: '_blank', rel: 'noopener' }, 'Notice page')
+        : null,
+      notice.source_url
+        ? el('a', { href: notice.source_url, target: '_blank', rel: 'noopener' }, 'Data source')
+        : null));
+
+  const page = el('div', {},
+    el('div', { class: 'panel' },
+      el('a', { href: '#/contracts' }, '← All contracts')),
+    el('div', { class: 'hero' },
+      el('h1', { text: 'Procurement lifecycle' }),
+      el('p', { class: 'lede' },
+        `${data.notice_count} notice${data.notice_count === 1 ? '' : 's'} `
+        + `published under one OCID by ${data.buyer?.name || 'the buyer'}`
+        + `${range.earliest ? `, ${isoDate(range.earliest)} to ${isoDate(range.latest)}` : ''}.`),
+      el('p', { class: 'small muted' }, el('code', { text: data.ocid }))),
+    pinnedCaveat(data.caveat, 'What this view may and may not do'));
+
+  for (const stage of data.stages || []) {
+    if (!stage.present) {
+      page.append(section(STAGE_LABEL[stage.stage] || stage.stage,
+        'No notice published for this stage — not evidence the stage did not happen.'));
+      continue;
+    }
+    page.append(section(STAGE_LABEL[stage.stage] || stage.stage, null,
+      ...stage.notices.map(noticeCard)));
+  }
+
+  replace(main, page);
+  return () => {};
 }

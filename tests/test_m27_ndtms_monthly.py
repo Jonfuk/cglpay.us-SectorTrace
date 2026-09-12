@@ -38,6 +38,19 @@ def test_parse_report_month_rejects_unparseable():
     assert monthly._parse_report_month(None) is None
 
 
+def test_version_bounds_are_optional_and_inclusive(monkeypatch):
+    monkeypatch.setenv("NDTMS_MONTHLY_MIN_VERSION", "73")
+    monkeypatch.setenv("NDTMS_MONTHLY_MAX_VERSION", "219")
+    assert monthly._version_bounds() == (73, 219)
+
+
+def test_version_bounds_reject_invalid_range(monkeypatch):
+    monkeypatch.setenv("NDTMS_MONTHLY_MIN_VERSION", "220")
+    monkeypatch.setenv("NDTMS_MONTHLY_MAX_VERSION", "219")
+    with pytest.raises(ValueError, match="must not exceed"):
+        monthly._version_bounds()
+
+
 def test_section_heading_strips_area_name():
     """The area name after the colon changes per request; the section name
     before it does not -- this is what lets one row cross areas cleanly.
@@ -84,6 +97,7 @@ def test_landing_page_parser_extracts_token_and_report_version():
     assert parser.token == "TESTTOKEN123"
     assert parser.report_version_id == "219"
     assert parser.report_label == "June 2026"
+    assert parser.report_versions == [("219", "June 2026"), ("218", "May 2026")]
 
 
 REPORT_HTML = """

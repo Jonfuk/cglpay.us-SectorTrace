@@ -49,38 +49,74 @@
       <a href="#/contracts" data-route="contracts">Funding &amp; contracts</a>
       <a href="#/geography" data-route="geography">Places</a>
       <a href="#/providers" data-route="providers">Providers</a>
+      <a href="#/relationships" data-route="relationships">Relationships</a>
       <a href="#/treatment" data-route="treatment">Treatment data</a>
       <a href="#/pfd" data-route="pfd">Safety &amp; legal</a>
       <a href="#/claims" data-route="claims">Evidence-backed claims</a>
+      <a href="#/documents" data-route="documents">Document search</a>
       <details class="lens-menu">
         <summary>Explore by lens</summary>
         <div class="lens-menu-panel" role="menu" aria-label="Explore by campaign lens">
           <div><strong>Workforce</strong><a href="#/pay">Pay</a><a href="#/providers">Provider employment</a></div>
-          <div><strong>Public money</strong><a href="#/contracts">Contracts</a><a href="#/geography">Council spending</a></div>
-          <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/coverage">Coverage</a></div>
+          <div><strong>Public money</strong><a href="#/contracts">Contracts</a><a href="#/geography">Council spending</a><a href="#/relationships">Who commissions whom</a></div>
+          <div><strong>Service access</strong><a href="#/geography">Places</a><a href="#/providers">Providers</a><a href="#/treatment">Treatment</a><a href="#/cqc">CQC locations</a><a href="#/coverage">Coverage</a></div>
           <div><strong>Safety &amp; legal</strong><a href="#/pfd">Coroners’ reports</a><a href="#/claims">Provider evidence</a></div>
-          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="/api">Downloads &amp; API</a></div>
+          <div><strong>Accountability</strong><a href="#/coverage">Limitations</a><a href="#/catalogue">Dataset catalogue</a><a href="#/changes">What changed?</a><a href="#/calendar">Publication calendar</a><a href="/api">Downloads &amp; API</a></div>
         </div>
       </details>
+      <!--
+        A second theme control, mobile-only (see .theme-control-mobile in
+        styles.css). The primary #theme-select below sits in the topbar
+        proper and was simply `display: none` under 900px with nothing
+        taking its place -- a reader on a phone had no way to override
+        "system" theme at all. Putting a duplicate inside the offcanvas nav
+        (rather than moving the original in here) keeps the desktop topbar
+        layout, which shares one flex row with the wrapping nav links,
+        untouched; theme.js keeps both controls' values in sync.
+      -->
+      <label class="theme-control theme-control-mobile" for="theme-select-mobile">Theme
+        <select id="theme-select-mobile" class="theme-select" aria-label="Colour theme">
+          <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
+        </select>
+      </label>
+      <!--
+        W-17: "find my council". A navigator, not a filter: picking an
+        authority goes straight to its page, which is why it is not in the
+        filter bar -- the filter bar's controls all declare a state key that a
+        page reads (tests/test_portal_controls.py), and a navigator holds no
+        state. A reader who knows their town, not their ONS code, has nowhere
+        else to start.
+
+        BETA-069: it lives inside the section drawer now. At phone widths the
+        topbar carries only brand, menu and search -- the council field used to
+        sit in that row and was clipped past the viewport edge at 390px. On
+        desktop `.mainnav`'s `margin-left: auto` lifts it back to the right of
+        the nav row, so the wide layout is unchanged.
+      -->
+      <div class="findcouncil" role="search">
+        <span class="search-icon" aria-hidden="true">⌕</span>
+        <input id="find-council" type="search" placeholder="Find your council"
+               aria-label="Find your council by name" autocomplete="off"
+               role="combobox" aria-expanded="false" aria-controls="find-council-list">
+        <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
+      </div>
     </nav>
   </div>
   <!--
-    W-17: "find my council". A navigator, not a filter: picking an authority
-    goes straight to its page, which is why it lives in the top bar rather
-    than the filter bar -- the filter bar's controls all declare a state key
-    that a page reads (tests/test_portal_controls.py), and a navigator holds
-    no state. A reader who knows their town, not their ONS code, has nowhere
-    else to start.
+    The command palette (js/palette.js): one search box for the whole portal —
+    pages, councils, providers and document text — opened by this button,
+    Ctrl/Cmd-K, or "/". A navigator like the council search beside it, not a
+    filter: every choice navigates, so it holds no filter-bar state key and
+    the data-filter contract in tests/test_portal_controls.py does not apply.
+    The kbd hint is rewritten per platform at boot (⌘K on a Mac).
   -->
-  <div class="findcouncil" role="search">
+  <button id="palette-open" class="palette-open" type="button" aria-haspopup="dialog" aria-label="Search the portal">
     <span class="search-icon" aria-hidden="true">⌕</span>
-    <input id="find-council" type="search" placeholder="Find your council"
-           aria-label="Find your council by name" autocomplete="off"
-           role="combobox" aria-expanded="false" aria-controls="find-council-list">
-    <ul id="find-council-list" class="typeahead-list" role="listbox" hidden></ul>
-  </div>
+    <span>Search</span>
+    <kbd aria-hidden="true">Ctrl K</kbd>
+  </button>
   <label class="theme-control" for="theme-select">Theme
-    <select id="theme-select" aria-label="Colour theme">
+    <select id="theme-select" class="theme-select" aria-label="Colour theme">
       <option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option>
     </select>
   </label>
@@ -145,6 +181,7 @@
     -->
     <ul>
       <li><code>/api/v1/summary</code> — headline counts and their caveats</li>
+      <li><code>/api/v1/meta</code> — release identity: build, schema and capabilities of this deployment</li>
       <li><code>/api/v1/pay</code> — pay evidence</li>
       <li><code>/api/v1/council_spend</code> — published council payment lines</li>
       <li><code>/api/v1/contracts</code> — contract notices</li>
@@ -153,13 +190,34 @@
       <li><code>/api/v1/geography</code> — evidence coverage per authority</li>
       <li><code>/api/v1/boundaries</code> — authority boundary geometry</li>
       <li><code>/api/v1/fingertips</code> — treatment demand indicators</li>
+      <li><code>/api/v1/treatment_metrics</code> — catalogue of treatment metrics with their definitions, units, intervals, periods, coverage and provenance</li>
       <li><code>/api/v1/ndtms</code> — NDTMS estimates with their confidence intervals</li>
       <li><code>/api/v1/compare</code> — the existing series for two or more authorities or providers, on shared axes</li>
+      <li><code>/api/v1/provider_compare</code> — two to four providers across four separate pay-evidence layers, never combined into a score</li>
       <li><code>/api/v1/layers</code> — the geography map's overlay layers, each with its own caveats</li>
+      <li><code>/api/v1/atlas_layers</code> — the closed registry of evidence-atlas layers, one shown at a time with no compositing</li>
+      <li><code>/api/v1/relationships</code> — one authority or provider's commissioning neighbourhood in the evidence graph</li>
+      <li><code>/api/v1/relationship_path</code> — the shortest verified path between two named entities through source-backed graph edges; unconfirmed name-match edges excluded</li>
+      <li><code>/api/v1/coverage_timeline</code> — which periods each source holds for one provider or authority, never gap-filled; an absent period is "not collected", not zero</li>
+      <li><code>/api/v1/cooccurrence</code> — documents and records naming two or more selected entities together, with the exact passage or field; location, never an asserted relationship</li>
+      <li><code>/api/v1/discrepancies</code> — fields two or more public sources report differently for one entity; both values shown, neither resolved or called an error</li>
+      <li><code>/api/v1/contract_diary</code> — procurement lifecycle as dated events (published, award, period start/end); every date from the notice, no renewal or completion predicted</li>
+      <li><code>/api/v1/source_link</code> — whether a source URL was live, redirected or gone at the last fetch and whether a checksum-verified archive copy is held; collection-time metadata only, no live request</li>
+      <li><code>/api/v1/document_tables</code> — tables detected in a parsed document, with the parser's grid, page context and extraction status; no cell is re-detected</li>
+      <li><code>/api/v1/document_search</code> — full-text search over published committee papers and community drug partnership documents</li>
+      <li><code>/api/v1/catalogue</code> — every dataset the portal holds, with its source, licence, cadence and one key limitation</li>
+      <li><code>/api/v1/changes</code> — a derived chronology of what the warehouse recorded changing (release, refreshed, reparsed, superseded, verified); collection, parser and human-review changes stay distinct kinds</li>
+      <li><code>/api/v1/publication_calendar</code> — each source's stated vs observed release cadence, last retrieval held here, next-expected date and overdue/unknown status; the stated cadence is never merged with the observed estimate</li>
+      <li><code>/api/v1/feed/changes.atom</code> — the "what changed?" stream as a stable Atom feed for external subscription; same kind/source/since filter as <code>/api/v1/changes</code></li>
+      <li><code>/api/v1/record_diff</code> — compare two revisions of one record: a field-aware notice diff (publisher amendment vs pipeline normalisation, counted apart) or a text-aware document-version diff</li>
       <li><code>/api/v1/pfd</code> — coroners' Prevention of Future Deaths reports</li>
+      <li><code>/api/v1/safety</code> — HSE enforcement notices served on a tracked provider</li>
+      <li><code>/api/v1/safety_legal</code> — one filterable chronology over PFD, SAR, HSE, tribunal and CQC evidence, each event carrying one relationship label; counts by source and relationship, never summed</li>
+      <li><code>/api/v1/cqc_locations</code> — tracked providers' CQC-registered locations, filtered and paged; not a service map</li>
       <li><code>/api/v1/claims</code> — what the campaign says, with the evidence behind each claim</li>
       <li><code>/api/v1/freshness</code> — when each source table was last collected</li>
       <li><code>/api/v1/export</code> — any of the above as CSV or JSON</li>
+      <li><code>/api/openapi.json</code> — an OpenAPI 3.1 description of every route above</li>
     </ul>
     <p>
       <code>/api/v1/export</code> returns the same figures with that provenance
@@ -184,6 +242,20 @@
 <footer class="sitefoot">
   <nav class="sitefoot-nav" aria-label="More resources">
     <a href="#/coverage" data-route="coverage">Coverage &amp; limitations</a>
+    <a href="#/catalogue" data-route="catalogue">Dataset catalogue</a>
+    <a href="#/changes" data-route="changes">What changed?</a>
+    <a href="#/calendar" data-route="calendar">Publication calendar</a>
+    <a href="#/notebook" data-route="notebook">Evidence notebook</a>
+    <a href="#/saved" data-route="saved">Saved searches</a>
+    <a href="#/revisions" data-route="revisions">Compare revisions</a>
+    <a href="#/pathfinder" data-route="pathfinder">Relationship pathfinder</a>
+    <a href="#/timeline" data-route="timeline">Coverage timeline</a>
+    <a href="#/journey" data-route="journey">Research journey</a>
+    <a href="#/cooccurrence" data-route="cooccurrence">Co-occurrence explorer</a>
+    <a href="#/discrepancies" data-route="discrepancies">Evidence discrepancies</a>
+    <a href="#/diary" data-route="diary">Contract diary</a>
+    <a href="#/links" data-route="links">Source-link resilience</a>
+    <a href="#/doctables" data-route="doctables">Document tables</a>
     <a href="/api" title="The read-only JSON API behind these pages">Downloads &amp; API</a>
     <a href="/admin/" title="Pipeline operator tools">Operator access &rarr;</a>
   </nav>
@@ -217,6 +289,13 @@
     <em>Where this came from</em> drawer beside it, and every export writes it
     into the file.
   </p>
+  <!--
+    Release identity, filled by app.js from /api/v1/meta. Hidden until it
+    resolves so a reader with JavaScript off (who has the <noscript> API list
+    above) sees nothing half-formed. It is a build/schema fingerprint, not a
+    figure, so it needs no caveat.
+  -->
+  <p class="muted small buildid" id="build-identity" hidden></p>
 </footer>
 
 <script type="module" src="/app.js"></script>

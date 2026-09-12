@@ -25,9 +25,31 @@ def _seed_authority(conn, ons_code: str, name: str) -> None:
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, last_seen_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', '2020-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "VALUES (%s, %s, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', '2020-01-01T00:00:00Z', 200, 'test', 'abc')",
         (ons_code, name),
     )
+
+
+def _apply_release_write(conn, bundle: "proc.ReleaseWrite | None") -> int:
+    """Persist what `_process_release`/`_process_csv_release_row` returned,
+    the way a channel's `BatchWriter`s do in production -- `_process_release`
+    itself is pure now (see its docstring), so a unit test asserting on
+    table state after calling it has to write the bundle back itself.
+    Returns the number of contract rows written, matching the old inline int
+    `_process_release` used to return.
+    """
+    if bundle is None:
+        return 0
+    if bundle.contract_rows:
+        db.upsert_many(conn, "contracts", bundle.contract_rows, natural_key=["notice_id", "supplier_id"])
+    if bundle.sighting is not None:
+        db.upsert(conn, "procurement_channel_sightings", bundle.sighting,
+                   natural_key=["notice_id", "source_system"])
+    if bundle.parse_failures:
+        db.record_parse_failures(conn, "m01_procurement", bundle.parse_failures)
+    if bundle.review_items:
+        db.record_review_items(conn, "m01_procurement", bundle.review_items)
+    return len(bundle.contract_rows)
 
 
 # --- buyer name normalisation / matching ------------------------------------
@@ -241,10 +263,12 @@ def test_process_release_against_real_fts_fixture(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    written = proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    bundle = proc._process_release("m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    assert len(bundle.contract_rows) == 1
+    written = _apply_release_write(conn, bundle)
     assert written == 1
 
-    row = conn.execute("SELECT * FROM contracts WHERE notice_id = ?", (release["id"],)).fetchone()
+    row = conn.execute("SELECT * FROM contracts WHERE notice_id = %s", (release["id"],)).fetchone()
     assert row["buyer_ons_code"] == "E06000061"
     assert row["supplier_name_raw"] == "H2S Cars Ltd"
     assert row["value_core"] == 90000
@@ -347,7 +371,12 @@ def test_process_release_logs_review_item_for_unmatched_buyer(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    bundle = proc._process_release("m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    assert bundle.review_items == [
+        ("unmatched_buyer_name", "West Northamptonshire Council",
+         json.dumps({"ocid": release.get("ocid"), "notice_id": release["id"]})),
+    ]
+    _apply_release_write(conn, bundle)
     rows = conn.execute("SELECT * FROM review_queue WHERE item_type = 'unmatched_buyer_name'").fetchall()
     assert len(rows) == 1
     assert rows[0]["raw_value"] == "West Northamptonshire Council"
@@ -369,7 +398,7 @@ def test_walk_and_process_follows_pagination_and_marks_done(httpx_mock, settings
         matched = proc._walk_and_process(
             client, conn, "m01_procurement", proc.SOURCE_FTS, proc.FTS_URL,
             ("updatedFrom", "updatedTo"), None, date(2026, 1, 1), date(2026, 1, 2),
-            "m01_procurement:fts", {}, None, False,
+            "m01_procurement:fts", {}, None, False, settings,
         )
 
     assert matched == 1  # only the substance-misuse-titled release matches scope
@@ -388,7 +417,7 @@ def test_walk_and_process_stops_at_limit_and_saves_resume_url(httpx_mock, settin
         proc._walk_and_process(
             client, conn, "m01_procurement", proc.SOURCE_FTS, proc.FTS_URL,
             ("updatedFrom", "updatedTo"), None, date(2026, 1, 1), date(2026, 1, 2),
-            "m01_procurement:fts", {}, 1, False,
+            "m01_procurement:fts", {}, 1, False, settings,
         )
 
     cursor = db.get_cursor(conn, "m01_procurement:fts")
@@ -453,7 +482,7 @@ def test_run_end_to_end(httpx_mock, settings, conn):
     ctx = ModuleContext(conn=conn, settings=settings, since="2026-08-01", dry_run=False, limit=None)
     proc.run(ctx)
 
-    row = conn.execute("SELECT * FROM contracts WHERE notice_id = ?", (release["id"],)).fetchone()
+    row = conn.execute("SELECT * FROM contracts WHERE notice_id = %s", (release["id"],)).fetchone()
     assert row is not None
     assert row["buyer_ons_code"] == "E06000061"
     assert db.get_cursor(conn, "m01_procurement:fts").startswith("DONE:")
@@ -569,19 +598,20 @@ def test_process_csv_release_row_records_amount_parse_failure(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    written = proc._process_csv_release_row(
-        conn, "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(),
+    bundle = proc._process_csv_release_row(
+        "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(),
         proc._build_authority_lookup(conn))
+    written = _apply_release_write(conn, bundle)
 
     # The release is still kept -- that is the point of NULL over discarding.
     assert written == 1
-    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = %s",
                            (row["releases/0/id"],)).fetchone()
     assert stored["value_core"] is None
     assert stored["buyer_ons_code"] == "E06000061"
 
     failure = conn.execute(
-        "SELECT * FROM parse_failures WHERE module = ? AND field_name = ?",
+        "SELECT * FROM parse_failures WHERE module = %s AND field_name = %s",
         ("m01_procurement", "tender/value/amount")).fetchone()
     assert failure is not None
     assert failure["raw_fragment"] == "United Kingdom"
@@ -592,9 +622,10 @@ def test_process_csv_release_row_out_of_scope_records_no_parse_failure(conn):
     of every oddity in an archive this module is not collecting."""
     row = {"releases/0/id": "abc-1", "releases/0/tender/title": "Playground equipment",
            "releases/0/tender/value/amount": "United Kingdom"}
-    written = proc._process_csv_release_row(conn, "m01_procurement", proc.SOURCE_CF_CSV,
-                                             row, object(), {})
-    assert written == 0
+    bundle = proc._process_csv_release_row("m01_procurement", proc.SOURCE_CF_CSV,
+                                            row, object(), {})
+    assert bundle is None
+    assert _apply_release_write(conn, bundle) == 0
     assert conn.execute("SELECT * FROM parse_failures").fetchone() is None
 
 
@@ -639,11 +670,12 @@ def test_process_csv_release_row_matches_and_persists(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    written = proc._process_csv_release_row(
-        conn, "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), proc._build_authority_lookup(conn))
+    bundle = proc._process_csv_release_row(
+        "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), proc._build_authority_lookup(conn))
+    written = _apply_release_write(conn, bundle)
     assert written == 1
 
-    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = ?",
+    stored = conn.execute("SELECT * FROM contracts WHERE notice_id = %s",
                            (row["releases/0/id"],)).fetchone()
     assert stored["buyer_ons_code"] == "E06000061"
     assert stored["source_system"] == proc.SOURCE_CF_CSV
@@ -654,9 +686,10 @@ def test_process_csv_release_row_matches_and_persists(conn):
 
 def test_process_csv_release_row_out_of_scope_writes_nothing(conn):
     row = {"releases/0/id": "abc-1", "releases/0/tender/title": "Playground equipment"}
-    written = proc._process_csv_release_row(conn, "m01_procurement", proc.SOURCE_CF_CSV,
-                                             row, object(), {})
-    assert written == 0
+    bundle = proc._process_csv_release_row("m01_procurement", proc.SOURCE_CF_CSV,
+                                            row, object(), {})
+    assert bundle is None
+    assert _apply_release_write(conn, bundle) == 0
     assert conn.execute("SELECT * FROM contracts").fetchone() is None
 
 
@@ -734,12 +767,12 @@ def test_walk_and_process_csv_archive_end_to_end(httpx_mock, settings, conn):
         matched = proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
             "m01_procurement:cf_csv", proc.WINDOW_START,
-            proc._build_authority_lookup(conn), None, False,
+            proc._build_authority_lookup(conn), None, False, settings,
         )
 
     assert matched == 1
     row = conn.execute(
-        "SELECT * FROM contracts WHERE notice_id = ?",
+        "SELECT * FROM contracts WHERE notice_id = %s",
         ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466",)).fetchone()
     assert row["buyer_ons_code"] == "E06000061"
     assert row["source_system"] == proc.SOURCE_CF_CSV
@@ -783,12 +816,12 @@ def test_walk_and_process_csv_archive_skips_robots_disallowed_file(httpx_mock, s
         matched = proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
             "m01_procurement:cf_csv", proc.WINDOW_START,
-            proc._build_authority_lookup(conn), None, False,
+            proc._build_authority_lookup(conn), None, False, settings,
         )
 
     assert matched == 1
     row = conn.execute(
-        "SELECT * FROM contracts WHERE notice_id = ?",
+        "SELECT * FROM contracts WHERE notice_id = %s",
         ("4e24328a-95cd-43b6-97f4-4c6cb25649ab-298467",)).fetchone()
     assert row is not None
     review_row = conn.execute(
@@ -813,10 +846,11 @@ def test_process_release_records_a_channel_sighting(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    bundle = proc._process_release("m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
+    _apply_release_write(conn, bundle)
 
     row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = %s AND source_system = %s",
         (release["id"], proc.SOURCE_FTS)).fetchone()
     assert row is not None
     assert row["buyer_name"] == "West Northamptonshire Council"
@@ -1030,7 +1064,7 @@ def test_walk_and_process_kaggle_end_to_end(httpx_mock, settings, conn):
     with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
         client.set_basic_auth("user", "key")
         matched = proc._walk_and_process_kaggle(
-            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False)
+            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False, settings)
 
     assert matched == 1  # only the in-scope row
     assert db.get_cursor(conn, "m01_procurement:kaggle") == "DONE"
@@ -1044,7 +1078,7 @@ def test_walk_and_process_kaggle_skips_when_already_done(httpx_mock, settings, c
     # No response registered: if this re-fetched, the missing mock would fail the test.
     with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
         matched = proc._walk_and_process_kaggle(
-            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False)
+            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False, settings)
     assert matched == 0
 
 
@@ -1060,7 +1094,7 @@ def test_walk_and_process_kaggle_stops_at_limit_and_saves_row_offset(httpx_mock,
     with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
         client.set_basic_auth("user", "key")
         matched = proc._walk_and_process_kaggle(
-            client, conn, "m01_procurement", "m01_procurement:kaggle", 1, False)
+            client, conn, "m01_procurement", "m01_procurement:kaggle", 1, False, settings)
 
     assert matched == 1
     assert db.get_cursor(conn, "m01_procurement:kaggle") == "ROW:1"
@@ -1089,15 +1123,16 @@ def test_backfill_channel_sightings_derives_rows_from_existing_contracts(conn):
 
     # Simulate the pre-existing state: a contracts row with no sighting row,
     # as if it had been written before procurement_channel_sightings existed.
-    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup)
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    _apply_release_write(conn, proc._process_release(
+        "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), lookup))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
     assert conn.execute("SELECT * FROM procurement_channel_sightings").fetchone() is None
 
     inserted = proc.backfill_channel_sightings(conn)
     assert inserted == 1
 
     row = conn.execute(
-        "SELECT * FROM procurement_channel_sightings WHERE notice_id = ? AND source_system = ?",
+        "SELECT * FROM procurement_channel_sightings WHERE notice_id = %s AND source_system = %s",
         (release["id"], proc.SOURCE_FTS)).fetchone()
     assert row is not None
     assert row["ocid"] == release["ocid"]
@@ -1115,8 +1150,9 @@ def test_backfill_channel_sightings_is_idempotent(conn):
         status_code = 200
         payload_sha256 = "deadbeef"
 
-    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    _apply_release_write(conn, proc._process_release(
+        "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {}))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
 
     first = proc.backfill_channel_sightings(conn)
     second = proc.backfill_channel_sightings(conn)
@@ -1142,8 +1178,9 @@ def test_backfill_then_kaggle_check_reports_no_coverage_gap(conn):
     # scope filter passes and this test actually reaches the check it means
     # to exercise.
     release["tender"]["title"] = "Substance misuse treatment and recovery service recommissioning"
-    proc._process_release(conn, "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {})
-    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = ?", (release["id"],))
+    _apply_release_write(conn, proc._process_release(
+        "m01_procurement", proc.SOURCE_FTS, release, _FakeResult(), {}))
+    conn.execute("DELETE FROM procurement_channel_sightings WHERE notice_id = %s", (release["id"],))
     proc.backfill_channel_sightings(conn)
 
     row = {"ocid": release["ocid"], "tender_title": release["tender"]["title"], "buyer": "West Northamptonshire Council"}
@@ -1167,7 +1204,179 @@ def test_walk_and_process_csv_archive_skips_months_already_done(httpx_mock, sett
     with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
         matched = proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
-            "m01_procurement:cf_csv", proc.WINDOW_START, {}, None, False,
+            "m01_procurement:cf_csv", proc.WINDOW_START, {}, None, False, settings,
         )
 
     assert matched == 0
+
+
+# --- BatchWriter/collection_attempt plumbing (performance.md Phase 4) --------
+
+def test_walk_and_process_isolates_a_malformed_release_via_batch_writer(httpx_mock, settings, conn):
+    """A batch of several releases where one is malformed enough to fail the
+    database write (`contracts.ocid` is NOT NULL) must not cost it its
+    siblings. `BatchWriter` subdivides the failing batch via SAVEPOINTs
+    (`pipeline/writer.py`) so the good releases still land in `contracts`
+    and the bad one is isolated and recorded rather than taking the whole
+    page down -- pre-refactor, a single `db.upsert_many` call per release
+    meant this exact case would have raised out of `_process_release` and
+    crashed the run.
+    """
+    _allow_all_robots(httpx_mock, "https://www.find-tender.service.gov.uk")
+    releases = [
+        {"id": "good-1", "ocid": "ocds-good-1", "tender": {"title": "substance misuse service one"}},
+        # No "ocid" at all -- contracts.ocid is NOT NULL, so this release's
+        # row fails the batch write at the database level.
+        {"id": "bad-1", "tender": {"title": "substance misuse service two"}},
+        {"id": "good-2", "ocid": "ocds-good-2", "tender": {"title": "substance misuse service three"}},
+    ]
+    httpx_mock.add_response(url=re.compile(r".*ocdsReleasePackages\?updatedFrom.*"), json={"releases": releases})
+
+    with PipelineHTTPClient(proc.SOURCE_FTS, settings=settings, conn=conn) as client:
+        matched = proc._walk_and_process(
+            client, conn, "m01_procurement", proc.SOURCE_FTS, proc.FTS_URL,
+            ("updatedFrom", "updatedTo"), None, date(2026, 1, 1), date(2026, 1, 2),
+            "m01_procurement:fts", {}, None, False, settings,
+        )
+
+    # `matched` counts rows queued for the contracts writer (releases that
+    # passed the scope filter), not rows that survived the eventual database
+    # write -- the two counts genuinely differ once a batch write can fail
+    # and be isolated after the fact rather than crashing the run.
+    assert matched == 3
+    good_ids = {r["notice_id"] for r in conn.execute("SELECT notice_id FROM contracts")}
+    assert good_ids == {"good-1", "good-2"}
+    assert conn.execute("SELECT * FROM contracts WHERE notice_id = 'bad-1'").fetchone() is None
+
+    failure = conn.execute(
+        "SELECT * FROM parse_failures WHERE module = 'm01_procurement' AND field_name = 'contract_row'"
+    ).fetchone()
+    assert failure is not None
+    assert "bad-1" in failure["raw_fragment"]
+
+    # The page's own cursor still advances -- the isolated failure did not
+    # stall the walk.
+    assert db.get_cursor(conn, "m01_procurement:fts") == "DONE:2026-01-02"
+
+
+# --- _existing_ocids -----------------------------------------------------------
+
+def test_existing_ocids_returns_empty_set_for_empty_input(conn):
+    assert proc._existing_ocids(conn, set()) == set()
+
+
+def test_existing_ocids_returns_only_ocids_already_in_contracts(conn):
+    db.upsert_many(conn, "contracts", [
+        {"notice_id": "n1", "supplier_id": "", "ocid": "ocds-seen-1", "notice_type": None,
+         "buyer_name": None, "buyer_ons_code": None, "supplier_name_raw": None, "supplier_ppon": None,
+         "title": None, "description": None, "cpv_codes": None, "value_core": None, "value_max": None,
+         "currency": None, "date_published": None, "date_start": None, "date_end": None,
+         "extension_terms_text": None, "procedure_type": None, "psr_basis": 0, "psr_direct_award_option": None,
+         "notice_web_url": None, "source_url": "https://example.com", "retrieved_at": "2026-01-01T00:00:00Z",
+         "http_status": 200, "source_system": "test", "payload_sha256": "abc"},
+    ], natural_key=["notice_id", "supplier_id"])
+
+    result = proc._existing_ocids(conn, {"ocds-seen-1", "ocds-never-seen"})
+    assert result == {"ocds-seen-1"}
+
+
+# --- collection_attempts -------------------------------------------------------
+
+def test_walk_and_process_records_a_collection_attempt_per_page(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://www.find-tender.service.gov.uk")
+    page = {"releases": [{"id": "1-2026", "ocid": "ocds-h6vhtk-000001",
+                           "tender": {"title": "substance misuse service"}}]}
+    httpx_mock.add_response(url=re.compile(r".*ocdsReleasePackages\?updatedFrom.*"), json=page)
+
+    with PipelineHTTPClient(proc.SOURCE_FTS, settings=settings, conn=conn) as client:
+        proc._walk_and_process(
+            client, conn, "m01_procurement", proc.SOURCE_FTS, proc.FTS_URL,
+            ("updatedFrom", "updatedTo"), None, date(2026, 1, 1), date(2026, 1, 2),
+            "m01_procurement:fts", {}, None, False, settings,
+        )
+
+    attempt = conn.execute(
+        "SELECT * FROM collection_attempts WHERE module = 'm01_procurement' AND source_system = %s",
+        (proc.SOURCE_FTS,)).fetchone()
+    assert attempt is not None
+    assert attempt["coverage_state"] == "covered"
+    assert attempt["result_count"] == 1
+    assert attempt["status"] == "ok"
+
+
+def test_walk_and_process_marks_a_genuinely_empty_page_no_results(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://www.find-tender.service.gov.uk")
+    httpx_mock.add_response(url=re.compile(r".*ocdsReleasePackages\?updatedFrom.*"), json={"releases": []})
+
+    with PipelineHTTPClient(proc.SOURCE_FTS, settings=settings, conn=conn) as client:
+        proc._walk_and_process(
+            client, conn, "m01_procurement", proc.SOURCE_FTS, proc.FTS_URL,
+            ("updatedFrom", "updatedTo"), None, date(2026, 1, 1), date(2026, 1, 2),
+            "m01_procurement:fts", {}, None, False, settings,
+        )
+
+    attempt = conn.execute(
+        "SELECT * FROM collection_attempts WHERE module = 'm01_procurement' AND source_system = %s",
+        (proc.SOURCE_FTS,)).fetchone()
+    assert attempt is not None
+    assert attempt["coverage_state"] == "no_results"
+    assert attempt["result_count"] == 0
+    assert attempt["status"] == "empty"
+
+
+def test_walk_and_process_csv_archive_records_a_collection_attempt_per_month(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://ckan.publishing.service.gov.uk")
+    _allow_all_robots(httpx_mock, "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com")
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+
+    package = _ckan_package("Contracts Finder Notices 06 2016", "contracts-finder-notices-06-2016", 0, "2018-01-10")
+    package["resources"] = [{
+        "format": "CSV",
+        "url": "https://cdp-sirsi-production-cfs.s3.eu-west-2.amazonaws.com/Harvester-new/2016-06/day1.csv",
+    }]
+    ckan_response = {"success": True, "result": {"count": 1, "results": [package]}}
+    httpx_mock.add_response(url=re.compile(r".*package_search.*"), json=ckan_response)
+
+    csv_body = (
+        "releases/0/ocid,releases/0/id,releases/0/tender/title,releases/0/buyer/name\r\n"
+        "ocds-b5fd17-hist1,4e24328a-95cd-43b6-97f4-4c6cb25649ab-298466,"
+        "Substance misuse recovery service,West Northamptonshire Council\r\n"
+    )
+    httpx_mock.add_response(url=package["resources"][0]["url"], text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_CSV, settings=settings, conn=conn) as client:
+        proc._walk_and_process_csv_archive(
+            client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
+            "m01_procurement:cf_csv", proc.WINDOW_START,
+            proc._build_authority_lookup(conn), None, False, settings,
+        )
+
+    attempt = conn.execute(
+        "SELECT * FROM collection_attempts WHERE module = 'm01_procurement' AND source_system = %s "
+        "AND scope = '2016-06'", (proc.SOURCE_CF_CSV,)).fetchone()
+    assert attempt is not None
+    assert attempt["result_count"] == 1
+    assert attempt["coverage_state"] == "covered"
+    assert attempt["detail_json"] == {"new_ocids": 1, "seen_ocids": 0}
+
+
+def test_walk_and_process_kaggle_records_a_collection_attempt(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock, "https://www.kaggle.com")
+    _seed_authority(conn, "E06000061", "West Northamptonshire")
+    csv_body = (
+        "ocid,tender_title,buyer,tender_value\r\n"
+        "ocds-5,Substance misuse recovery service,West Northamptonshire Council,90000\r\n"
+    )
+    httpx_mock.add_response(url=proc.KAGGLE_DOWNLOAD_URL, text=csv_body)
+
+    with PipelineHTTPClient(proc.SOURCE_CF_KAGGLE, settings=settings, conn=conn) as client:
+        client.set_basic_auth("user", "key")
+        proc._walk_and_process_kaggle(
+            client, conn, "m01_procurement", "m01_procurement:kaggle", None, False, settings)
+
+    attempt = conn.execute(
+        "SELECT * FROM collection_attempts WHERE module = 'm01_procurement' AND source_system = %s",
+        (proc.SOURCE_CF_KAGGLE,)).fetchone()
+    assert attempt is not None
+    assert attempt["result_count"] == 1
+    assert attempt["status"] == "ok"

@@ -277,7 +277,7 @@ def test_run_puts_claimant_name_only_in_restricted_table(httpx_mock, settings, c
 
     # The public row must not carry the claimant's name in ANY column.
     public = conn.execute("SELECT * FROM tribunal_cases").fetchone()
-    public_blob = " ".join(str(v) for v in tuple(public) if v is not None)
+    public_blob = " ".join(str(v) for v in public.values() if v is not None)
     assert "Roe" not in public_blob
     assert "X Roe" not in public_blob
 
@@ -503,7 +503,7 @@ def test_eat_pass_stores_an_appeal_with_both_parties_matched(httpx_mock, setting
     assert case["underlying_et_cases"] == "2303961/2024,1308908/2022"
     assert case["document_count"] == 1
     # the public row must not carry either party's name
-    public_blob = " ".join(str(v) for v in tuple(case) if v is not None)
+    public_blob = " ".join(str(v) for v in case.values() if v is not None)
     assert "Person" not in public_blob and "Change Grow Live" not in public_blob
 
     restricted = conn.execute("SELECT * FROM restricted_eat_parties").fetchone()

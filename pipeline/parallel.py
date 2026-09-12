@@ -59,6 +59,7 @@ import structlog
 
 from pipeline.config import Settings
 from pipeline.http import PipelineHTTPClient
+from pipeline.writer import BatchWriter
 
 log = structlog.get_logger()
 
@@ -117,15 +118,12 @@ class _ClientPool:
             # hook of its own to close it in.
             conn = db.get_connection(self._settings, check_same_thread=False)
             client = PipelineHTTPClient(self._source_system, settings=self._settings, conn=conn)
-            # Deferring is SQLite's answer to SQLite's single writer. On
-            # PostgreSQL a worker writes its own cache entries on its own
-            # connection, which is what the module docstring above has always
-            # wished were true — see `PipelineHTTPClient` for why the commit
-            # travels with it.
-            if db.backend_of(conn) == "sqlite":
-                client.defer_cache_writes = True
-            else:
-                client.commit_cache_writes = True
+            # A worker writes its own cache entries on its own connection — what
+            # the module docstring above always wished were true, and now is:
+            # SQLite's single writer (and the deferral that worked around it)
+            # is gone. See `PipelineHTTPClient` for why the commit travels with
+            # it.
+            client.commit_cache_writes = True
             if self._configure is not None:
                 self._configure(client)
             self._local.client = client
@@ -209,9 +207,14 @@ def fetch_in_parallel(
 
             # The executor has joined every worker by now, so this is the only
             # thread running. Last write wins on a repeated URL, which is the
-            # same as the serial behaviour.
-            for entry in deferred:
-                db.set_http_cache(cache_conn, **entry)
+            # same as the serial behaviour. Cache writes are deliberately
+            # bounded; losing one is safe because the next fetch revalidates.
+            def write_cache_batch(entries) -> None:
+                for entry in entries:
+                    db.set_http_cache(cache_conn, **entry)
+
+            with BatchWriter(cache_conn, write_cache_batch, max_rows=500) as writer:
+                writer.write_many(deferred)
             log.info("parallel.cache_flushed", source_system=source_system,
                       entries=len(deferred))
 

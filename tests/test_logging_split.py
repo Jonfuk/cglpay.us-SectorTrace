@@ -18,6 +18,8 @@ import pytest
 from pipeline import http
 from pipeline.logging_conf import configure_logging
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture
 def configured(tmp_path, monkeypatch):

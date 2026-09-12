@@ -33,7 +33,7 @@ def _evidence_id(source_system: str, payload_sha256: str) -> str:
 def _upsert_entity(conn: Any, entity_id: str, entity_type: str, name: str, now: str) -> None:
     conn.execute(
         "INSERT INTO entities (entity_id, entity_type, canonical_name, canonical_name_normalized, "
-        "status, created_at, updated_at) VALUES (?, ?, ?, ?, 'active', ?, ?) "
+        "status, created_at, updated_at) VALUES (%s, %s, %s, %s, 'active', %s, %s) "
         "ON CONFLICT(entity_id) DO UPDATE SET entity_type = excluded.entity_type, "
         "canonical_name = excluded.canonical_name, canonical_name_normalized = excluded.canonical_name_normalized, "
         "updated_at = excluded.updated_at",
@@ -44,7 +44,7 @@ def _upsert_entity(conn: Any, entity_id: str, entity_type: str, name: str, now: 
 def _identifier(conn: Any, entity_id: str, scheme: str, value: str, now: str) -> None:
     conn.execute(
         "INSERT INTO entity_identifiers (entity_id, identifier_scheme, identifier_value, created_at) "
-        "VALUES (?, ?, ?, ?) ON CONFLICT(identifier_scheme, identifier_value) DO NOTHING",
+        "VALUES (%s, %s, %s, %s) ON CONFLICT(identifier_scheme, identifier_value) DO NOTHING",
         (entity_id, scheme, value, now),
     )
 
@@ -53,7 +53,7 @@ def _evidence(conn: Any, row: dict, now: str) -> str:
     evidence_id = _evidence_id(row["source_system"], row["payload_sha256"])
     conn.execute(
         "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
-        "payload_sha256, raw_object_path, created_at) VALUES (?, ?, ?, ?, ?, ?, NULL, ?) "
+        "payload_sha256, raw_object_path, created_at) VALUES (%s, %s, %s, %s, %s, %s, NULL, %s) "
         "ON CONFLICT(evidence_id) DO NOTHING",
         (evidence_id, row["source_system"], row["source_url"], row["retrieved_at"],
          row["http_status"], row["payload_sha256"], now),
@@ -78,7 +78,7 @@ def _relationship(
     conn.execute(
         "INSERT INTO entity_relationships (relationship_id, subject_entity_id, predicate, object_entity_id, "
         "relationship_type, evidence_id, valid_from, valid_to, confidence, derivation_type, "
-        "derivation_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "derivation_version, created_at, updated_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) "
         "ON CONFLICT(relationship_id) DO UPDATE SET valid_from = excluded.valid_from, "
         "valid_to = excluded.valid_to, confidence = excluded.confidence, updated_at = excluded.updated_at",
         (relationship_id, subject_id, predicate, object_id, predicate, evidence_id, valid_from, valid_to,
@@ -90,13 +90,13 @@ def _relationship(
 def _queue(conn: Any, object_type: str, object_id: str, operation: str, now: str) -> None:
     """Replace a pending equivalent operation; repeated backfills stay bounded."""
     conn.execute(
-        "DELETE FROM graph_projection_queue WHERE object_type = ? AND object_id = ? "
-        "AND operation = ? AND processed_at IS NULL",
+        "DELETE FROM graph_projection_queue WHERE object_type = %s AND object_id = %s "
+        "AND operation = %s AND processed_at IS NULL",
         (object_type, object_id, operation),
     )
     conn.execute(
         "INSERT INTO graph_projection_queue (object_type, object_id, operation, created_at) "
-        "VALUES (?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s)",
         (object_type, object_id, operation, now),
     )
 

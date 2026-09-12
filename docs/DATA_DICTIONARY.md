@@ -948,6 +948,89 @@ Constraint 5: idempotent and resumable. Each module persists a cursor (e.g. last
 | `cursor_value` | TEXT | nullable | exportable |
 | `updated_at` | TEXT | NOT NULL | exportable |
 
+## `ndtms_powerbi_observations`
+
+Conservative long-form cells extracted from public NDTMS Power BI `querydata`
+responses. The exact response is retained in `ndtms_powerbi_payloads`; cell
+positions are not semantic measures unless the report supplies a label.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `dashboard_key` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+| `row_index` | INTEGER | NOT NULL | exportable |
+| `cell_path` | TEXT | NOT NULL | exportable |
+| `column_index` | INTEGER | NOT NULL | exportable |
+| `metric_raw` | TEXT | NOT NULL | exportable |
+| `value` | REAL | nullable | exportable |
+| `value_text` | TEXT | NOT NULL | exportable |
+| `dimensions_json` | TEXT | NOT NULL | exportable |
+| `area_name_raw` | TEXT | nullable | exportable |
+| `ons_code` | TEXT | nullable | exportable |
+| `time_period_raw` | TEXT | nullable | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+
+## `ndtms_powerbi_payloads`
+
+One archived exact response body per captured public Power BI querydata payload.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `dashboard_key` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+| `cohort` | TEXT | NOT NULL | exportable |
+| `dashboard_url` | TEXT | NOT NULL | exportable |
+| `response_url` | TEXT | NOT NULL | exportable |
+| `request_body_sha256` | TEXT | NOT NULL | exportable |
+| `sequence` | INTEGER | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `content_type` | TEXT | nullable | exportable |
+| `archived_path` | TEXT | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+
+## `ndtms_viewit_archive_rows`
+
+Historical NDTMS ViewIt export rows. This is a separate report vintage from
+the current Power BI querydata layer. The source is a wide CSV, so its exact
+indicator names and disclosure markers are retained in `metrics_json` rather
+than being guessed into the current report's vocabulary.
+
+| Column | Type | Null | Export |
+| --- | --- | --- | --- |
+| `row_key` | TEXT | NOT NULL | exportable |
+| `cohort` | TEXT | NOT NULL | exportable |
+| `reporting_period` | TEXT | NOT NULL | exportable |
+| `area_name_raw` | TEXT | NOT NULL | exportable |
+| `ons_code` | TEXT | nullable | exportable |
+| `drug_group` | TEXT | NOT NULL | exportable |
+| `gender` | TEXT | NOT NULL | exportable |
+| `age_group` | TEXT | NOT NULL | exportable |
+| `metrics_json` | JSONB | NOT NULL | exportable |
+| `source_url` | TEXT | NOT NULL | exportable |
+| `retrieved_at` | TEXT | NOT NULL | exportable |
+| `http_status` | INTEGER | NOT NULL | exportable |
+| `source_system` | TEXT | NOT NULL | exportable |
+| `payload_sha256` | TEXT | NOT NULL | exportable |
+
+## `v_ndtms_viewit_current_history`
+
+Read-only metric-level union of current Power BI observations and historical
+ViewIt archive rows. `source_variant` remains explicit; overlapping periods
+must be compared, not deduplicated or summed, because report definitions and
+rounding rules can change between vintages.
+
+## `v_ndtms_complete_history`
+
+Read-only metric-level union of the current Power BI observations, historical
+ViewIt archive rows, and monthly provisional statistics. `source_variant` is
+always explicit; report vintages and indicator definitions must be compared,
+not summed or deduplicated.
+
 ## `ndtms_la_statistics`
 
 *table* — 17,231 rows.

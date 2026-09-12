@@ -19,10 +19,12 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
+import { el, svgEl, replace, fetchJSON, num, gbp, pct, ago } from '/app.js';
 import { statCard, section, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenance, truncate, escapeHtml, shareButton, tableCard,
-          lensBadge, timingBadge, findingBlock } from '/js/components.js';
+          lensBadge, timingBadge, findingBlock, revealOnScroll } from '/js/components.js';
+import { renderMyAreaCard } from '/js/myarea.js';
+import { renderRecentList } from '/js/recent.js';
 
 const SOURCE_LABELS = {
   contracts_finder: 'Contracts Finder',
@@ -37,29 +39,33 @@ export async function render(main) {
   try {
     summary = await fetchJSON('summary');
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 
-  const snapshot = el('div', {});
+  const heroMap = el('div', { class: 'hero-map', id: 'hero-map' });
   const page = el('div', {},
-    el('div', { class: 'hero' },
-      el('div', { class: 'hero-kicker' }, lensBadge('accountability'), ' · England-wide evidence desk'),
-      el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
-      el('p', { class: 'lede' },
-        'Explore published evidence about pay, commissioning, providers, treatment activity ',
-        'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
-        'missing values are never guessed.'),
-      el('div', { class: 'hero-actions' },
-        shareButton({
-          title: 'SectorTrace overview',
-          text: 'Explore the latest SectorTrace evidence snapshot.',
-        }),
-        el('a', { class: 'btn ghost', href: '#/coverage' }, 'How evidence is handled')),
-      el('details', { class: 'read-first' },
-        el('summary', { text: 'Read this first' }),
-        el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
-        el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
+    el('div', { class: 'hero hero-split hero-animated' },
+      el('div', { class: 'hero-copy' },
+        el('div', { class: 'hero-kicker' }, lensBadge('accountability'), ' · England-wide evidence desk'),
+        el('h1', { text: 'Evidence for fair pay in England’s drug and alcohol treatment sector' }),
+        el('p', { class: 'lede' },
+          'Explore published evidence about pay, commissioning, providers, treatment activity ',
+          'and workforce conditions. Every figure links to its source, retrieval date and caveats; ',
+          'missing values are never guessed.'),
+        el('div', { class: 'hero-actions' },
+          shareButton({
+            title: 'SectorTrace overview',
+            text: 'Explore the latest SectorTrace evidence snapshot.',
+          }),
+          el('a', { class: 'btn ghost', href: '#/coverage' }, 'How evidence is handled')),
+        el('details', { class: 'read-first' },
+          el('summary', { text: 'Read this first' }),
+          el('p', { text: 'This is a map of the evidence held by the portal, not a single scorecard. Pay, contracts, treatment activity, workforce figures and safety evidence remain separate layers.' }),
+          el('p', { text: 'A status such as unverified, not collected or unavailable describes the evidence state. It does not mean zero.' }))),
+      heroMap),
+    el('div', { id: 'my-area' }),
+    el('div', { id: 'recent' }),
     el('div', { id: 'snapshot' }),
     el('div', { id: 'briefing-strip' }),
     el('div', { id: 'explore' }),
@@ -67,15 +73,180 @@ export async function render(main) {
     el('div', { id: 'contracts-chart' }));
   replace(main, page);
 
-  renderCards(snapshot, summary);
+  // Pre-existing bug fixed in passing (BETA-032): this used to fill a
+  // detached `el('div', {})` that was never inserted into `page` — the
+  // element below with a matching id was a separate, permanently-empty
+  // node. The whole "Current snapshot" band (coverage, evidence quality,
+  // sector context cards) has not rendered on the live site until now.
+  // BETA-073: the reader's saved council, if any — a local starting point
+  // built entirely from the existing authority payload. Lazily filled; not on
+  // the headline critical path, and absent when no area is saved.
+  const myAreaSlot = page.querySelector('#my-area');
+  renderMyAreaCard(myAreaSlot);
+  const onMyAreaChange = () => renderMyAreaCard(myAreaSlot);
+  window.addEventListener('myareachange', onMyAreaChange);
+
+  // BETA-077: recently viewed providers and authorities — a trail back.
+  const recentSlot = page.querySelector('#recent');
+  renderRecentList(recentSlot);
+  const onRecentChange = () => renderRecentList(recentSlot);
+  window.addEventListener('recentchange', onRecentChange);
+
+  renderCards(page.querySelector('#snapshot'), summary);
   renderBriefingStrip(page.querySelector('#briefing-strip'), summary);
   renderExplore(page.querySelector('#explore'));
   renderEvidenceStatus(page.querySelector('#evidence-status'), summary);
+  // Lazily filled after first paint — a separate fetch of its own, and not
+  // on the critical path for the headline text above it.
+  renderHeroMap(heroMap, summary);
   // Freshness is seconds of table scans, so renderEvidenceStatus fetches it
   // lazily after first paint and fills the third status panel in place.
   await renderTopContracts(page.querySelector('#contracts-chart'), charts);
 
-  return () => disposeCharts(charts);
+  revealOnScroll(page);
+  return () => {
+    window.removeEventListener('myareachange', onMyAreaChange);
+    window.removeEventListener('recentchange', onRecentChange);
+    disposeCharts(charts);
+  };
+}
+
+// --- hero: England region silhouette -----------------------------------------
+
+/* The hero's one visual risk: a real (if simplified) silhouette of England's
+ * nine regions, shaded by the same "appears as a contract buyer" coverage
+ * signal the snapshot cards already report nationally -- so darker is not
+ * decoration, it is "more of this region's authorities show contract
+ * evidence." Deliberately not the /geography page's live MapLibre workspace:
+ * that fetches 14MB of full authority boundaries plus live basemap tiles
+ * from a CDN, which is a reasonable cost for a page a reader chose to visit
+ * and a bad one for the homepage's first paint. This fetches a ~60KB
+ * pre-simplified region dissolve (scripts/generate_region_outline.py) and
+ * draws it as plain inline SVG -- no map library, no network dependency
+ * beyond the portal's own static file.
+ */
+const REGION_MAP_HEIGHT = 380;
+
+function projectRing(ring, bbox, width, height) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const points = ring.map(([lon, lat]) => {
+    const x = (lon - minLon) / (maxLon - minLon) * width;
+    const y = height - (lat - minLat) / (maxLat - minLat) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  return `M ${points.join(' L ')} Z`;
+}
+
+function pathForGeometry(geometry, bbox, width, height) {
+  const polygons = geometry.type === 'Polygon' ? [geometry.coordinates] : geometry.coordinates;
+  const parts = [];
+  for (const polygon of polygons) {
+    for (const ring of polygon) parts.push(projectRing(ring, bbox, width, height));
+  }
+  return parts.join(' ');
+}
+
+// Real England, not a naive lon/lat rectangle: a degree of longitude is
+// shorter than a degree of latitude this far from the equator, and drawing
+// both as equal units makes the country look wider and squatter than it is.
+function viewBoxFor(bbox) {
+  const [minLon, minLat, maxLon, maxLat] = bbox;
+  const meanLatRad = (minLat + maxLat) / 2 * (Math.PI / 180);
+  const aspect = ((maxLon - minLon) * Math.cos(meanLatRad)) / (maxLat - minLat);
+  return { width: Math.round(REGION_MAP_HEIGHT * aspect), height: REGION_MAP_HEIGHT };
+}
+
+async function renderHeroMap(container, summary) {
+  let shapes;
+  try {
+    const response = await fetch('/assets/england-regions.json');
+    shapes = await response.json();
+  } catch (error) {
+    // Decorative: a failed fetch removes the visual rather than showing an
+    // error card the hero has no room for.
+    container.remove();
+    return;
+  }
+
+  const density = new Map(
+    (summary.authorities?.regions || []).map((r) => [r.region, r]));
+  const fractions = [...density.values()]
+    .map((r) => (r.authorities_total ? r.authorities_with_contracts / r.authorities_total : 0));
+  const maxFraction = Math.max(...fractions, 0.0001);
+
+  const { width, height } = viewBoxFor(shapes.meta.bbox);
+  const paths = shapes.features.map((feature) => {
+    const region = feature.properties.region;
+    const row = density.get(region);
+    const fraction = row?.authorities_total ? row.authorities_with_contracts / row.authorities_total : 0;
+    const intensity = fraction / maxFraction;
+    // Muted slate for genuinely zero coverage (rare, but distinct from "some
+    // coverage, drawn pale") rather than the same hue at near-zero opacity,
+    // which a reader could mistake for "no data" either way.
+    const fill = fraction === 0 ? 'rgba(130, 147, 170, 0.25)'
+      : `rgba(33, 212, 208, ${(0.18 + intensity * 0.62).toFixed(2)})`;
+    return svgEl('path', {
+      d: pathForGeometry(feature.geometry, shapes.meta.bbox, width, height),
+      fill, stroke: '#08111f', 'stroke-width': '1',
+    }, svgEl('title', { text: row
+      ? `${region}: ${num(row.authorities_with_contracts)} of ${num(row.authorities_total)} authorities appear as a contract buyer (${pct(fraction)})`
+      : `${region}: no coverage data` }));
+  });
+
+  const sorted = [...density.values()].filter((r) => r.authorities_total)
+    .sort((a, b) => (b.authorities_with_contracts / b.authorities_total) - (a.authorities_with_contracts / a.authorities_total));
+  const best = sorted[0];
+  const worst = sorted[sorted.length - 1];
+  const ariaLabel = best && worst
+    ? `Map of England's nine regions, shaded by the share of local authorities `
+      + `that appear as a contract buyer. Highest: ${best.region} at `
+      + `${pct(best.authorities_with_contracts / best.authorities_total)}. `
+      + `Lowest: ${worst.region} at ${pct(worst.authorities_with_contracts / worst.authorities_total)}.`
+    : `Map of England's nine regions, shaded by contract-buyer coverage.`;
+
+  replace(container,
+    svgEl('svg', {
+      viewBox: `0 0 ${width} ${height}`, role: 'img', 'aria-label': ariaLabel,
+      class: 'hero-map-svg',
+    }, paths),
+    el('p', { class: 'hero-map-caption small muted',
+      text: 'Share of local authorities appearing as a contract buyer, by region.' }));
+}
+
+/** A `<strong>` that counts up to `value` on first paint rather than
+ *  appearing pre-filled. Purely a presentation flourish on the strip's own
+ *  numbers -- it reads the same value `num()` would have rendered outright,
+ *  it just gets there over a few frames. A missing value renders as the
+ *  usual em dash, unanimated, because there is nothing to count up to. */
+function countUpMetric(value) {
+  const n = Number(value);
+  if (value === null || value === undefined || Number.isNaN(n)) {
+    return el('strong', { text: '—' });
+  }
+  return el('strong', { text: '0', 'data-count-target': String(n) });
+}
+
+/** Runs every `[data-count-target]` inside `root` from 0 to its target over
+ *  ~900ms with an ease-out curve. Skipped for reduced motion -- the number is
+ *  set to its final value immediately rather than left at 0. */
+function animateCounts(root) {
+  const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  for (const node of root.querySelectorAll('[data-count-target]')) {
+    const target = Number(node.dataset.countTarget);
+    if (reduceMotion || !Number.isFinite(target)) {
+      node.textContent = num(target);
+      continue;
+    }
+    const duration = 900;
+    const start = performance.now();
+    const step = (now) => {
+      const progress = Math.min(1, (now - start) / duration);
+      const eased = 1 - (1 - progress) ** 3;
+      node.textContent = num(Math.round(target * eased));
+      if (progress < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 }
 
 function renderBriefingStrip(container, summary) {
@@ -89,10 +260,12 @@ function renderBriefingStrip(container, summary) {
         el('h2', { text: 'The campaign view, at a glance' })),
       timingBadge({ kind: retrieved ? 'current' : 'snapshot', date: retrieved ? retrieved.slice(0, 10) : null })),
     el('div', { class: 'evidence-strip-grid' },
-      el('div', {}, el('strong', { text: num(summary.funnel?.evidence_rows) }), el('span', { text: ' verified evidence rows' })),
-      el('div', {}, el('strong', { text: num(summary.contracts?.total_notices) }), el('span', { text: ' procurement notices indexed' })),
-      el('div', {}, el('strong', { text: num(summary.providers?.total) }), el('span', { text: ' providers tracked' })),
-      el('div', {}, el('strong', { text: num(signalCount) }), el('span', { text: ' active evidence signals' }))),
+      el('div', {}, countUpMetric(summary.funnel?.evidence_rows), el('span', { text: ' verified evidence rows' })),
+      el('div', {}, countUpMetric(summary.contracts?.total_notices), el('span', { text: ' procurement notices indexed' })),
+      el('div', {}, countUpMetric(summary.providers?.total), el('span', { text: ' providers tracked' })),
+      // Same "matched to a known provider" measure as the contracts page, in
+      // place of a count of how many layers happened to be non-zero.
+      el('div', {}, countUpMetric(summary.contracts?.matched_to_provider), el('span', { text: ' matched to a known provider' }))),
     el('p', { class: 'small muted', text: retrieved
       ? `Scope: England-wide public evidence. Latest source retrieval: ${retrieved.slice(0, 10)}.`
       : 'Scope: England-wide public evidence. Retrieval timing is not available in this extract.' }),
@@ -104,6 +277,7 @@ function renderBriefingStrip(container, summary) {
       sources: sources.map((s) => SOURCE_LABELS[s.source_system] || s.source_system).filter(Boolean),
       retrievedAt: retrieved ? retrieved.slice(0, 10) : null,
     })));
+  animateCounts(container);
 }
 
 function renderCards(container, summary) {
@@ -214,6 +388,26 @@ function renderCards(container, summary) {
       band('Sector context', 'Published workforce context, kept separate from the coverage counts above.', sectorContext))));
 }
 
+// Same lens classification app.js stamps onto each route's page-top cue
+// (`lensByRoute` in app.js), repeated here rather than imported: it is
+// presentation metadata about where a route sits in the campaign's argument,
+// not evidence, and the card's accent colour is the only place on this page
+// that reads it. Set as an inline custom property rather than a `lens-*`
+// class -- that class name is already `.lens-accountability` etc. on the
+// hero-kicker badge (components.js's lensBadge()), styled bare rather than
+// scoped to the badge, and reusing it here would pull that styling onto
+// two of these five cards.
+const EXPLORE_LENS = {
+  '#/pay': ['--accent-green', 'Workforce'],
+  '#/contracts': ['--accent-amber', 'Public money'],
+  '#/geography': ['--accent-teal', 'Service access'],
+  '#/providers': ['--accent-teal', 'Service access'],
+  '#/treatment': ['--accent-teal', 'Service access'],
+  '#/pfd': ['--accent-red', 'Safety & legal'],
+  '#/claims': ['--accent-purple', 'Accountability'],
+  '#/documents': ['--accent-purple', 'Accountability'],
+};
+
 function renderExplore(container) {
   const routes = [
     ['#/pay', 'Pay & benchmarks', 'Follow the workforce story from published pay to labour-market context.'],
@@ -223,16 +417,19 @@ function renderExplore(container) {
     ['#/treatment', 'Treatment data', 'Understand demand and activity figures with their uncertainty and limits.'],
     ['#/pfd', 'Safety & legal', 'Explore coroners’ reports, concerns, and provider mentions responsibly.'],
     ['#/claims', 'Evidence-backed claims', 'Find campaign-ready claims with the evidence behind them.'],
+    ['#/documents', 'Document search', 'Search the text of published committee papers and partnership documents.'],
   ];
   const routeCards = [];
   for (const route of routes) {
     const href = route[0];
     const title = route[1];
     const description = route[2];
-    routeCards.push(el('a', { class: 'explore-card', href },
+    const [lensVar, lensLabel] = EXPLORE_LENS[href] || ['--accent-teal', 'Evidence'];
+    routeCards.push(el('a', { class: 'explore-card', style: `--lens: var(${lensVar})`, href },
+      el('span', { class: 'explore-card-lens', text: lensLabel }),
       el('span', { class: 'explore-card-title', text: title }),
       el('span', { class: 'explore-card-description', text: description }),
-      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: 'Open route' })));
+      el('span', { class: 'explore-card-arrow', 'aria-hidden': 'true', text: '→' })));
   }
   replace(container, section(
     'Explore the evidence',
@@ -361,56 +558,69 @@ async function renderFreshnessPanel(container) {
 async function renderTopContracts(container, charts) {
   let data;
   try {
-    data = await fetchJSON('contracts', { limit: 500 });
+    // Everything this section draws -- `value_concentration`,
+    // `largest_matched_to_provider` (already top-5), the corpus-wide
+    // concentration line -- is computed server-side over the whole corpus and
+    // does not depend on `limit`. The only limit-bound field read below is
+    // `notices`, and only for provenance (deduped, at most 6 URLs shown) and
+    // its latest retrieval date. So ask for 10, not 500: same chart, and the
+    // homepage's single biggest transfer drops ~98%.
+    data = await fetchJSON('contracts', { limit: 10 });
   } catch (error) {
-    replace(container, errorCard(error.message));
+    replace(container, errorCard(error));
     return;
   }
 
   const concentration = data.value_concentration || {};
-  const largest = (concentration.largest || []).slice(0, 10).reverse();
-  const tableRows = (concentration.largest || []).slice(0, 10);
+  const matchedLargest = data.largest_matched_to_provider || [];
+  const largest = matchedLargest.slice(0, 5).reverse();
+  const tableRows = matchedLargest.slice(0, 5);
 
   const holder = el('div', {});
   const valueCaveat = data.caveats?.value_sum
     || 'Published notice values can include framework ceilings and are not a measure of sector spend.';
+  const providerCaveat = data.caveats?.provider_match;
 
   replace(container, section(
     'The largest notices in the corpus',
-    'Ten highest published values. Read the caveat before treating any of '
-    + 'these as sector spend.',
+    'Five highest published values, limited to notices matched to a tracked '
+    + 'provider by exact supplier name. Read the caveats before treating '
+    + 'any of these as sector spend.',
     pinnedCaveat(valueCaveat, 'Important limitation'),
+    providerCaveat ? pinnedCaveat(providerCaveat, 'Matching is a floor') : null,
     findingBlock({
-      finding: 'The largest published notices are useful for locating procurement activity, but their headline values should not be read as sector spend.',
-      value: `Median notice ${gbp(concentration.median_value_gbp, { compact: false })}`,
+      finding: 'The largest notices matched to a tracked provider are useful for locating procurement activity, but their headline values should not be read as sector spend.',
+      value: `Median notice (all notices) ${gbp(concentration.median_value_gbp, { compact: false })}`,
       evidenceStatus: 'Published', timing: { kind: 'current', date: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10) },
       caveat: valueCaveat, sources: ['Contracts Finder'],
       retrievedAt: (data.notices || []).map((n) => n.retrieved_at).filter(Boolean).sort().pop()?.slice(0, 10),
     }),
     el('div', { class: 'panel' },
       el('p', { class: 'small muted' },
-        `Median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
+        `Corpus-wide: median notice ${gbp(concentration.median_value_gbp, { compact: false })} · `,
         `mean ${gbp(concentration.mean_value_gbp)} · `,
         `${num(concentration.notices_over_1bn)} notices above £1bn carry `,
         `${pct(concentration.share_over_1bn)} of the total`),
       holder,
       el('details', { class: 'chart-data' },
         el('summary', { text: `View data (${num(tableRows.length)} notices)` }),
-        tableCard('Largest published notices', [
+        tableCard('Largest published notices matched to a provider', [
+          { title: 'Provider', field: 'canonical_name' },
           { title: 'Buyer', field: 'buyer_name' },
           { title: 'Notice', field: 'title' },
           { title: 'Published value', field: 'value_display', width: 150 },
           { title: 'Notice ID', field: 'notice_id', width: 150 },
         ], tableRows.map((notice) => ({
+          canonical_name: notice.canonical_name || '—',
           buyer_name: notice.buyer_name || 'Not published',
           title: notice.title || 'Untitled notice',
           value_display: gbp(notice.value_core, { compact: false }),
           notice_id: notice.notice_id || '—',
-        })), { height: 360, total: tableRows.length })),
+        })), { height: 300, total: tableRows.length })),
       provenance({
         sources: (data.notices || []).map((n) => n.source_url),
         retrievedAt: (data.notices || []).map((n) => n.retrieved_at).sort().pop(),
-        tables: ['contracts'],
+        tables: ['contracts', 'supplier_aliases'],
         module: 'm01_procurement',
       }))));
 
@@ -427,14 +637,15 @@ async function renderTopContracts(container, charts) {
     },
     yAxis: {
       type: 'category',
-      data: largest.map((n) => truncate(n.buyer_name || n.notice_id, 32)),
+      data: largest.map((n) => truncate(n.canonical_name || n.buyer_name || n.notice_id, 32)),
     },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       formatter: (params) => {
         const row = largest[params[0].dataIndex];
         return [
-          `<strong>${escapeHtml(row.buyer_name || '')}</strong>`,
+          `<strong>${escapeHtml(row.canonical_name || '')}</strong>`,
+          escapeHtml(row.buyer_name || ''),
           escapeHtml(truncate(row.title || '', 80)),
           `<strong>${gbp(row.value_core, { compact: false })}</strong>`,
         ].join('<br>');
@@ -451,10 +662,9 @@ async function renderTopContracts(container, charts) {
     }],
   }, {
     height: 'tall',
-    aria: `Bar chart of the ten highest-value procurement notices. `
-      + `${num(concentration.notices_over_1bn)} notices above one billion pounds `
-      + `account for ${pct(concentration.share_over_1bn)} of the total value, `
-      + `and are cross-government framework ceilings rather than sector spend.`,
+    aria: `Bar chart of the five highest-value procurement notices matched to `
+      + `a tracked provider by exact supplier name. Matching is a floor, so `
+      + `this is not the five highest-value notices in the whole corpus.`,
   }));
 }
 

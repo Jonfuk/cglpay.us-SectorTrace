@@ -128,9 +128,9 @@ _INSERT_DECISION = (
     "(census_year, metric, workforce_segment, raw_text, decision, "
     " decided_by, decided_at, note, checked_value, checked_unit, checked_page, "
     " checked_against_url, checked_against_sha256) "
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)")
 
-_WHERE_KEY = (f"WHERE {' AND '.join(f'{c} = ?' for c in KEY_COLUMNS)}")
+_WHERE_KEY = (f"WHERE {' AND '.join(f'{c} = %s' for c in KEY_COLUMNS)}")
 
 
 def _key_values(row: dict) -> tuple:
@@ -166,7 +166,7 @@ def verify(conn: sqlite3.Connection, key: str, verified_by: str,
         conn.execute(_INSERT_DECISION,
                       _decision_params(row, "verified", who, note))
         conn.execute(
-            f"UPDATE {METRICS} SET verified = 1, rejected = 0, verified_at = ? "
+            f"UPDATE {METRICS} SET verified = 1, rejected = 0, verified_at = %s "
             f"{_WHERE_KEY}", (decided_at, *_key_values(row)))
         conn.commit()
     except Exception:
@@ -207,7 +207,7 @@ def reject(conn: sqlite3.Connection, keys: list[str], rejected_by: str,
                           _decision_params(row, "rejected", who, note))
             conn.execute(
                 f"UPDATE {METRICS} SET rejected = 1, verified = 0, "
-                f"verified_at = ? {_WHERE_KEY}",
+                f"verified_at = %s {_WHERE_KEY}",
                 (decided_at, *_key_values(row)))
             _record_bad_parse(conn, row, who, note)
         conn.commit()
@@ -320,4 +320,4 @@ def history(conn: sqlite3.Connection, limit: int = 20) -> list[dict]:
         "SELECT id, census_year, metric, workforce_segment, decision, "
         "       decided_by, decided_at, note, checked_value, checked_unit, "
         "       checked_page, checked_against_sha256 "
-        "FROM census_verifications ORDER BY id DESC LIMIT ?", (limit,))]
+        "FROM census_verifications ORDER BY id DESC LIMIT %s", (limit,))]

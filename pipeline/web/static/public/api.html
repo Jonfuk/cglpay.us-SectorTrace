@@ -74,6 +74,8 @@
       <a href="#route-compare"><code>compare</code></a>,
       <a href="#route-geography"><code>geography</code></a>, and
       <a href="#route-layers"><code>layers</code></a>.</li>
+    <li><strong>See who an authority or provider commissions.</strong> Use
+      <a href="#route-relationships"><code>relationships</code></a>.</li>
     <li><strong>Explore a subject.</strong> Go to
       <a href="#route-contracts"><code>contracts</code></a>,
       <a href="#route-pay"><code>pay</code></a>,
@@ -94,8 +96,10 @@
       <code>POST</code> to one is a 404.</li>
     <li><strong>No authentication and no API key.</strong> The security model
       is the bind address: this server is meant to run on a machine or a
-      network you trust. Nothing here is rate-limited, so please be no less
-      polite than the pipeline is to its own sources.</li>
+      network you trust. A per-address rate limit answers sustained abuse
+      with <code>429</code> and <code>Retry-After</code> — generous enough
+      that ordinary use never sees it — so please be no less polite than the
+      pipeline is to its own sources regardless.</li>
     <li><strong>Same-origin.</strong> No CORS headers are ever sent, so a page
       on another site cannot read these responses from a browser. A script, a
       notebook or <code>curl</code> is unaffected.</li>
@@ -136,6 +140,23 @@
     <p><a href="/api/v1/summary"><code>/api/v1/summary</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="meta">
+    <h3><code>/api/v1/meta</code></h3>
+    <p>
+      Release identity for this deployment: the <code>environment</code>, the
+      running <code>revision</code> and <code>build_time</code>, the database
+      <code>backend</code>, the <code>schema</code> block (latest applied
+      migration and count) and a <code>capabilities</code> block (admin UI,
+      response cache, rate limit, document analysis, semantic search, and any
+      PostgreSQL extensions installed). It lets a reviewer confirm which build
+      and schema they are looking at. Per-source collection times are
+      <a href="/api/v1/freshness"><code>/api/v1/freshness</code></a>;
+      <code>/health</code> stays the plain liveness check.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p><a href="/api/v1/meta"><code>/api/v1/meta</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="providers">
     <h3><code>/api/v1/providers</code></h3>
     <p>
@@ -169,6 +190,35 @@
       <code>caveats</code>.
     </p>
     <p><code>/api/v1/providers/change_grow_live/timeline</code></p>
+  </article>
+
+  <article class="apiroute" data-route="providers/{provider_key}/lineage"
+           data-route-pattern="providers/([a-z0-9_]+)/lineage">
+    <h3><code>/api/v1/providers/{provider_key}/lineage</code></h3>
+    <p>
+      The verified administrative record of an organisation's identity —
+      renamed, merged into another body, or dissolved — from the pipeline's
+      lifecycle config, cross-checked against the registered company and
+      charity record. <strong>Not a statement about continuity of service,
+      staff, contracts or quality</strong>: a merged charity's services and
+      workforce may have moved, stayed or ended, and this does not say which.
+      Evidence that names an older identity stays attached to that identity.
+      No ownership structure is inferred and no individual officer is named.
+    </p>
+    <p class="small">
+      Returns <code>provider</code> (<code>provider_key</code>,
+      <code>canonical_name</code>, <code>status</code>,
+      <code>is_target</code>), <code>edges</code> — each with
+      <code>relationship</code> (<code>renamed_to</code>,
+      <code>merged_into</code>, <code>dissolved</code>,
+      <code>renamed_from</code>, <code>merged_from</code>),
+      <code>direction</code>, the other <code>provider_key</code> /
+      <code>canonical_name</code> and its <code>basis</code> —
+      <code>chain</code> (this entity forward to the surviving one, with a
+      cycle guard), <code>identifiers</code> (config-verified company / charity
+      / CQC ids and their role) and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/providers/with_you/lineage</code></p>
   </article>
 
   <article class="apiroute" data-route="authorities">
@@ -246,6 +296,563 @@
     </p>
   </article>
 
+  <article class="apiroute" id="route-provider-compare" data-route="provider_compare">
+    <h3><code>/api/v1/provider_compare</code></h3>
+    <p>
+      Two to four providers laid out across four separate pay-evidence
+      layers: Living Wage accreditation, the latest gender pay gap filing,
+      pay a provider published on its own website, and its ten most recent
+      NHS Jobs adverts. The layers are placed side by side, never combined —
+      the response has no ranking, score, difference or ratio, and a
+      provider absent from a layer has not been shown to be worse or better
+      on it. Non-temporal by design: this is not <code>/api/v1/compare</code>'s
+      time series.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Required, repeatable. Between two and four distinct providers from <code>/api/v1/providers</code>; fewer or more is a 400, as is an unknown key.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>providers</code> (key and name, in the order asked) and
+      <code>layers</code> — <code>living_wage</code>, <code>gender_pay_gap</code>,
+      <code>provider_pay</code>, <code>nhs_jobs</code> — each with its own
+      <code>unit</code>, a <code>by_provider</code> map of rows keyed by
+      provider, and its own <code>caveat</code>, plus a top-level
+      <code>caveat</code>. There is no CSV form: unlike measures must not be
+      flattened into one table.
+    </p>
+    <p>
+      <code>/api/v1/provider_compare?provider_key=change_grow_live&amp;provider_key=turning_point</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-relationships" data-route="relationships">
+    <h3><code>/api/v1/relationships</code></h3>
+    <p>
+      One authority or provider's commissioning neighbourhood in the evidence
+      graph — a one-hop view centred on whichever entity you ask for, not a
+      map of the whole corpus. A line means a contract notice named this
+      authority as buyer and this provider as supplier; it is not a measure
+      of size, value, importance or reliance. Only deterministic
+      relationships are returned — contract awards backed by an exact
+      supplier-name match — never an unreviewed inference.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>. Exactly one of <code>ons_code</code> or <code>provider_key</code> is required.</td></tr>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>center</code> (the entity you asked about),
+      <code>neighbours</code> (the entities it has commissioning
+      relationships with), <code>edges</code> (each with its evidence
+      source, retrieval date and any date range the relationship was valid
+      for), and <code>caveat</code>. An authority or provider that exists but
+      has no matched relationships returns an empty neighbourhood, not an
+      error — the coverage floor is the same one <code>contracts</code> and
+      <code>compare</code> already document.
+    </p>
+    <p>
+      <code>/api/v1/relationships?ons_code=E08000025</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-document_tables" data-route="document_tables">
+    <h3><code>/api/v1/document_tables</code></h3>
+    <p>
+      Tables detected in a parsed document, so evidence that sits in a table
+      can be read as a grid rather than as a flattened text snippet. Each
+      table is the grid the parser wrote to <code>document_tables</code> — its
+      page number, row and column counts, an extraction status
+      (<code>structured</code>, <code>markdown_only</code>, <code>empty</code>)
+      and a preview. <strong>No cell is re-detected or reconstructed.</strong>
+      A <code>markdown_only</code> or <code>empty</code> status means the
+      parse did not produce a structured grid. <code>table_id</code> returns
+      one table with its full grid, its nearest caption, and the surrounding
+      elements for page context; the client builds the CSV from exactly those
+      cells.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>document_id</code></td><td>A document from <a href="#route-document_search">document search</a>.</td></tr>
+        <tr><td><code>table_id</code></td><td>One <code>document_table_id</code> from the list, for the full grid.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Documents are gated by the same source allowlist as document search.
+      The source document is the authority for anything the parse got wrong.
+    </p>
+    <p><code>/api/v1/document_tables?document_id=…</code></p>
+  </article>
+
+  <article class="apiroute" id="route-source_link" data-route="source_link">
+    <h3><code>/api/v1/source_link</code></h3>
+    <p>
+      Whether an original source URL was <em>live</em>, <em>redirected</em>,
+      <em>gone</em> or <em>errored</em> the last time this pipeline fetched
+      it, and whether a checksum-verified archive copy of the bytes is held.
+      <strong>No live request is made</strong> — every state is read from the
+      HTTP status, the SHA-256 and the archived file recorded at collection
+      time. The archive is provenance, not a mirror: it is the bytes fetched
+      on a past date and is never presented as the current publisher page.
+      Omit <code>url</code> for a corpus-wide count of cited rows at each
+      state.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>url</code></td><td>An http(s) source URL cited somewhere in the warehouse. Omit for the breakdown.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Per-URL: <code>state</code>, <code>last_http_status</code>,
+      <code>last_checked</code>, <code>archive</code> (<code>held</code>,
+      <code>verified</code>, <code>sha256</code>), <code>note</code>,
+      <code>caveat</code>. Breakdown: <code>by_state</code>,
+      <code>tables_checked</code>.
+    </p>
+    <p><code>/api/v1/source_link?url=https://www.gov.uk/…</code></p>
+  </article>
+
+  <article class="apiroute" id="route-contract_diary" data-route="contract_diary">
+    <h3><code>/api/v1/contract_diary</code></h3>
+    <p>
+      Procurement lifecycle records read as dated events rather than
+      disconnected notice rows: a notice published, an award, a contract
+      period starting, a contract period ending. <strong>Every date is
+      transcribed from the notice.</strong> An “ends” event is the contract
+      period <em>as published</em> — it is not a forecast of renewal,
+      re-tender, or completion — and no milestone or performance event is
+      shown because the warehouse does not collect them. Scope the diary by
+      provider, buyer authority, or a single OCDS process.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Contracts whose supplier name matched this key (via <code>supplier_aliases</code>).</td></tr>
+        <tr><td><code>buyer_ons_code</code></td><td>Contracts bought by this authority.</td></tr>
+        <tr><td><code>ocid</code></td><td>One OCDS process.</td></tr>
+        <tr><td><code>year</code></td><td>Keep only events in this calendar year.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code> (each with <code>date</code>,
+      <code>kind</code>, <code>title</code>, <code>value_core</code>,
+      <code>source_url</code>), <code>months</code> (event counts, for a
+      calendar overview), <code>span</code>, <code>counts</code>,
+      <code>note</code> and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/contract_diary?buyer_ons_code=E08000025</code></p>
+  </article>
+
+  <article class="apiroute" id="route-discrepancies" data-route="discrepancies">
+    <h3><code>/api/v1/discrepancies</code></h3>
+    <p>
+      Where two or more public sources report a <em>different</em> value for
+      the same verified entity and field — a provider's legal name across
+      Companies House, the CQC register and a gender-pay-gap filing; a company
+      number; a CQC location's rating from the syndication API versus the bulk
+      export — both values are shown side by side with their source and
+      retrieval date. <strong>Nothing is reconciled, ranked, or called an
+      error.</strong> This is not cross-source arithmetic: it adds and
+      averages nothing, it only lets the reader see both. A closed registry of
+      comparable field pairs decides what is compared; a field whose sources
+      agree is listed as agreeing.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Exactly one of this or <code>ons_code</code>.</td></tr>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entity</code>, <code>discrepancies</code> (each with
+      <code>label</code>, <code>observations</code> [source, value, as_of,
+      source_url] and <code>distinct_values</code>), <code>agreed</code>,
+      <code>checked</code>, <code>note</code> and <code>caveat</code>. Only
+      identity-level fields (name, number, rating) are compared in this
+      version.
+    </p>
+    <p><code>/api/v1/discrepancies?provider_key=change_grow_live</code></p>
+  </article>
+
+  <article class="apiroute" id="route-cooccurrence" data-route="cooccurrence">
+    <h3><code>/api/v1/cooccurrence</code></h3>
+    <p>
+      Documents and records in which two or more selected tracked entities are
+      named <em>together</em> — in one document element, one coroner's report,
+      one tribunal case, or one procurement notice — with the exact passage or
+      structured field for each. Name matching uses only the verified variants
+      in <code>supplier_aliases</code> (the explicit review step), and every
+      structured mention already carries a confirmed <code>provider_key</code>.
+      <strong>Co-occurrence is location, not a relationship.</strong> Two names
+      in one passage may be a list, a comparison, or unrelated; for a verified
+      connection use <a href="#route-relationship_path">the pathfinder</a>.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>key</code></td><td>A provider/supplier key. Repeat the parameter 2–5 times.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entities</code>, <code>results</code> (each with
+      <code>record_type</code>, <code>title</code>, <code>text</code> or
+      <code>matched</code>, and a <code>link</code>), <code>counts</code>
+      (<code>by_record_type</code>), <code>note</code> and <code>caveat</code>.
+      Documents are searched over committee papers and community
+      drug-partnership documents only.
+    </p>
+    <p><code>/api/v1/cooccurrence?key=change_grow_live&amp;key=turning_point</code></p>
+  </article>
+
+  <article class="apiroute" id="route-coverage_timeline" data-route="coverage_timeline">
+    <h3><code>/api/v1/coverage_timeline</code></h3>
+    <p>
+      For one selected provider or authority, exactly which periods each
+      source holds — so a reader sees a gap before opening a section.
+      <strong>Nothing is gap-filled.</strong> Each source's <code>periods</code>
+      list is the distinct periods the warehouse actually holds for that
+      entity; a period missing from a list means the source did not publish it
+      or this pipeline has not collected it — it is never a zero. The only
+      synthesised value is the <code>years</code> axis, drawn for alignment.
+      A source with an empty list is shown, not hidden: "this source holds
+      nothing for this entity" is itself the answer.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>A provider from <code>/api/v1/providers</code>. Exactly one of this or <code>ons_code</code>.</td></tr>
+        <tr><td><code>ons_code</code></td><td>An authority from <code>/api/v1/authorities</code>.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>entity</code>, <code>span</code> / <code>years</code>
+      (the axis), <code>sources</code> (each with <code>title</code>,
+      <code>period_kind</code>, <code>periods</code>, <code>held</code>,
+      <code>link</code>), <code>note</code> and <code>caveat</code>.
+    </p>
+    <p><code>/api/v1/coverage_timeline?provider_key=change_grow_live</code></p>
+  </article>
+
+  <article class="apiroute" id="route-relationship_path" data-route="relationship_path">
+    <h3><code>/api/v1/relationship_path</code></h3>
+    <p>
+      A neighbourhood view answers what surrounds one entity; this answers how
+      two known entities are connected. It returns the <strong>shortest
+      verified path</strong> between them through the source-backed entity
+      graph (<code>v_entity_edges</code>). An edge whose basis is an
+      unconfirmed name match — the review gate not yet passed — is not
+      followed, and the restricted shared-officer edges never reach this
+      surface at all. The traversal is deterministic: among equally short
+      paths the one first in <code>(relationship, node id)</code> order is
+      returned. Every hop carries its own source URL and retrieval date.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>from_type</code> / <code>to_type</code></td><td>provider, authority or supplier. Default provider / authority.</td></tr>
+        <tr><td><code>from_id</code> / <code>to_id</code></td><td>The two entity ids (provider_key or ONS code). Both required.</td></tr>
+        <tr><td><code>max_hops</code></td><td>1–8, default 6.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>found</code>, <code>hops</code>, <code>path</code> (one
+      row per hop: from, relationship, basis, to, source_url, retrieved_at),
+      <code>nodes</code> and a <code>note</code>. No path within
+      <code>max_hops</code> returns <code>found: false</code> with a reason,
+      not an error.
+    </p>
+    <p><code>/api/v1/relationship_path?from_type=provider&amp;from_id=cgl&amp;to_type=authority&amp;to_id=E09000007</code></p>
+  </article>
+
+  <article class="apiroute" id="route-relationship-detail"
+           data-route="relationships/{relationship_id}"
+           data-route-pattern="relationships/(relationship:[0-9a-f]{64})">
+    <h3><code>/api/v1/relationships/{relationship_id}</code></h3>
+    <p>
+      One <code>AWARDED_TO</code> edge (a <code>relationship_id</code> from an
+      <code>edges</code> entry above), resolved to the authority and provider
+      it connects, plus a dated <code>timeline</code> of every contract notice
+      behind every edge between that same pair. It is the source events behind
+      one relationship — not a history of the working relationship, a measure
+      of its value or reliance, or evidence of organisational continuity.
+      Missing notice dates are left blank, never inferred.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>relationship_id</code></td><td>Required, in the path. A <code>relationship_id</code> from an <code>/api/v1/relationships</code> <code>edges</code> entry; anything that is not an <code>AWARDED_TO</code> edge is a 400.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>authority</code> and <code>provider</code> (name and
+      identifier each), <code>timeline</code> — one entry per edge with
+      <code>valid_from</code> / <code>valid_to</code>, <code>confidence</code>,
+      the source <code>notice</code> (id, title, value, buyer/supplier names,
+      published date, source URL, and a constructed <code>notice_web_url</code>)
+      or <code>null</code> where the notice is no longer held —
+      <code>edge_count</code>, <code>truncated</code> (true when more than 500
+      notices exist for the pair) and <code>caveat</code>.
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-document_search" data-route="document_search">
+    <h3><code>/api/v1/document_search</code></h3>
+    <p>
+      Full-text search over page-level text extracted from published
+      committee papers and community drug partnership documents — the two
+      document types currently parsed by the document-analysis pipeline
+      (<code>docs/document-analysis.md</code>). Not a search of the whole
+      warehouse: PFD reports, tribunal judgments and every structured
+      warehouse table are reached through their own routes above, not this
+      one, and a document type is added to this search only after a
+      deliberate decision that its extracted text carries no restricted
+      personal data.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>q</code></td><td>Required. The search term(s). Quotes, <code>OR</code> and <code>-term</code> are honoured.</td></tr>
+        <tr><td><code>source_system</code></td><td>Optional. One of the values in the <code>facets.source_system</code> block; anything else is rejected.</td></tr>
+        <tr><td><code>document_type</code></td><td>Optional. One of the values in the <code>facets.document_type</code> block.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Optional. Bound the document's published year; an undated page is excluded when either is set.</td></tr>
+        <tr><td><code>since_retrieved_at</code></td><td>Optional ISO timestamp. Only pages collected on or after it.</td></tr>
+        <tr><td><code>limit</code></td><td>Optional, default 25, maximum 50.</td></tr>
+        <tr><td><code>offset</code></td><td>Optional. Pages the ranked list; the order is stable across requests.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>results</code> — one row per matching page/element, each
+      with <code>document_id</code>, <code>document_element_id</code>,
+      <code>document_type</code>, <code>source_system</code>,
+      <code>title</code>, <code>title_basis</code>
+      (<code>source_label</code>, <code>pdf_metadata</code>,
+      <code>heading</code>, <code>filename</code> or <code>unknown</code> —
+      how <code>title</code> was derived; <code>null</code> until the
+      backfill has run), <code>source_title</code> (the collecting module's
+      raw label), <code>page_number</code>, the matched
+      <code>text</code>, <code>source_url</code>, <code>retrieved_at</code>
+      and <code>published_at</code> — plus <code>total</code>,
+      <code>facets</code> (a <code>value</code>/<code>count</code> list per
+      facet, sized to the query and any date scope), <code>filters</code>,
+      <code>query</code> and <code>caveat</code>. Relevance order is a reading
+      aid, not a measure of evidential weight. A result is a page that
+      contains the term, not a finding.
+    </p>
+    <p>
+      <code>/api/v1/document_search?q=recruitment&amp;source_system=committee_paper_promotion</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-documents" data-route="documents/{document_id}"
+           data-route-pattern="documents/([A-Za-z0-9_-]{1,80})">
+    <h3><code>/api/v1/documents/{document_id}</code></h3>
+    <p>
+      The bounded passage around one element of a document from
+      <code>/api/v1/document_search</code> — enough surrounding text to
+      interpret a hit without republishing the document. Reads the active
+      parsed version only, and the same allowlist as the search: a
+      <code>document_id</code> whose source is not searchable is not
+      readable here either.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>document_id</code></td><td>Required, in the path. The <code>document_id</code> from a search result.</td></tr>
+        <tr><td><code>element_id</code></td><td>Optional. A <code>document_element_id</code> from a search result to centre the window on; omitted, the window is the head of the document.</td></tr>
+        <tr><td><code>context</code></td><td>Optional, default 3, maximum 3. Elements to include either side of the anchor.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns the document's <code>title</code>, <code>title_basis</code>,
+      <code>source_title</code>, <code>source_url</code>,
+      <code>source_system</code>, <code>published_at</code>,
+      <code>retrieved_at</code>, the <code>parser</code> identity, and an
+      ordered <code>elements</code> window — each with <code>text</code>,
+      <code>element_type</code>, <code>page_number</code> and an
+      <code>is_anchor</code> flag — plus <code>has_more_before</code> /
+      <code>has_more_after</code>, <code>element_count</code> and
+      <code>caveat</code>.
+    </p>
+    <p>
+      <code>/api/v1/documents/document-…?element_id=…&amp;context=3</code>
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-catalogue" data-route="catalogue">
+    <h3><code>/api/v1/catalogue</code></h3>
+    <p>
+      A registry of every dataset this portal collects: for each, its title,
+      official publisher and source URL, evidence layer, geography, update
+      cadence, licence, the public warehouse tables it writes, and the single
+      limitation that matters most before quoting it. Row counts and
+      last-retrieved dates are measured against the warehouse on each
+      request, so a dataset showing zero rows has not been collected here
+      rather than being empty at source.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>datasets</code> — one row per collecting module, each with
+      <code>dataset_id</code>, <code>module</code>, <code>title</code>,
+      <code>publisher</code>, <code>official_url</code>,
+      <code>evidence_layer</code> (+ <code>evidence_layer_label</code>),
+      <code>geography</code>, <code>cadence</code>, <code>licence</code>,
+      <code>tables</code> (name, rows, <code>last_retrieved_at</code>),
+      <code>row_count</code>, <code>last_retrieved_at</code> and
+      <code>caveat</code> — plus <code>evidence_layers</code> (the layer
+      vocabulary), <code>count</code> and a shared <code>caveat</code>.
+      Datasets in different evidence layers are never added together.
+    </p>
+    <p><a href="/api/v1/catalogue"><code>/api/v1/catalogue</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-catalogue-detail" data-route="catalogue/{dataset_id}"
+           data-route-pattern="catalogue/([a-z0-9-]{1,64})">
+    <h3><code>/api/v1/catalogue/{dataset_id}</code></h3>
+    <p>
+      One catalogue entry, by its <code>dataset_id</code>, with the full
+      licence <code>licence_statement</code> and any <code>licence_caution</code>
+      alongside the same fields the list returns.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>dataset_id</code></td><td>Required, in the path. A <code>dataset_id</code> from the catalogue list; anything else is a 400.</td></tr>
+      </tbody>
+    </table>
+    <p><code>/api/v1/catalogue/procurement-notices</code></p>
+  </article>
+
+  <article class="apiroute" id="route-changes" data-route="changes">
+    <h3><code>/api/v1/changes</code></h3>
+    <p>
+      A <em>derived</em> chronology of what the warehouse recorded changing —
+      there is no persisted change-event table and this endpoint adds no
+      collection-time write path. Each event is one kind: <code>release</code>
+      (a run of the module runner), <code>refreshed</code> (a source table's
+      latest retrieval moved), <code>reparsed</code> (a document got a new
+      active parsed version), <code>superseded</code> (a provider now trades as
+      a successor) or <code>verified</code> (a human review decision). A
+      collection change, a parser change and a human-review change are distinct
+      kinds and their counts are never added. This shows what <em>this
+      warehouse</em> recorded changing, not what a source published.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>release, refreshed, reparsed, superseded or verified.</td></tr>
+        <tr><td><code>source</code></td><td>One source label from the feed.</td></tr>
+        <tr><td><code>evidence_type</code></td><td>One evidence type / dataset id.</td></tr>
+        <tr><td><code>since</code></td><td>ISO date; keeps dated events on or after it.</td></tr>
+        <tr><td><code>limit</code></td><td>Default 200, capped at 500.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code>, <code>counts</code> (by_kind — never a
+      total), <code>kinds</code>, <code>note</code>, <code>caveat</code>,
+      <code>truncated</code>.
+    </p>
+    <p><a href="/api/v1/changes"><code>/api/v1/changes</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-publication_calendar" data-route="publication_calendar">
+    <h3><code>/api/v1/publication_calendar</code></h3>
+    <p>
+      Each source's release cadence, computed on the request. A publisher that
+      has released nothing and a collection here that has not run are different
+      conditions, and freshness alone cannot tell them apart. Every row carries
+      two cadences that are never merged: the publisher's <em>stated</em> period
+      (transcribed in the dataset registry, present only where the source
+      commits to a calendar) and an <em>observed</em> interval — the median gap
+      between the distinct dates this warehouse holds retrieval timestamps for,
+      shown only with three or more such dates and always an estimate.
+      <code>next_expected</code> is projected from whichever basis applies
+      (stated preferred); <code>status</code> is <code>overdue</code>,
+      <code>due</code>, <code>current</code> or <code>unknown</code>.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>today</code></td><td>ISO date to evaluate against; defaults to the server's current date. For reproducible views.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>datasets</code> (each with <code>stated_cadence</code>,
+      <code>stated_cadence_days</code>, <code>observed_interval_days</code>,
+      <code>observed_sample</code>, <code>cadence_basis</code>,
+      <code>last_publication</code>, <code>next_expected</code>,
+      <code>status</code>), <code>counts</code> (<code>by_status</code> and
+      <code>by_basis</code> — never a total), <code>as_of</code>,
+      <code>note</code>, <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/publication_calendar"><code>/api/v1/publication_calendar</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-record_diff" data-route="record_diff">
+    <h3><code>/api/v1/record_diff</code></h3>
+    <p>
+      Compare two revisions of one record rather than treating the latest row
+      as timeless. <code>kind=ocds</code> diffs two procurement notices
+      field by field and labels each changed field: a <strong>source</strong>
+      field is verbatim from the OCDS release, so a change there is an
+      amendment the publisher made; a <strong>derived</strong> field is a
+      match or normalisation this pipeline recomputed between collections, so a
+      change there need not mean the underlying notice moved. The two change
+      counts are reported apart and never added. <code>kind=document</code>
+      diffs two parsed versions of one document — a metadata diff (parser,
+      schema, config hash) plus an element-aligned, text-aware diff of the
+      body; unchanged elements are omitted.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>ocds (default) or document.</td></tr>
+        <tr><td><code>a</code>, <code>b</code></td><td>The two revision ids (notice_id or document_version_id).</td></tr>
+        <tr><td><code>ocid</code></td><td>kind=ocds: diff this OCID's two most recent notices instead of passing a/b.</td></tr>
+        <tr><td><code>document_id</code></td><td>kind=document: diff this document's two most recent versions.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Documents are gated by the same source allowlist as
+      <a href="#route-document_search">document search</a> — a source not
+      searchable there is not diffable here.
+    </p>
+  </article>
+
+  <article class="apiroute" id="route-feed" data-route="feed">
+    <h3><code>/api/v1/feed/changes.atom</code></h3>
+    <p>
+      The <a href="#route-changes">“what changed?”</a> stream as a stable
+      <strong>Atom 1.0</strong> feed, for a feed reader or any external
+      subscriber. It takes the same <code>kind</code> / <code>source</code> /
+      <code>since_retrieved_at</code> filter as <code>/api/v1/changes</code>.
+      The feed <code>&lt;id&gt;</code> and every entry <code>&lt;id&gt;</code>
+      are host-independent tag URIs derived from the event's own content, so
+      a subscription keeps working across releases and across the dev and
+      production hosts.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>kind</code></td><td>release, refreshed, reparsed, superseded or verified.</td></tr>
+        <tr><td><code>source</code></td><td>One source label from the feed.</td></tr>
+        <tr><td><code>since</code></td><td>ISO date; keeps dated events on or after it.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>application/atom+xml</code>, not JSON. Up to 100 entries,
+      newest first.
+    </p>
+    <p><a href="/api/v1/feed/changes.atom"><code>/api/v1/feed/changes.atom</code></a></p>
+  </article>
+
   <article class="apiroute" id="route-layers" data-route="layers">
     <h3><code>/api/v1/layers</code></h3>
     <p>
@@ -264,6 +871,19 @@
     </p>
     <p class="muted small">No parameters.</p>
     <p><a href="/api/v1/layers"><code>/api/v1/layers</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-atlas_layers" data-route="atlas_layers">
+    <h3><code>/api/v1/atlas_layers</code></h3>
+    <p>
+      The closed registry of the evidence atlas's layers. Each entry names the
+      endpoint that serves it, its legend, its unit, the GeoJSON property that
+      keys a feature, the accessible-table columns and its caveat. Exactly one
+      layer is shown at a time — the atlas performs no arithmetic between
+      layers and produces no composite score.
+    </p>
+    <p class="small">Returns <code>layers</code>, <code>note</code>. Takes no parameters.</p>
+    <p><a href="/api/v1/atlas_layers"><code>/api/v1/atlas_layers</code></a></p>
   </article>
 
   <article class="apiroute" id="route-contracts" data-route="contracts">
@@ -306,6 +926,33 @@
       <code>published</code> or <code>constructed</code>.
     </p>
     <p><a href="/api/v1/contracts?psr_only=1&amp;year_from=2025"><code>/api/v1/contracts?psr_only=1&amp;year_from=2025</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-contracts-process"
+           data-route="contracts/process/{ocid}"
+           data-route-pattern="contracts/process/([A-Za-z0-9_-]{1,100})">
+    <h3><code>/api/v1/contracts/process/{ocid}</code></h3>
+    <p>
+      The notices that share one OCDS release id (<code>ocid</code>), grouped
+      into the lifecycle stages the notices' own OCDS tags name — planning,
+      tender, award, contract, amendment, termination, implementation. A stage
+      with no notice is drawn as absent, never as an inferred completion: this
+      view computes no completion, renewal, KPI achievement, supplier
+      performance or organisational continuity.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>ocid</code></td><td>Required, in the path. The <code>ocid</code> of any notice in the process.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>ocid</code>, <code>buyer</code>, <code>stage_order</code>,
+      <code>stages</code> (each with <code>stage</code>, <code>present</code>
+      and its ordered <code>notices</code> — id, OCDS tags, title, dates,
+      value, suppliers, source URL and constructed <code>notice_web_url</code>),
+      <code>notice_count</code>, <code>date_range</code> and <code>caveat</code>.
+    </p>
   </article>
 
   <article class="apiroute" id="route-pay" data-route="pay">
@@ -432,6 +1079,22 @@
     <p><a href="/api/v1/fingertips"><code>/api/v1/fingertips</code></a></p>
   </article>
 
+  <article class="apiroute" data-route="treatment_metrics">
+    <h3><code>/api/v1/treatment_metrics</code></h3>
+    <p>
+      A catalogue of treatment metrics to read <em>before</em> a chart: one row
+      per Fingertips indicator and per NDTMS source table, each with its
+      definition, unit, whether a 95% confidence interval is published, the
+      exact periods held (never gap-filled), authority and England coverage,
+      and provenance. Computed from the same tables the treatment page charts.
+    </p>
+    <p class="small">
+      Returns <code>metrics</code>, <code>count</code>, <code>caveat</code>.
+      Takes no parameters.
+    </p>
+    <p><a href="/api/v1/treatment_metrics"><code>/api/v1/treatment_metrics</code></a></p>
+  </article>
+
   <article class="apiroute" data-route="ndtms">
     <h3><code>/api/v1/ndtms</code></h3>
     <p>
@@ -484,6 +1147,109 @@
       table is listed anywhere in the payload.
     </p>
     <p><a href="/api/v1/pfd"><code>/api/v1/pfd</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-safety" data-route="safety">
+    <h3><code>/api/v1/safety</code></h3>
+    <p>
+      Enforcement notices the Health and Safety Executive served on an
+      organisation whose name exactly matches a tracked provider. A notice is
+      a point-in-time fact, not a settled outcome: the register's own
+      <code>result</code> — which can be <code>Under appeal</code>,
+      <code>Withdrawn</code> or an appeal decision — travels with every
+      notice, and nothing here infers compliance. Notices served on
+      individuals are excluded at collection, and the register covers only
+      HSE-enforced workplaces, so an absence of notices is not a safety
+      rating.
+    </p>
+    <p class="muted small">No parameters.</p>
+    <p class="small">
+      Returns <code>notices</code> (each with <code>notice_number</code>,
+      <code>recipient_name</code>, <code>provider_key</code>,
+      <code>notice_type</code>, <code>issue_date</code>,
+      <code>compliance_date</code>, <code>result</code>,
+      <code>legislation</code>, <code>contravention_text</code> and the
+      source URL), <code>by_provider</code>, <code>by_type</code>,
+      <code>total</code> and <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/safety"><code>/api/v1/safety</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-safety_legal" data-route="safety_legal">
+    <h3><code>/api/v1/safety_legal</code></h3>
+    <p>
+      One filterable chronology over five distinct accountability sources —
+      Prevention of Future Deaths reports, Safeguarding Adult Reviews, HSE
+      enforcement notices, employment-tribunal cases and CQC inspections. Each
+      event carries exactly one relationship label: <code>addressed_to</code>
+      (the document was sent to the organisation), <code>named_in</code> (the
+      organisation is mentioned — not a finding), <code>matched_to</code> (an
+      exact name match in a register) or <code>regulated_by</code> (a
+      registration/inspection record). The four are never summed and a mention
+      is never a finding of fault.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>source</code></td><td>pfd, sar, hse, tribunal or cqc.</td></tr>
+        <tr><td><code>relationship</code></td><td>addressed_to, named_in, matched_to or regulated_by.</td></tr>
+        <tr><td><code>provider_key</code></td><td>One tracked provider.</td></tr>
+        <tr><td><code>year_from</code>, <code>year_to</code></td><td>Bound the dated events.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>events</code>, <code>counts</code> (by_source,
+      by_relationship — never a total), <code>labels</code>, <code>sources</code>,
+      <code>caveats</code> (one per source), <code>note</code>,
+      <code>truncated</code>.
+    </p>
+    <p><a href="/api/v1/safety_legal"><code>/api/v1/safety_legal</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-cqc_locations" data-route="cqc_locations">
+    <h3><code>/api/v1/cqc_locations</code></h3>
+    <p>
+      CQC-registered locations belonging to a provider this pipeline tracks.
+      CQC registration covers only certain regulated activities — residential
+      detox, inpatient care, some prescribing — so most community drug and
+      alcohol provision is not registered: this is a map of regulated
+      locations, <strong>never a complete service map</strong>, and a count
+      of locations is neither coverage nor quality. Do not rank authorities
+      or providers by it, and do not combine it with any other layer. No
+      personal data: CQC's registered-manager names are held in a restricted
+      table and never reach this route.
+    </p>
+    <table class="params">
+      <thead><tr><th>Parameter</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>provider_key</code></td><td>Optional. One tracked provider.</td></tr>
+        <tr><td><code>authority_ons_code</code></td><td>Optional. Resolved local authority of the location.</td></tr>
+        <tr><td><code>registration_status</code></td><td>Optional. One of the <code>facets.registration_status</code> values.</td></tr>
+        <tr><td><code>regulated_activity</code></td><td>Optional. Contains match against the comma-joined activities (CQC's activity names contain commas, so the column cannot be split exactly).</td></tr>
+        <tr><td><code>service_type</code></td><td>Optional. An exact gacServiceType name; one of the <code>facets.service_type</code> values.</td></tr>
+        <tr><td><code>rating</code></td><td>Optional. Overall rating, matching the API rating or the bulk-export fallback.</td></tr>
+        <tr><td><code>limit</code></td><td>Optional, default 100, maximum 500.</td></tr>
+        <tr><td><code>offset</code></td><td>Optional. Pages the list; the order is stable.</td></tr>
+      </tbody>
+    </table>
+    <p class="small">
+      Returns <code>results</code> — one row per location with
+      <code>location_id</code>, <code>provider_key</code>,
+      <code>provider_name</code>, <code>location_name</code>,
+      <code>postal_code</code>, <code>latitude</code>, <code>longitude</code>,
+      <code>local_authority_raw</code>, <code>local_authority_ons_code</code>,
+      <code>region</code>, <code>registration_status</code>,
+      <code>overall_rating</code>, <code>overall_rating_date</code>,
+      <code>rating_source</code> (<code>api</code> or <code>bulk_export</code>),
+      <code>regulated_activities</code>, <code>service_types</code> and the
+      source URL — plus <code>total</code>, <code>without_coordinate</code>
+      (rows in the current filter that cannot be placed on a map),
+      <code>facets</code> (a <code>value</code>/<code>count</code> list for
+      <code>registration_status</code>, <code>overall_rating</code>,
+      <code>region</code> and <code>service_type</code>),
+      <code>filters</code> and <code>caveat</code>.
+    </p>
+    <p><a href="/api/v1/cqc_locations"><code>/api/v1/cqc_locations</code></a></p>
   </article>
 
   <article class="apiroute" data-route="claims">
@@ -552,6 +1318,18 @@
       <code>limit</code> in the query is ignored here.
     </p>
     <p><a href="/api/v1/export?endpoint=contracts&amp;format=csv&amp;psr_only=1"><code>/api/v1/export?endpoint=contracts&amp;format=csv&amp;psr_only=1</code></a></p>
+  </article>
+
+  <article class="apiroute" id="route-openapi">
+    <h3><code>/api/openapi.json</code></h3>
+    <p>
+      An OpenAPI 3.1 description of every route on this page — paths,
+      parameters, pagination, the shared error shape and examples. It is a
+      sibling of this page, not a <code>/api/v1/</code> route, and it is
+      checked against the server's actual route table on every build, so it
+      cannot drift into describing a route that does not exist.
+    </p>
+    <p><a href="/api/openapi.json"><code>/api/openapi.json</code></a></p>
   </article>
 </section>
 

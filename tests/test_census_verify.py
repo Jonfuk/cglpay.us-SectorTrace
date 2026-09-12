@@ -13,11 +13,10 @@ it turned up:
 from __future__ import annotations
 
 import inspect
-import sqlite3
 
 import pytest
 
-from pipeline import census_verify
+from pipeline import census_verify, db
 from pipeline.web import census as census_web
 
 METRIC = {
@@ -36,23 +35,23 @@ METRIC = {
 }
 
 
-def _insert_metric(conn: sqlite3.Connection, **overrides) -> dict:
+def _insert_metric(conn: db.Connection, **overrides) -> dict:
     row = {**METRIC, **overrides}
     columns = ", ".join(row)
-    marks = ", ".join(f":{name}" for name in row)
+    marks = ", ".join(f"%({name})s" for name in row)
     conn.execute(
         f"INSERT INTO workforce_census_metrics ({columns}) VALUES ({marks})", row)
     conn.commit()
     return row
 
 
-def _insert_page(conn: sqlite3.Connection, year: int = 2024, page: int = 6,
+def _insert_page(conn: db.Connection, year: int = 2024, page: int = 6,
                   text: str = "…an 8% vacancy rate in the delivery workforce…") -> None:
     conn.execute(
         "INSERT INTO workforce_census_page_text "
         "(census_year, page_number, page_text, source_url, retrieved_at, "
         " http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
         (year, page, text, METRIC["source_url"], METRIC["retrieved_at"], 200,
          METRIC["source_system"], METRIC["payload_sha256"]))
     conn.commit()
@@ -74,12 +73,13 @@ def test_a_metric_cannot_be_verified_without_a_decision(conn, metric):
     This is the statement the generated worklist used to print at the top of
     every census_{year}_tables.md.
     """
-    with pytest.raises(sqlite3.IntegrityError) as raised:
+    with pytest.raises(db.IntegrityError) as raised:
         conn.execute(
             "UPDATE workforce_census_metrics SET verified = 1 "
             "WHERE census_year = 2024")
 
     assert "not verified without a human" in str(raised.value)
+    conn.rollback()
     assert conn.execute(
         "SELECT verified FROM workforce_census_metrics").fetchone()["verified"] == 0
 
@@ -88,7 +88,7 @@ def test_a_metric_cannot_be_inserted_already_verified(conn):
     """The other route in. A rule enforced on UPDATE alone is not enforced --
     a module, an import or the SQL box can write the row verified from the
     start."""
-    with pytest.raises(sqlite3.IntegrityError) as raised:
+    with pytest.raises(db.IntegrityError) as raised:
         _insert_metric(conn, verified=1)
     assert "not verified without a human" in str(raised.value)
 
@@ -119,7 +119,7 @@ def test_a_verification_is_attributed(conn, metric):
     with pytest.raises(census_verify.VerificationError) as raised:
         census_verify.verify(conn, metric, verified_by="   ")
     assert "attributed" in str(raised.value)
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failed_verification_leaves_no_decision_row(conn, metric):
@@ -129,7 +129,7 @@ def test_a_failed_verification_leaves_no_decision_row(conn, metric):
     census_verify.verify(conn, metric, verified_by="Jon")
     with pytest.raises(census_verify.VerificationError):
         census_verify.verify(conn, metric, verified_by="Jon")
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 1
 
 
 # --- no payload hash, because nothing was fetched -----------------------------
@@ -141,7 +141,11 @@ def test_the_mechanism_records_no_payload_hash_of_its_own(conn):
     retrieved here, and a column named as though something had been is an
     invitation to fill it in.
     """
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(census_verifications)")}
+    columns = {row["column_name"] for row in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = %s",
+        ("census_verifications",),
+    )}
 
     for absent in ("payload_sha256", "fetched_url", "http_status", "archived_path"):
         assert absent not in columns, (
@@ -210,7 +214,7 @@ def test_resetting_keeps_the_decisions(conn, metric):
 
     assert conn.execute(
         "SELECT verified FROM workforce_census_metrics").fetchone()["verified"] == 0
-    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone()[0] == 1
+    assert conn.execute("SELECT COUNT(*) FROM census_verifications").fetchone().values().__iter__().__next__() == 1
 
 
 # --- a verification can go stale ----------------------------------------------
@@ -232,7 +236,7 @@ def test_a_reparsed_value_makes_its_verification_stale(conn, metric):
 
 def test_a_reissued_report_makes_its_verification_stale(conn, metric):
     census_verify.verify(conn, metric, verified_by="Jon")
-    conn.execute("UPDATE workforce_census_metrics SET payload_sha256 = ?", ("b" * 64,))
+    conn.execute("UPDATE workforce_census_metrics SET payload_sha256 = %s", ("b" * 64,))
     conn.commit()
 
     stale = census_verify.stale(conn)

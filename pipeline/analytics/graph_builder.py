@@ -39,8 +39,8 @@ def build_commissioner_provider_graph(
     ]
     params: list[Any] = []
     if as_of:
-        clauses.extend(["(r.valid_from IS NULL OR r.valid_from <= ?)",
-                        "(r.valid_to IS NULL OR r.valid_to >= ?)"])
+        clauses.extend(["(r.valid_from IS NULL OR r.valid_from <= %s)",
+                        "(r.valid_to IS NULL OR r.valid_to >= %s)"])
         params.extend([as_of, as_of])
     where = " AND ".join(clauses)
     rows = conn.execute(
@@ -50,7 +50,7 @@ def build_commissioner_provider_graph(
         "FROM entity_relationships r "
         "JOIN entities source ON source.entity_id = r.subject_entity_id "
         "JOIN entities target ON target.entity_id = r.object_entity_id "
-        f"WHERE {where} ORDER BY r.relationship_id LIMIT ?",
+        f"WHERE {where} ORDER BY r.relationship_id LIMIT %s",
         [*params, max_edges + 1],
     ).fetchall()
     if len(rows) > max_edges:
@@ -88,11 +88,11 @@ def build_evidence_graph(
     """Build a bounded entity relationship graph for future evidence analysis."""
     where, params = "", []
     if relationship_type:
-        where, params = " WHERE r.relationship_type = ?", [relationship_type]
+        where, params = " WHERE r.relationship_type = %s", [relationship_type]
     rows = conn.execute(
         "SELECT r.relationship_id, r.predicate, r.evidence_id, r.claim_id, "
         "r.subject_entity_id, r.object_entity_id FROM entity_relationships r"
-        f"{where} ORDER BY r.relationship_id LIMIT ?", [*params, max_edges + 1]).fetchall()
+        f"{where} ORDER BY r.relationship_id LIMIT %s", [*params, max_edges + 1]).fetchall()
     if len(rows) > max_edges:
         raise GraphTooLargeError(f"Evidence selection exceeds max_edges={max_edges}; narrow the filters.")
     graph = nx.MultiDiGraph(kind="evidence", relationship_type=relationship_type)

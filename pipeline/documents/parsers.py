@@ -73,6 +73,37 @@ class PyMuPDFParser:
         return ParsedDocument(self.name, self.version, elements)
 
 
+class PdfPlumberParser:
+    """Conservative PDF text fallback for parser-specific failures.
+
+    PyMuPDF remains the normal parser. This adapter is intentionally kept
+    separate so a fallback is visible in the stored parser version and can
+    be compared against the primary parser on the representative corpus
+    before changing the preferred parser.
+    """
+
+    name = "pdfplumber"
+
+    def __init__(self) -> None:
+        try:
+            import pdfplumber
+        except ImportError as exc:  # pragma: no cover - install-specific
+            raise ParserUnavailable(
+                "PDF fallback parsing needs `uv sync` (pdfplumber).") from exc
+        self._pdfplumber = pdfplumber
+        self.version = getattr(pdfplumber, "__version__", "unknown")
+
+    def supports(self, mime_type: str) -> bool:
+        return mime_type == "application/pdf"
+
+    def parse(self, body: bytes, mime_type: str) -> ParsedDocument:
+        if not self.supports(mime_type):
+            raise ValueError(f"{self.name} does not support {mime_type}")
+        with self._pdfplumber.open(BytesIO(body)) as pdf:
+            pages = [(page.extract_text() or "") for page in pdf.pages]
+        return ParsedDocument(self.name, self.version, _elements_from_pages(pages))
+
+
 class DOCXParser:
     """Small deterministic DOCX reader for the worker's lightweight image."""
 
@@ -365,6 +396,8 @@ def get_parser(name: str) -> DocumentParser:
         return DoclingParser()
     if name == "pymupdf":
         return PyMuPDFParser()
+    if name == "pdfplumber":
+        return PdfPlumberParser()
     if name == "docx":
         return DOCXParser()
     if name == "pptx":

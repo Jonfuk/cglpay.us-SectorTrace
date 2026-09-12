@@ -225,6 +225,7 @@ def run(ctx: ModuleContext) -> None:
 
             provenance = _provenance(file_result)
             year_row_count = 0
+            grant_rows: list[dict] = []
             for row in rows[header_idx + 1:]:
                 if ons_idx >= len(row):
                     continue
@@ -248,7 +249,7 @@ def run(ctx: ModuleContext) -> None:
                         )
                         continue
 
-                    db.upsert(conn, "public_health_grants", {
+                    grant_rows.append({
                         "ons_code": ons_code,
                         "financial_year": col["financial_year"],
                         "grant_type": col["grant_type"],
@@ -258,9 +259,13 @@ def run(ctx: ModuleContext) -> None:
                         "source_column_header": col["header"],
                         "source_document": attachment["url"],
                         **provenance,
-                    }, natural_key=["ons_code", "financial_year", "grant_type"])
+                    })
                     year_row_count += 1
 
+            db.upsert_many(
+                conn, "public_health_grants", grant_rows,
+                natural_key=["ons_code", "financial_year", "grant_type"],
+            )
             total_rows += year_row_count
             # Committed per publication, not once at the end. SQLite allows one
             # writer, and a transaction left open spans every fetch that

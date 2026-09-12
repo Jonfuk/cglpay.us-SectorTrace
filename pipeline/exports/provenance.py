@@ -11,6 +11,8 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pipeline import db
+
 
 def collect_provenance(conn, tables: list[str]) -> dict:
     """Source systems, retrieval window and row counts for the tables that
@@ -22,7 +24,8 @@ def collect_provenance(conn, tables: list[str]) -> dict:
             row = conn.execute(
                 f"SELECT COUNT(*) AS rows, MIN(retrieved_at) AS first_retrieved, "
                 f"MAX(retrieved_at) AS last_retrieved, "
-                f"GROUP_CONCAT(DISTINCT source_system) AS source_systems FROM {table}"
+                f"STRING_AGG(DISTINCT source_system, ',') AS source_systems "
+                f"FROM {table}"
             ).fetchone()
             contributions.append({
                 "table": table,
@@ -32,9 +35,10 @@ def collect_provenance(conn, tables: list[str]) -> dict:
                 "first_retrieved_at": row["first_retrieved"],
                 "last_retrieved_at": row["last_retrieved"],
             })
-        except Exception:
+        except db.Error:
             # Reference tables (providers, supplier_aliases) carry no
             # provenance columns by design; record the count alone.
+            conn.rollback()
             try:
                 count = conn.execute(f"SELECT COUNT(*) AS rows FROM {table}").fetchone()["rows"]
             except Exception:

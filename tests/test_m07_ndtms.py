@@ -26,6 +26,56 @@ def test_parse_publication_title_rejects_other_publications(title):
     assert ndtms.parse_publication_title(title) is None
 
 
+def test_viewit_archive_parser_preserves_dimensions_and_suppression():
+    body = (
+        "ReportingPeriod,Area,drug_group,gender,age_group,Measure,Other\n"
+        "2022/23,Derby,alcohol & non-opiates,F,18-29,5,-\n"
+    ).encode()
+    rows, malformed = ndtms.parse_viewit_archive_rows(
+        body,
+        cohort="adults",
+        provenance={
+            "source_url": "https://example.test/archive.csv",
+            "retrieved_at": "2026-01-01T00:00:00Z",
+            "http_status": 200,
+            "source_system": "test",
+            "payload_sha256": "a" * 64,
+        },
+        authority_lookup={"derby": "E06000015"},
+        transitions={},
+    )
+    assert malformed == []
+    assert rows[0]["ons_code"] == "E06000015"
+    assert rows[0]["reporting_period"] == "2022/23"
+    assert '"Measure": "5"' in rows[0]["metrics_json"]
+    assert '"Other": "-"' in rows[0]["metrics_json"]
+
+
+def test_viewit_young_archive_parser_accepts_yp_dimensions():
+    body = (
+        "ReportingPeriod,Area,Sex,AgeGroup,InTreatment_AllInTx,Other\n"
+        "2009/10,Derby,Female,14-15,5,NULL\n"
+    ).encode()
+    rows, malformed = ndtms.parse_viewit_archive_rows(
+        body,
+        cohort="young_people",
+        provenance={
+            "source_url": "https://example.test/yp.csv",
+            "retrieved_at": "2026-01-01T00:00:00Z",
+            "http_status": 200,
+            "source_system": "test",
+            "payload_sha256": "b" * 64,
+        },
+        authority_lookup={"derby": "E06000015"},
+        transitions={},
+    )
+    assert malformed == []
+    assert rows[0]["gender"] == "Female"
+    assert rows[0]["age_group"] == "14-15"
+    assert rows[0]["drug_group"] == "All"
+    assert '"Other": "NULL"' in rows[0]["metrics_json"]
+
+
 # --- area name normalisation ----------------------------------------------------
 
 @pytest.mark.parametrize("raw,expected", [
@@ -81,7 +131,7 @@ def _add_authority(conn, ons_code: str, name: str, kind: str = "unitary") -> Non
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, '2020-01-01', 'x', 'x', 'https://example.com', "
+        "VALUES (%s, %s, %s, '2020-01-01', 'x', 'x', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (ons_code, name, kind))
 
 
@@ -176,7 +226,7 @@ def _add_successor(conn, predecessor: str, successor: str, overlap: float) -> No
         "INSERT INTO authority_successors (predecessor_code, successor_code, "
         "overlap_fraction, method, transition_from_vintage, transition_to_vintage, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, 'geometry_overlap', 'A', 'B', 'https://example.com', "
+        "VALUES (%s, %s, %s, 'geometry_overlap', 'A', 'B', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (predecessor, successor, overlap))
 
 
@@ -418,13 +468,18 @@ def test_ndtms_tables_are_separate_from_workforce_tables(conn):
     caseload-per-worker style ratio would combine sources with different
     populations and methods.
     """
-    tables = {r["name"] for r in conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table'")}
+    tables = {r["table_name"] for r in conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = current_schema()")}
     assert "ndtms_la_statistics" in tables
     assert "workforce_census_metrics" in tables
 
-    ndtms_cols = {r[1] for r in conn.execute("PRAGMA table_info(ndtms_la_statistics)")}
-    census_cols = {r[1] for r in conn.execute("PRAGMA table_info(workforce_census_metrics)")}
+    ndtms_cols = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = 'ndtms_la_statistics'")}
+    census_cols = {r["column_name"] for r in conn.execute(
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_schema = current_schema() AND table_name = 'workforce_census_metrics'")}
     # no shared measure columns that would invite a silent join
     assert "wte" not in ndtms_cols
     assert not (ndtms_cols & census_cols) - {

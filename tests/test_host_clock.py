@@ -21,6 +21,8 @@ import pytest
 from pipeline.config import Settings
 from pipeline.http import HOST_CLOCK, _HostClock, _RateLimiter
 
+pytestmark = pytest.mark.serial
+
 
 @pytest.fixture
 def clock():

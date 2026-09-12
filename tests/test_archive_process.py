@@ -1,6 +1,7 @@
 import hashlib
 import json
 
+from pipeline import quarantine
 from pipeline.archive import FilesystemArchive
 from pipeline.archive_process import process_archive
 
@@ -13,7 +14,7 @@ def test_process_archive_extracts_and_is_idempotent(conn, settings):
     conn.execute(
         "INSERT INTO evidence_records "
         "(evidence_id, source_system, source_url, retrieved_at, payload_sha256, raw_object_path, mime_type, content_length, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
         ("ev-1", "council_papers", "https://example.test/paper", "2026-01-01T00:00:00+00:00",
          sha, logical, "text/html", len(html), "2026-01-01T00:00:00+00:00"),
     )
@@ -50,4 +51,26 @@ def test_process_archive_records_json_as_derived_text(conn, settings):
     assert row["status"] == "extracted"
     assert row["parser_name"] == "json"
     assert row["character_count"] > 0
-    assert conn.execute("SELECT COUNT(*) FROM graph_claims").fetchone()[0] == 0
+    assert conn.execute("SELECT COUNT(*) FROM graph_claims").fetchone().values().__iter__().__next__() == 0
+
+
+def test_a_hash_mismatch_is_quarantined_not_just_counted(conn, settings):
+    """A tampered/corrupted archive object must be listable and retryable
+    later (migration 0103), not only reflected in this run's failed count."""
+    archive = FilesystemArchive(settings.raw_archive_dir)
+    html = b"<html><body>original bytes</body></html>"
+    sha = hashlib.sha256(html).hexdigest()
+    logical = archive.put("council_papers", sha, "text/html", html)
+    # Corrupt the bytes on disk after archiving: the filename still claims
+    # `sha`, but the content no longer hashes to it.
+    (settings.raw_archive_dir / logical.removeprefix("data/raw/")).write_bytes(b"tampered")
+
+    result = process_archive(conn, settings, archive)
+    assert result["failed"] == 1
+
+    items = quarantine.list_items(conn, kind="archive_mismatch")
+    assert len(items) == 1
+    assert items[0]["failure_class"] == "sha256_mismatch"
+    assert items[0]["input_sha256"] == sha
+    assert items[0]["module"] == "archive_process"
+    assert "corrupt" in items[0]["reason"]

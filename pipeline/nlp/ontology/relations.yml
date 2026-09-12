@@ -1,0 +1,219 @@
+# SectorTrace ontology — relations (BETA-034B)
+#
+# The controlled predicate vocabulary. Every machine claim candidate (034F)
+# and every graph_claims draft it produces uses a predicate id from this
+# file. Nothing downstream is allowed to invent `has_issue`,
+# `associated_with`, or any predicate not defined here — an open predicate
+# set is how a claim corpus stops being auditable.
+#
+# FIELDS
+#   id           dotted, stable. Downstream stores this, never the label.
+#   label        human phrasing of the predicate.
+#   subject      the kind of thing the claim is about — one of:
+#                  provider | service | commissioner | area | workforce
+#                (`workforce` = a claim about the staff group at a provider or
+#                 service, not about a named person.)
+#   object       what completes the triple:
+#                  none                 — a unary state (subject has property)
+#                  concept:<category>   — a concept id from that category
+#                  literal:count        — a bare number the reviewer records
+#                  literal:money        — a monetary amount
+#                  literal:date         — a date or period
+#   pressure     true when the predicate asserts a difficulty or negative
+#                situation. The 034E assertion layer pairs this with
+#                AFFIRMED / NEGATED / HISTORICAL so "no recruitment pressure"
+#                is not stored as the same fact as "recruitment pressure".
+#   notes        scope and boundary reminders.
+#
+# A predicate here is a shape a person can confirm, not a fact. Adding one is
+# a deliberate widening of what this corpus is willing to assert.
+
+schema_version: "1"
+
+relations:
+
+  # --- workforce ----------------------------------------------------
+  - id: workforce.has_recruitment_pressure
+    label: has recruitment difficulty
+    subject: workforce
+    object: none
+    pressure: true
+    notes: >
+      The service or provider reports difficulty filling posts. Not the same
+      as `workforce.has_vacancy_pressure` (a count/rate) — this is the stated
+      difficulty, which can appear without a figure.
+  - id: workforce.has_retention_pressure
+    label: has retention difficulty
+    subject: workforce
+    object: none
+    pressure: true
+  - id: workforce.has_vacancy_pressure
+    label: has vacancy pressure
+    subject: workforce
+    object: literal:count
+    pressure: true
+    notes: >
+      Use when a vacancy count or rate is stated. The literal is the number
+      the reviewer records verbatim; no rate is computed here.
+  - id: workforce.has_turnover
+    label: has staff turnover
+    subject: workforce
+    object: literal:count
+    pressure: true
+  - id: workforce.has_high_caseload
+    label: has high caseloads
+    subject: workforce
+    object: literal:count
+    pressure: true
+  - id: workforce.relies_on_agency
+    label: relies on agency or locum staffing
+    subject: workforce
+    object: none
+    pressure: true
+  - id: workforce.has_pay_concern
+    label: has a pay concern
+    subject: workforce
+    object: none
+    pressure: true
+    notes: >
+      Language about low, eroded, uncompetitive or below-NHS pay for the
+      staff group. A pay *figure* is `workforce.reports_pay_rate`.
+  - id: workforce.reports_pay_rate
+    label: reports a pay rate or band
+    subject: workforce
+    object: literal:money
+    notes: >
+      A stated salary, hourly rate or Agenda-for-Change-equivalent band for a
+      role. Not itself a pressure claim; comparison is the reviewer's.
+  - id: workforce.has_low_morale
+    label: has low morale or burnout
+    subject: workforce
+    object: none
+    pressure: true
+  - id: workforce.has_sickness_absence
+    label: has raised sickness absence
+    subject: workforce
+    object: literal:count
+    pressure: true
+  - id: workforce.undergoes_tupe
+    label: staff transfer under TUPE
+    subject: workforce
+    object: none
+    notes: >
+      Staff move between employers on a contract change. Neutral by itself;
+      pairs with a commissioning predicate on the same event.
+
+  # --- finance ------------------------------------------------------
+  - id: finance.has_funding_reduction
+    label: has a funding reduction
+    subject: service
+    object: literal:money
+    pressure: true
+    notes: >
+      A cut, reduction or disinvestment affecting the service's budget. The
+      literal is the amount or percentage as stated; no real-terms
+      adjustment is computed.
+  - id: finance.has_cost_pressure
+    label: has a cost pressure
+    subject: service
+    object: literal:money
+    pressure: true
+  - id: finance.has_savings_target
+    label: has a savings target
+    subject: service
+    object: literal:money
+    pressure: true
+  - id: finance.receives_grant
+    label: receives a named grant
+    subject: service
+    object: concept:finance
+    notes: >
+      Links a service to a funding stream (public health grant, SSMTR grant,
+      RSDATG, …). Existence of the link, not its adequacy.
+  - id: finance.reports_contract_value
+    label: reports a contract value
+    subject: service
+    object: literal:money
+
+  # --- commissioning ---------------------------------------------
+  - id: commissioning.is_recommissioning
+    label: is being recommissioned or retendered
+    subject: service
+    object: literal:date
+    notes: >
+      A procurement exercise is planned or under way for the service. The
+      literal is the timescale as stated.
+  - id: commissioning.awarded_contract
+    label: was awarded the contract
+    subject: provider
+    object: concept:service
+    notes: >
+      A provider is named as winning / holding the contract for a service.
+      This is still a draft for review — it is not provider attribution
+      until a person confirms it (decision 4).
+  - id: commissioning.extended_contract
+    label: had its contract extended
+    subject: provider
+    object: literal:date
+  - id: commissioning.delivers_service
+    label: delivers a service
+    subject: provider
+    object: concept:service
+    notes: >
+      A provider currently runs a service. Weaker and more common than
+      `awarded_contract`; both need a person before they attribute anything.
+  - id: commissioning.uses_lead_provider_model
+    label: uses a lead-provider or consortium model
+    subject: service
+    object: none
+
+  # --- service delivery & access -------------------------------
+  - id: service.has_access_pressure
+    label: has an access or waiting pressure
+    subject: service
+    object: literal:count
+    pressure: true
+  - id: service.reports_waiting_time
+    label: reports a waiting time
+    subject: service
+    object: literal:count
+    pressure: true
+  - id: service.provides_treatment
+    label: provides a treatment
+    subject: service
+    object: concept:treatment
+    notes: >
+      Links a service to an intervention it offers (OST, harm reduction,
+      residential rehab, …). Configuration, not a quality claim.
+  - id: service.serves_population
+    label: serves a population group
+    subject: service
+    object: concept:service
+    notes: >
+      e.g. a service configured for young people, or for people who are
+      rough sleeping. Uses a `service`-category concept as the group marker.
+  - id: service.has_capacity_reduction
+    label: has reduced capacity
+    subject: service
+    object: literal:count
+    pressure: true
+
+  # --- outcomes (population / area level) ---------------------
+  - id: outcome.reports_measure
+    label: reports an outcome measure
+    subject: area
+    object: concept:outcome
+    notes: >
+      An area-level figure is reported for an outcome concept (successful
+      completions, drug-related deaths, unmet need, …). The value is a
+      literal the reviewer records; nothing is trended or differenced here.
+  - id: outcome.has_unmet_need
+    label: has unmet treatment need
+    subject: area
+    object: literal:count
+    pressure: true
+  - id: outcome.reports_drug_related_deaths
+    label: reports drug-related deaths
+    subject: area
+    object: literal:count
+    pressure: true

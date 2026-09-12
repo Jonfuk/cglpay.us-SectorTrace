@@ -52,12 +52,13 @@ import gzip
 import hashlib
 import json
 import re
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
 
-from pipeline import catalog, db, pgload
+from pipeline import catalog, db, pgschema
 from pipeline.backup import (
     POSTGRES_SUFFIX as ARCHIVE_SUFFIX,
 )
@@ -109,9 +110,8 @@ def snapshot_connection(settings: Settings) -> _ConnAdapter:
     """A read-only, single-instant view of the warehouse, in this codebase's
     dialect.
 
-    Shared with `pipeline/pgsync.py`, which needs exactly the same thing for
-    the opposite direction: a warehouse being copied out has to be read as of
-    one moment whether the copy lands in a file or in another database.
+    `REPEATABLE READ, READ ONLY` so every table in the dump is read as of one
+    instant, whatever the dump's duration.
     """
     return _ConnAdapter(_connect_for_snapshot(settings))
 
@@ -126,13 +126,10 @@ def _connect_for_snapshot(settings: Settings):
     depend on this module being correct.
     """
     import psycopg
+    from psycopg.rows import dict_row
 
-    from pipeline import pg
-
-    # The project's own row factory, because `catalog` addresses rows by name
-    # and psycopg's default hands back plain tuples.
     conn = psycopg.connect(settings.database_url,
-                            row_factory=pg.row_factory,
+                           row_factory=dict_row,
                             application_name="sectortrace-backup")
     try:
         conn.read_only = True
@@ -144,11 +141,11 @@ def _connect_for_snapshot(settings: Settings):
 
 
 def _server_version(conn) -> str:
-    return conn.execute("SELECT version()").fetchone()[0]
+    return conn.execute("SELECT version() AS version").fetchone()["version"]
 
 
 def _applied_migrations(conn) -> list[str]:
-    return [row[0] for row in conn.execute(
+    return [row["filename"] for row in conn.execute(
         "SELECT filename FROM schema_migrations ORDER BY filename")]
 
 
@@ -165,9 +162,8 @@ def dump(settings: Settings | None = None, destination: Path | None = None,
     and unlinking is not.
     """
     settings = settings or get_settings()
-    if settings.database_backend != "postgres":
-        raise BackupError(
-            "this is the PostgreSQL backup path and DATABASE_URL is not set.")
+    if not settings.database_url:
+        raise BackupError("PostgreSQL backup path requires DATABASE_URL.")
 
     started = _now()
     name = (f"warehouse-{started.strftime('%Y%m%dT%H%M%SZ')}"
@@ -176,9 +172,8 @@ def dump(settings: Settings | None = None, destination: Path | None = None,
     target.parent.mkdir(parents=True, exist_ok=True)
 
     if destination is None:
-        # Same reasoning as the SQLite path: a second-resolution name the
-        # caller did not choose, colliding, is not their mistake to be told
-        # about.
+        # A second-resolution name the caller did not choose may collide; it
+        # is not their mistake to be told about.
         attempt = 2
         while target.exists():
             target = settings.backup_dir / f"{name}-{attempt}{ARCHIVE_SUFFIX}"
@@ -261,10 +256,10 @@ def _write_archive(conn, path: Path, settings: Settings,
     edges the triggers impose and no foreign key expresses — so that restoring
     the file in the order it was written satisfies every reference and every
     refusal from migrations 0030 and 0033 as it goes. See
-    `pipeline/pgload.py`.
+    `pipeline/pgschema.py`.
     """
     asked = _ConnAdapter(conn)
-    tables = pgload.load_order(asked)
+    tables = pgschema.load_order(asked)
     header = {
         "format": FORMAT_VERSION,
         "created_at": started.isoformat(timespec="seconds"),
@@ -312,7 +307,7 @@ def _write_archive(conn, path: Path, settings: Settings,
             # A difference here means the stream and the count disagree about
             # one instant, which is a fault in this module and not a race.
             expected = conn.execute(
-                f"SELECT COUNT(*) FROM {catalog.quote(table)}").fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {catalog.quote(table)}").fetchone()["n"]
             if rows != expected:
                 raise BackupError(
                     f"{table}: the snapshot holds {expected:,} rows and "
@@ -331,13 +326,11 @@ def _write_archive(conn, path: Path, settings: Settings,
 
 
 class _ConnAdapter:
-    """A raw psycopg connection wearing the methods `catalog`, `pgload` and
-    `pgverify` call on a warehouse connection.
+    """A raw psycopg connection wearing the methods `catalog` and `pgschema`
+    call on a warehouse connection.
 
-    Those helpers dispatch on `db.backend_of`, which asks whether the object is
-    a `sqlite3.Connection` — anything else is PostgreSQL — and then execute
-    `?`-style SQL. A raw psycopg connection fails on the placeholders, so the
-    snapshot connection is wrapped rather than opened through
+    Those helpers execute PostgreSQL-native `%s`-style SQL. The snapshot
+    connection is wrapped rather than opened through
     `pipeline.pg.connect`: this one needs `read_only` and an isolation level
     set before the first statement, which is not what `pg.connect` builds.
     """
@@ -348,10 +341,7 @@ class _ConnAdapter:
         self._conn = conn
 
     def execute(self, sql, parameters=()):
-        from pipeline.sqldialect import to_psycopg
-
-        translated, params = to_psycopg(sql, parameters)
-        return self._conn.execute(translated, params)
+        return self._conn.execute(sql, parameters or None)
 
     def close(self) -> None:
         self._conn.close()
@@ -375,7 +365,7 @@ def read_header(path: Path) -> dict:
                     return json.loads(text[len(_HEADER_MARKER):])
                 if not text.startswith("--"):
                     break
-    except OSError as exc:
+    except (OSError, zlib.error) as exc:
         raise BackupError(f"{path} cannot be read as a gzip archive: {exc}") from exc
     except ValueError as exc:
         raise BackupError(f"{path} has an unreadable header: {exc}") from exc
@@ -426,7 +416,7 @@ def verify_archive(path: Path) -> dict:
                     continue
                 digest.update(line)
                 rows += 1
-    except (OSError, EOFError) as exc:
+    except (OSError, EOFError, zlib.error) as exc:
         raise BackupError(
             f"{path} did not decompress to the end ({exc}). A gzip stream "
             "carries a checksum of its own contents, so this is a truncated "
@@ -484,9 +474,8 @@ def restore(archive: Path, settings: Settings | None = None,
         wrong one.
     """
     settings = settings or get_settings()
-    if settings.database_backend != "postgres":
-        raise BackupError(
-            "this is the PostgreSQL restore path and DATABASE_URL is not set.")
+    if not settings.database_url:
+        raise BackupError("PostgreSQL restore path requires DATABASE_URL.")
     if not archive.is_file():
         raise BackupError(f"no snapshot at {archive}.")
 
@@ -510,7 +499,7 @@ def restore(archive: Path, settings: Settings | None = None,
                 "commit that has those files first.")
         ahead = sorted(ledger - set(verified["migrations"]))
 
-        tables = pgload.load_order(target)
+        tables = pgschema.load_order(target)
         unknown = sorted(set(verified["counts"]) - set(tables))
         if unknown:
             raise BackupError(
@@ -520,7 +509,7 @@ def restore(archive: Path, settings: Settings | None = None,
         occupied = {}
         for table in tables:
             count = target.execute(
-                f"SELECT COUNT(*) FROM {catalog.quote(table)}").fetchone()[0]
+                f"SELECT COUNT(*) AS n FROM {catalog.quote(table)}").fetchone()["n"]
             if count:
                 occupied[table] = count
         superseded = None
@@ -534,7 +523,7 @@ def restore(archive: Path, settings: Settings | None = None,
             superseded = dump(settings, label="superseded-by-restore")["warehouse"]["backup"]
             log.info("backup.superseded_snapshot", path=superseded)
             # Emptied inside the restore's own transaction rather than through
-            # `pgload.truncate_all`, which commits: that is right for a
+            # `pgschema.truncate_all`, which commits: that is right for a
             # migration, which is a thing you resume, and wrong for a restore,
             # which either replaced the warehouse or did not. Committing the
             # emptying separately would mean a restore that failed half way
@@ -557,7 +546,7 @@ def restore(archive: Path, settings: Settings | None = None,
                 + ", ".join(f"{t}: archive {a:,}, written {b:,}"
                              for t, (a, b) in sorted(drift.items())))
 
-        sequences = pgload.reset_sequences(target)
+        sequences = pgschema.reset_sequences(target)
         target.commit()
     finally:
         target.close()
@@ -575,10 +564,8 @@ def restore(archive: Path, settings: Settings | None = None,
 def _restore_data(archive: Path, target, on_table=None) -> dict[str, int]:
     """Feed every `COPY` block in the archive back through `COPY FROM STDIN`.
 
-    One transaction for the whole file, committed by the caller. That is the
-    opposite of `pgload`, which commits per table so an interrupted migration
-    leaves whole tables — and it is deliberate: a migration is a thing you
-    resume, and a restore is a thing that either replaced the warehouse or did
+    One transaction for the whole file, committed by the caller. That is
+    deliberate: a restore is a thing that either replaced the warehouse or did
     not. Half a restore is a warehouse nobody can reason about.
     """
     written: dict[str, int] = {}

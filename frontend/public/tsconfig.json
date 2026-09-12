@@ -1,0 +1,5 @@
+{
+  // Nuxt generates the real compiler options under .nuxt; this file only
+  // references them so editors and `nuxt typecheck` agree.
+  "extends": "./.nuxt/tsconfig.json"
+}

@@ -35,7 +35,7 @@ def _review_state(conn) -> dict[str, dict[str, int]]:
 def _pending_modules(conn) -> set[str]:
     if not catalog.object_type(conn, "review_queue"):
         return set()
-    return {row[0] for row in conn.execute(
+    return {row["module"] for row in conn.execute(
         "SELECT DISTINCT module FROM review_queue WHERE status = 'pending' "
         "AND module IS NOT NULL")}
 
@@ -94,7 +94,7 @@ def baseline(conn, *, tier: str = "upper") -> dict:
                           "status": status})
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "backend": db.backend_of(conn),
+        "backend": "postgres",
         "coverage": coverage,
         "coverage_cells": cells,
         "table_counts": _count_tables(conn),

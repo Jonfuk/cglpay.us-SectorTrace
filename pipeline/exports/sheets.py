@@ -42,7 +42,7 @@ def run_tab_query(conn: sqlite3.Connection, tab: TabSpec) -> tuple[list[str], li
     cursor = conn.execute(tab.sql)
     columns = [d[0] for d in cursor.description]
     guard_columns(tab.name, columns)
-    return columns, cursor.fetchall()
+    return columns, [tuple(row[column] for column in columns) for row in cursor.fetchall()]
 
 
 def _write_csv(path: Path, columns: list[str], rows: list[tuple], tab: TabSpec) -> None:

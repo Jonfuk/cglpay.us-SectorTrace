@@ -61,7 +61,7 @@ def counts(conn: sqlite3.Connection) -> dict:
             "rejected": rejected,
             "undecided": total - promoted - rejected,
             "evidence_rows": conn.execute(
-                f"SELECT COUNT(*) FROM {spec['target_table']}").fetchone()[0],
+                f"SELECT COUNT(*) AS count FROM {spec['target_table']}").fetchone()["count"],
         }
     return out
 
@@ -105,23 +105,24 @@ def listing(conn: sqlite3.Connection, kind: str, status: str = "undecided",
             "rejected or all.")
 
     if authority:
-        where.append(f"{authority_column} = ?")
+        where.append(f"{authority_column} = %s")
         params.append(authority)
     if search:
         # Searched across the URL and whichever columns this kind shows, so
         # what a person types matches what they can see.
         columns = [url_column, *SUMMARY_COLUMNS[kind]]
         where.append("(" + " OR ".join(
-            f"COALESCE({c}, '') LIKE ? ESCAPE '\\'" for c in columns) + ")")
+            f"COALESCE(CAST({c} AS text), '') LIKE %s ESCAPE '\\'"
+            for c in columns) + ")")
         params.extend([f"%{escape_like(search)}%"] * len(columns))
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
-    total = conn.execute(f"SELECT COUNT(*) FROM {table} {clause}", params).fetchone()[0]
+    total = conn.execute(f"SELECT COUNT(*) AS count FROM {table} {clause}", params).fetchone()["count"]
 
     limit = max(1, min(int(limit), PAGE))
     rows = conn.execute(
         f"SELECT * FROM {table} {clause} "
-        f"ORDER BY {authority_column}, {url_column} LIMIT ? OFFSET ?",
+        f"ORDER BY {authority_column}, {url_column} LIMIT %s OFFSET %s",
         [*params, limit, max(0, int(offset))])
 
     names = {row["ons_code"]: row["name"]
@@ -158,13 +159,13 @@ def detail(conn: sqlite3.Connection, kind: str, url: str) -> dict | None:
     spec = _spec(kind)
     row = conn.execute(
         f"SELECT * FROM {spec['candidate_table']} "
-        f"WHERE {spec['candidate_url_column']} = ?", (url,)).fetchone()
+        f"WHERE {spec['candidate_url_column']} = %s", (url,)).fetchone()
     if row is None:
         return None
 
     promotions = [dict(p) for p in conn.execute(
         "SELECT id, promoted_by, promoted_at, note, http_status, payload_sha256 "
-        "FROM evidence_promotions WHERE candidate_table = ? AND candidate_url = ? "
+        "FROM evidence_promotions WHERE candidate_table = %s AND candidate_url = %s "
         "ORDER BY id DESC", (spec["candidate_table"], url))]
 
     return {"kind": kind, "url": url, "candidate": dict(row),

@@ -34,7 +34,7 @@ def _seed_authority(conn, ons_code: str, name: str) -> None:
     conn.execute(
         "INSERT INTO authorities (ons_code, name, type, active_from, first_seen_vintage, "
         "last_seen_vintage, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', "
+        "VALUES (%s, %s, 'unitary', '2020-01-01', 'x', 'x', 'https://example.com', "
         "'2020-01-01T00:00:00Z', 200, 'test', 'abc')", (ons_code, name))
 
 

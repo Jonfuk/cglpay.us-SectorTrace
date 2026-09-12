@@ -45,7 +45,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, region, active_from, "
             " first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, ?, ?, '2021-04-01', '2024', '2026', "
+            "VALUES (%s, %s, %s, %s, '2021-04-01', '2024', '2026', "
             " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
             (ons_code, name, kind, region))
 
@@ -55,15 +55,15 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO public_health_grants (ons_code, financial_year, grant_type, "
             " allocation_status, unit, amount, source_column_header, source_document, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'allocation', ?, 'gbp', ?, '2025-26 allocation', 'alloc.xlsx', "
+            "VALUES (%s, %s, 'allocation', %s, 'gbp', %s, '2025-26 allocation', 'alloc.xlsx', "
             " 'https://gov.example/g', '2026-08-01T00:00:00Z', 200, 'dhsc', 'y')",
             (BIRMINGHAM, year, status, amount))
         conn.execute(
             "INSERT INTO public_health_grants (ons_code, financial_year, grant_type, "
             " allocation_status, unit, amount, source_column_header, source_document, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'of_which_is_drug_&_alcohol_ring-fenced_funding_total', "
-            " 'confirmed', 'gbp', ?, 'ring-fence', 'alloc.xlsx', "
+            "VALUES (%s, %s, 'of_which_is_drug_&_alcohol_ring-fenced_funding_total', "
+            " 'confirmed', 'gbp', %s, 'ring-fence', 'alloc.xlsx', "
             " 'https://gov.example/g', '2026-08-01T00:00:00Z', 200, 'dhsc', 'y')",
             (BIRMINGHAM, year, 500_000))
     conn.execute(
@@ -80,8 +80,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " section, line_number, column_label, amounts_multiplier, amount, "
             " value_text, source_document, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'transpblopr', 'Public Health', '271', "
-            " 'Public health (operational)', 1000, ?, '9000', 'b.xlsx', "
+            "VALUES (%s, %s, 'transpblopr', 'Public Health', '271', "
+            " 'Public health (operational)', 1000, %s, '9000', 'b.xlsx', "
             " 'https://gov.example/b', '2026-08-01T00:00:00Z', 200, 'mhclg', 'z')",
             (BIRMINGHAM, year, amount))
     conn.execute(
@@ -89,7 +89,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         " section, line_number, column_label, amounts_multiplier, amount, "
         " value_text, source_document, source_url, retrieved_at, http_status, "
         " source_system, payload_sha256) "
-        "VALUES (?, '2025-26', 'eduerl', 'Education Services', '110', "
+        "VALUES (%s, '2025-26', 'eduerl', 'Education Services', '110', "
         " 'Education and early years', 1000, 120000000, '120000', 'b.xlsx', "
         " 'https://gov.example/b', '2026-08-01T00:00:00Z', 200, 'mhclg', 'z')",
         (BIRMINGHAM,))
@@ -99,7 +99,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         " section, line_number, column_label, amounts_multiplier, amount, "
         " value_text, source_document, source_url, retrieved_at, http_status, "
         " source_system, payload_sha256) "
-        "VALUES (?, '2025-26', 'badline', 'Public Health', '999', "
+        "VALUES (%s, '2025-26', 'badline', 'Public Health', '999', "
         " 'Unreadable line', NULL, NULL, 'n/a', 'b.xlsx', "
         " 'https://gov.example/b', '2026-08-01T00:00:00Z', 200, 'mhclg', 'z')",
         (BIRMINGHAM,))
@@ -117,8 +117,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " time_period, area_name, ons_code, area_level, value, lower_ci_95, "
             " upper_ci_95, time_period_sortable, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (92454, ?, 102, ?, 'Birmingham', ?, 'local_authority', "
-            " ?, ?, ?, ?, 'https://fingertips.example/v', '2026-08-01T00:00:00Z', "
+            "VALUES (92454, %s, 102, %s, 'Birmingham', %s, 'local_authority', "
+            " %s, %s, %s, %s, 'https://fingertips.example/v', '2026-08-01T00:00:00Z', "
             " 200, 'ohid', 'f')",
             (BIRMINGHAM, period, BIRMINGHAM, value, lower, upper, period))
     conn.execute(
@@ -145,8 +145,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " area_name_raw, ons_code, age_group, time_period, indicator, value, "
             " value_text, cohort, financial_year, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES ('adult_2024-25', 'Table_9_2', 'Birmingham', ?, '18+', "
-            " 'April 2022 to March 2025', ?, ?, ?, 'adults', '2024-25', "
+            "VALUES ('adult_2024-25', 'Table_9_2', 'Birmingham', %s, '18+', "
+            " 'April 2022 to March 2025', %s, %s, %s, 'adults', '2024-25', "
             " 'https://ndtms.example/v', '2026-08-01T00:00:00Z', 200, 'ohid', 'n')",
             (BIRMINGHAM, indicator, value, value_text))
 
@@ -156,8 +156,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'Birmingham City Council', ?, 'Supplier Ltd', "
-            " 'Treatment services', ?, 'GBP', '2026-03-01', 'open', 'psr', "
+            "VALUES (%s, %s, 'Birmingham City Council', %s, 'Supplier Ltd', "
+            " 'Treatment services', %s, 'GBP', '2026-03-01', 'open', 0, "
             " 'https://find.example/n', '2026-08-01T00:00:00Z', 200, "
             " 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", BIRMINGHAM, value))
@@ -171,7 +171,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO cqc_locations (location_id, provider_id, location_name, "
         " local_authority_raw, local_authority_ons_code, registration_status, "
         " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES ('loc1', 'prov1', 'A regulated service', 'Birmingham', ?, "
+        "VALUES ('loc1', 'prov1', 'A regulated service', 'Birmingham', %s, "
         " 'Registered', 'https://cqc.example/l', '2026-08-01T00:00:00Z', "
         " 200, 'cqc', 'c')",
         (BIRMINGHAM,))
@@ -179,7 +179,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO cdp_document_candidates (authority_ons_code, candidate_url, "
         " title, confidence, discovered_at, source_url, retrieved_at, http_status, "
         " source_system, payload_sha256) "
-        "VALUES (?, 'https://birmingham.example/cdp.pdf', 'CDP strategy', 0.8, "
+        "VALUES (%s, 'https://birmingham.example/cdp.pdf', 'CDP strategy', 0.8, "
         " '2026-08-01', 'https://birmingham.example/', '2026-08-01T00:00:00Z', "
         " 200, 'm09', 'd')",
         (BIRMINGHAM,))
@@ -187,7 +187,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO committee_paper_candidates (authority_ons_code, document_url, "
         " report_title, committee_system, discovered_at, source_url, "
         " retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, 'https://birmingham.example/paper.pdf', 'A committee paper', "
+        "VALUES (%s, 'https://birmingham.example/paper.pdf', 'A committee paper', "
         " 'moderngov', '2026-08-01', 'https://birmingham.example/', "
         " '2026-08-01T00:00:00Z', 200, 'm10', 'e')",
         (BIRMINGHAM,))
@@ -195,10 +195,50 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
         "INSERT INTO foi_request_candidates (ons_code, candidate_url, title, "
         " discovered_at, discovery_source, source_url, retrieved_at, http_status, "
         " source_system, payload_sha256) "
-        "VALUES (?, 'https://birmingham.example/foi.pdf', 'An FOI response', "
+        "VALUES (%s, 'https://birmingham.example/foi.pdf', 'An FOI response', "
         " '2026-08-01', 'disclosure_log', 'https://birmingham.example/', "
         " '2026-08-01T00:00:00Z', 200, 'm15', 'q')",
         (BIRMINGHAM,))
+
+    conn.execute(
+        "INSERT INTO rough_sleeping_snapshot (ons_code, snapshot_year, count, "
+        " count_text, rate_per_100k, rate_text, source_url, retrieved_at, "
+        " http_status, source_system, payload_sha256) "
+        "VALUES (%s, 2025, 12, '12', 1.4, '1.4', 'https://gov.example/rs', "
+        " '2026-08-01T00:00:00Z', 200, 'mhclg_rough_sleeping', 'r')",
+        (BIRMINGHAM,))
+    conn.execute(
+        "INSERT INTO statutory_homelessness_snapshot (ons_code, quarter_start, "
+        " quarter_label, total_initial_assessments, "
+        " total_initial_assessments_text, total_owed_duty, total_owed_duty_text, "
+        " prevention_duty_owed, prevention_duty_owed_text, relief_duty_owed, "
+        " relief_duty_owed_text, source_url, retrieved_at, http_status, "
+        " source_system, payload_sha256) "
+        "VALUES (%s, '2026-01-01', 'January to March 2026', 300, '300', 260, "
+        " '260', 120, '120', 140, '140', 'https://gov.example/hclic', "
+        " '2026-08-01T00:00:00Z', 200, 'mhclg_statutory_homelessness', 's')",
+        (BIRMINGHAM,))
+    conn.execute(
+        "INSERT INTO temporary_accommodation_snapshot (ons_code, quarter_start, "
+        " quarter_label, total_households_ta, total_households_ta_text, "
+        " households_ta_with_children, children_in_ta, source_url, "
+        " retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES (%s, '2026-01-01', 'January to March 2026', 180, '180', 90, "
+        " 160, 'https://gov.example/hclic-ta', '2026-08-01T00:00:00Z', 200, "
+        " 'mhclg_temporary_accommodation', 't')",
+        (BIRMINGHAM,))
+    for measure, value in (("bb_households", "40"),
+                            ("bb_households_with_children", "[c]")):
+        conn.execute(
+            "INSERT INTO temporary_accommodation_breakdowns (ons_code, "
+            " quarter_start, quarter_label, measure, unit, households, "
+            " households_text, source_url, retrieved_at, http_status, "
+            " source_system, payload_sha256) "
+            "VALUES (%s, '2026-01-01', 'January to March 2026', %s, 'households', "
+            " %s, %s, 'https://gov.example/hclic-ta', '2026-08-01T00:00:00Z', "
+            " 200, 'mhclg_temporary_accommodation', 't')",
+            (BIRMINGHAM, measure,
+             int(value) if value.isdigit() else None, value))
 
     conn.commit()
     return conn
@@ -261,6 +301,58 @@ def test_authority_payload_agrees_with_the_existing_endpoints(ro):
     # Contracts: the count is the contracts endpoint's count.
     assert payload["contracts"]["total"] == public_queries.contracts(
         ro, buyer_ons_code=BIRMINGHAM)["total"]
+
+
+# --- comparators (Modules 29-31) ---------------------------------------------
+
+def test_comparators_are_present_and_carry_their_own_caveats(ro):
+    payload = public_queries.authority(ro, BIRMINGHAM)
+    comparators = payload["comparators"]
+
+    rough_sleeping = comparators["rough_sleeping"]
+    assert rough_sleeping["rows"][0]["snapshot_year"] == 2025
+    assert rough_sleeping["rows"][0]["count_text"] == "12"
+    assert "comparator" in rough_sleeping["caveat"].lower()
+
+    homelessness = comparators["statutory_homelessness"]
+    assert homelessness["rows"][0]["quarter_label"] == "January to March 2026"
+    assert homelessness["rows"][0]["total_owed_duty"] == 260
+    assert "comparator" in homelessness["caveat"].lower()
+
+    ta = comparators["temporary_accommodation"]
+    assert ta["rows"][0]["total_households_ta_text"] == "180"
+    assert ta["rows"][0]["children_in_ta"] == 160
+    assert "comparator" in ta["caveat"].lower()
+
+    # BETA-064: the bed-and-breakfast breakdown, verbatim — a [c] placeholder
+    # stays [c] with a NULL number, never 0.
+    breakdown = {row["measure"]: row for row in ta["breakdown"]}
+    assert breakdown["bb_households"]["households"] == 40
+    assert breakdown["bb_households_with_children"]["households"] is None
+    assert breakdown["bb_households_with_children"]["households_text"] == "[c]"
+    assert breakdown["bb_households"]["unit"] == "households"
+    assert "not" in ta["breakdown_caveat"].lower()
+
+
+def test_comparators_never_combined_or_scored_against_other_evidence():
+    """The three comparator caveats must say, in words, that these figures
+    are not combined with the authority's own evidence — the entire reason
+    Modules 29-31 exist as separate tables rather than joined columns."""
+    for key in ("rough_sleeping_comparator", "statutory_homelessness_comparator",
+                "temporary_accommodation_comparator"):
+        text = public_queries.CAVEATS[key].lower()
+        assert "never" in text or "not" in text
+
+
+def test_an_authority_with_no_comparator_data_gets_empty_rows_not_an_error(ro):
+    """Staffordshire has no rough sleeping/homelessness rows in the fixture
+    — absence must read as an empty list, not a missing key or an error."""
+    payload = public_queries.authority(ro, "E10000028")
+    comparators = payload["comparators"]
+    assert comparators["rough_sleeping"]["rows"] == []
+    assert comparators["statutory_homelessness"]["rows"] == []
+    assert comparators["temporary_accommodation"]["rows"] == []
+    assert comparators["temporary_accommodation"]["breakdown"] == []
 
 
 def test_an_authority_with_nothing_returns_the_same_empty_shapes(ro):

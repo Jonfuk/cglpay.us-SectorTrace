@@ -37,12 +37,35 @@
                       rgba(245, 158, 11, 0.06), rgba(245, 158, 11, 0.06) 4px,
                       transparent 4px, transparent 12px);
 
-  /* Spacing */
+  /* Spacing — a 4px scale, --space-N == N*4px. `--space-5` (20px) and
+     `--space-10` (40px) were missing and several rules already referenced
+     them; an undefined custom property invalidates the whole declaration, so
+     those paddings and gaps silently collapsed to nothing. Defined here now
+     (BETA-080). */
   --space-1: 4px;  --space-2: 8px;   --space-3: 12px;  --space-4: 16px;
-  --space-6: 24px; --space-8: 32px;  --space-12: 48px; --space-16: 64px;
+  --space-5: 20px; --space-6: 24px;  --space-8: 32px;  --space-10: 40px;
+  --space-12: 48px; --space-16: 64px;
 
   /* Radii */
   --radius-sm: 4px; --radius-md: 8px; --radius-lg: 12px; --radius-xl: 16px;
+
+  /* Shared primitive: the keyboard focus ring. One declaration so every
+     `:focus-visible` outline in this stylesheet is the same shape; the
+     colour is the portal's own accent (BETA-080). The admin stylesheet has
+     its own `--focus-ring` with its own accent — the two front ends keep
+     their identities. */
+  --focus-ring: 2px solid var(--accent-teal);
+  --focus-ring-offset: 2px;
+
+  /* Breakpoints, as documented constants. CSS cannot use a custom property
+     inside a media query, so these are not consumed directly — they are the
+     canonical values every `@media` in this file is written against, so a
+     new rule lands on an existing breakpoint rather than inventing one.
+       --bp-narrow  340px   very small phones
+       --bp-mobile  720px   phone / drawer layout
+       --bp-tablet  900px   the offcanvas nav still applies
+       --bp-wide    1100px  two-column layouts collapse
+     (BETA-080) */
 
   /* Glass */
   --glass-bg:     rgba(22, 27, 34, 0.72);
@@ -84,19 +107,29 @@ a:hover { text-decoration-color: currentColor; }
 }
 .skip:focus { left: var(--space-4); top: var(--space-2); }
 
-:focus-visible { outline: 2px solid var(--accent-teal); outline-offset: 2px; }
+:focus-visible { outline: var(--focus-ring); outline-offset: var(--focus-ring-offset); }
 
 /* --- top bar ------------------------------------------------------------- */
 
 .topbar {
   display: flex; align-items: center; gap: var(--space-6);
   padding: var(--space-3) var(--space-6);
+  position: sticky; top: 0; z-index: 40;
+  flex-wrap: wrap;
+}
+/* The glass background lives on a pseudo-element, not on `.topbar` itself.
+   `backdrop-filter` on `.topbar` makes it the containing block for every
+   descendant with `position: fixed` -- which is what the mobile section
+   drawer (`#portal-nav`, an `offcanvas-lg`) uses. It was being sized against
+   the 64px topbar instead of the viewport, so opening the menu on a phone
+   showed a 32px sliver of clipped links (BETA-069). Moving the filter here
+   lets the drawer escape to the viewport while keeping the effect. */
+.topbar::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
   background: color-mix(in srgb, var(--bg-base) 88%, transparent);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-bottom: 1px solid var(--border-subtle);
-  position: sticky; top: 0; z-index: 40;
-  flex-wrap: wrap;
 }
 .brand { display: flex; align-items: center; gap: var(--space-2); text-decoration: none; color: inherit; }
 .brand-mark {
@@ -136,8 +169,10 @@ a:hover { text-decoration-color: currentColor; }
 }
 .adminlink:hover { color: var(--text-secondary); border-color: var(--border-accent); }
 
-/* "Find your council" (W-17): a navigator in the top bar, not a filter.
-   Right-aligned with the admin links; the list drops below the input. */
+/* "Find your council" (W-17): a navigator, not a filter. It lives inside the
+   section drawer (BETA-069); on desktop the `margin-left: auto` here lifts it
+   to the right of the nav row, level with the palette button, so the wide
+   topbar layout is unchanged. The list drops below the input. */
 .findcouncil { position: relative; margin-left: auto; }
 .findcouncil input { min-width: 190px; }
 .findcouncil .typeahead-list { min-width: 260px; right: 0; left: auto; }
@@ -194,6 +229,14 @@ main { padding: var(--space-8) var(--space-6) var(--space-16); max-width: 1440px
 .route-lens.lens-money .eyebrow, .route-lens.lens-accountability .eyebrow { color: var(--accent-amber); }
 main:focus { outline: none; }
 .section { margin-bottom: var(--space-12); }
+
+/* Scroll-triggered reveal (components.js's revealOnScroll). `.reveal` is
+   only ever added by that JS, immediately before it starts observing --
+   never a bare CSS rule on `.section` itself -- so a page that does not
+   call it, or a browser without IntersectionObserver, shows every section
+   at full opacity by default rather than losing content permanently. */
+.reveal { opacity: 0; transform: translateY(18px); transition: opacity .6s ease, transform .6s ease; }
+.reveal.is-visible { opacity: 1; transform: none; }
 .section > header { margin-bottom: var(--space-4); }
 .section > header p { color: var(--text-secondary); max-width: 76ch; }
 .section-action { margin: 0 0 var(--space-4); }
@@ -203,8 +246,12 @@ main:focus { outline: none; }
   border-radius: var(--radius-lg); padding: var(--space-6); box-shadow: 0 18px 55px rgba(0, 0, 0, .12);
 }
 .grid { display: grid; gap: var(--space-4); }
-.grid.two { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
-.grid.cards { grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); }
+/* `min(420px, 100%)` not a bare `420px`: auto-fit's track keeps its stated
+   minimum even when the container is narrower than it, so a bare 420px track
+   overran the viewport by ~45px at 375 (BETA-071). */
+.grid.two { grid-template-columns: repeat(auto-fit, minmax(min(420px, 100%), 1fr)); }
+.grid.cards { grid-template-columns: repeat(auto-fit, minmax(min(215px, 100%), 1fr)); }
+.grid > * { min-width: 0; }
 .snapshot-bands { display: grid; gap: var(--space-6); }
 .snapshot-band { border-top: 1px solid var(--border-subtle); padding-top: var(--space-4); }
 .snapshot-band:first-child { border-top: 0; padding-top: 0; }
@@ -219,6 +266,29 @@ main:focus { outline: none; }
 .hero .lede { font-size: 18px; color: var(--text-secondary); max-width: 68ch; }
 .hero .lede strong { color: var(--text-primary); font-weight: 600; }
 .hero-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: var(--space-4); }
+
+/* Overview only: the England region silhouette sits beside the headline on
+   wide viewports and drops below it on narrow ones. Every other page's hero
+   stays the plain single column above. */
+.hero-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(240px, 340px); gap: var(--space-8); align-items: center; }
+.hero-map { display: flex; flex-direction: column; align-items: center; gap: var(--space-2); }
+.hero-map-svg { width: 100%; height: auto; max-height: 380px; filter: drop-shadow(0 18px 40px rgba(0, 0, 0, .35)); }
+.hero-map-svg path { transition: fill-opacity .15s; }
+.hero-map-svg path:hover { fill-opacity: 1; stroke: var(--accent-teal); }
+.hero-map-caption { text-align: center; max-width: 30ch; }
+
+/* The page-load sequence: hero children rise in, staggered, once. Reduced
+   motion is handled by the sitewide `animation-duration: .01ms` override
+   below rather than a second code path here. */
+.hero-animated > * { opacity: 0; animation: hero-rise .6s ease forwards; }
+.hero-animated > *:nth-child(1) { animation-delay: .05s; }
+.hero-animated > *:nth-child(2) { animation-delay: .16s; }
+.hero-animated > *:nth-child(3) { animation-delay: .27s; }
+.hero-animated > *:nth-child(n+4) { animation-delay: .38s; }
+@keyframes hero-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 .hero-kicker { display: flex; align-items: center; gap: 8px; margin-bottom: var(--space-3); color: var(--text-muted); font: 700 13px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase; }
 .lens-badge, .timing-badge { display: inline-flex; align-items: center; width: fit-content; padding: 3px 8px; border: 1px solid var(--border-accent); border-radius: 999px; font: 700 12px/1.2 var(--display); letter-spacing: .06em; text-transform: uppercase; }
 .lens-accountability, .timing-current { color: var(--accent-amber); border-color: var(--caveat-border); background: var(--caveat-bg); }
@@ -261,18 +331,45 @@ main:focus { outline: none; }
 
 .explore-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
 .explore-card {
-  min-height: 132px; display: flex; flex-direction: column; gap: var(--space-2);
+  --lens: var(--accent-teal);
+  min-height: 148px; display: flex; flex-direction: column; gap: var(--space-2);
   position: relative; padding: var(--space-5); border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-lg); background: var(--bg-surface); color: var(--text-primary);
-  text-decoration: none; transition: border-color .15s, transform .15s, background .15s;
+  border-top: 3px solid var(--lens);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(165deg, var(--bg-surface), var(--bg-elevated) 160%);
+  color: var(--text-primary);
+  text-decoration: none;
+  transition: border-color .15s, transform .15s, background .15s, box-shadow .15s;
 }
+/* Each card's `--lens` custom property is set inline per card (overview.js),
+   tracing the same evidence "lens" the route carries elsewhere on the portal
+   (the campaign-lens cue under the page h1) — the colour is telling the
+   reader something true about the card, not just varying for its own sake. */
 .explore-card:hover, .explore-card:focus-visible {
-  border-color: var(--accent-teal); background: var(--bg-elevated); color: var(--text-primary);
-  transform: translateY(-2px);
+  border-color: var(--lens); background: var(--bg-elevated); color: var(--text-primary);
+  transform: translateY(-3px);
+  box-shadow: 0 16px 36px -16px var(--lens);
 }
+.explore-card-lens {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: 700 11px/1.2 var(--display); letter-spacing: .08em; text-transform: uppercase;
+  color: var(--lens);
+}
+.explore-card-lens::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--lens); }
 .explore-card-title { font-size: 17px; font-weight: 700; }
 .explore-card-description { color: var(--text-secondary); font-size: 13.5px; max-width: 34ch; }
-.explore-card-arrow { margin-top: auto; color: var(--accent-teal); font-size: 20px; line-height: 1; }
+.explore-card-arrow {
+  margin-top: auto; align-self: flex-end;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 50%;
+  border: 1px solid var(--border-accent); color: var(--lens);
+  font-size: 15px; line-height: 1;
+  transition: transform .15s, border-color .15s, background .15s;
+}
+.explore-card:hover .explore-card-arrow, .explore-card:focus-visible .explore-card-arrow {
+  transform: translateX(3px); border-color: var(--lens);
+  background: color-mix(in srgb, var(--lens) 18%, transparent);
+}
 
 .status-key { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; margin: calc(var(--space-2) * -1) 0 var(--space-4); }
 .evidence-status-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); align-items: stretch; }
@@ -350,6 +447,17 @@ main:focus { outline: none; }
 .badge.good { background: rgba(52,211,153,0.12); color: var(--accent-green); }
 .badge.bad { background: rgba(248,113,113,0.12); color: var(--accent-red); }
 .badge.neutral { background: var(--bg-elevated); color: var(--text-secondary); border-color: var(--border-accent); }
+/* Provider lifecycle: renamed / merged / dissolved. Muted, not alarming --
+   a merged comparator is still a valid comparator for its own era. */
+.badge.lifecycle { background: var(--bg-elevated); color: var(--text-secondary); border-color: var(--border-accent); text-transform: uppercase; letter-spacing: 0.05em; }
+.badge.lifecycle.dissolved { color: var(--accent-red); border-color: rgba(248,113,113,0.35); }
+.provider-lifecycle-note { color: var(--text-secondary); font-size: 13px; margin: 2px 0 0; }
+.provider-lifecycle-note a { color: var(--text-primary); }
+/* BETA-066: the entity-lineage block. The chain reads left to right to the
+   surviving entity; the edges are a plain list with their basis. */
+.lineage-chain { font-size: 15px; margin: var(--space-2) 0; }
+.lineage-edges { margin: var(--space-2) 0; padding-left: var(--space-5); }
+.lineage-edges li { margin: 3px 0; }
 
 /* --- charts -------------------------------------------------------------- */
 
@@ -362,6 +470,20 @@ main:focus { outline: none; }
   opacity: 0.45; transition: opacity 0.15s;
 }
 .chartwrap:hover .chart-save, .chart-save:focus-visible { opacity: 1; }
+
+/* BETA-074: shared chart controls — keyboard series toggles above, a
+   reset / view-as-table / save-image row below, an optional missing-period
+   note under that. */
+.chart-series-toggles { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 6px; }
+.chart-series-toggle {
+  font-size: 12px; padding: 2px 9px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-accent); background: var(--bg-elevated); color: var(--text-primary);
+}
+.chart-series-toggle[aria-pressed="false"] { opacity: 0.45; text-decoration: line-through; }
+.chart-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; margin-top: 6px; }
+.chart-controls .chart-save { position: static; opacity: 1; }
+.chart-to-table { text-decoration: none; }
+.chart-missing-note { margin: 6px 0 0; }
 .chart { width: 100%; height: 380px; }
 .chart.tall { height: 520px; }
 .chart.short { height: 260px; }
@@ -373,6 +495,20 @@ main:focus { outline: none; }
   color: var(--text-secondary); padding: var(--space-6);
 }
 .chart-error { border-color: rgba(248,113,113,0.4); color: var(--accent-red); }
+
+/* BETA-068: feature-unavailable state. Wider and left-aligned — it carries a
+ * paragraph and an operator diagnostics block, not a one-line message. */
+.unavailable-card { align-items: stretch; text-align: left; color: var(--text-secondary); }
+.unavailable-card > strong { color: var(--accent-red); }
+.unavailable-card p { margin: 0; }
+.unavailable-diag { margin-top: var(--space-2); }
+.unavailable-diag summary { cursor: pointer; color: var(--text-secondary); }
+.unavailable-diag .kv {
+  display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-4);
+  margin-top: var(--space-2);
+}
+.unavailable-diag .kv-key { color: var(--text-tertiary, var(--text-secondary)); }
+.unavailable-diag .kv-val { font-family: var(--font-mono, ui-monospace, monospace); word-break: break-word; }
 .chart-empty code {
   background: var(--bg-base); border: 1px solid var(--border-accent);
   border-radius: var(--radius-sm); padding: 2px 8px; color: var(--accent-teal);
@@ -402,6 +538,123 @@ main:focus { outline: none; }
    is what it is: a condition on reuse that a reader who skims will miss. */
 .provenance .licence-caution { color: var(--accent-amber); margin-top: var(--space-1); }
 
+/* BETA-084: page-level evidence health strip. */
+.evidence-health {
+  margin: var(--space-4) 0 var(--space-6); padding: var(--space-4);
+  border: 1px solid var(--border-subtle); border-left: 3px solid var(--accent-teal);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+}
+.ehs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: var(--space-3); }
+.ehs-cell { display: flex; flex-direction: column; gap: 2px; }
+.ehs-label { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.ehs-value { font-size: 13px; color: var(--text-primary); }
+.ehs-unknown { color: var(--text-muted); font-style: italic; }
+.ehs-cell.ehs-warn .ehs-value { color: var(--accent-amber); }
+.ehs-limitation { margin: var(--space-3) 0 0; font-size: 13px; color: var(--text-secondary); border-top: 1px solid var(--border-subtle); padding-top: var(--space-2); }
+.ehs-links { margin: var(--space-2) 0 0; }
+
+/* BETA-081: document reading room. */
+.reading-split { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+@media (max-width: 900px) { .reading-split { grid-template-columns: 1fr; } }
+.reading-meta dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-3); font-size: 12.5px; margin: var(--space-2) 0; }
+.reading-meta dt { color: var(--text-muted); }
+.reading-meta dd { margin: 0; }
+.reading-meta .btn { margin-top: var(--space-2); }
+.reading-body { max-height: 70vh; overflow-y: auto; }
+.reading-nav { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-3); position: sticky; top: 0; background: var(--bg-surface); padding-bottom: var(--space-2); }
+.reading-body p { margin: var(--space-2) 0; }
+.reading-anchor { border-left: 3px solid var(--accent-teal); padding-left: var(--space-3); color: var(--text-primary); }
+
+/* BETA-079: safety & legal chronology. */
+.sl-chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-2) 0 var(--space-4); }
+.sl-relationship-key { margin: var(--space-3) 0; padding: var(--space-3); border-left: 3px solid var(--accent-amber); background: var(--caveat-bg, var(--bg-elevated)); }
+.sl-relationship-key p { margin: 0 0 var(--space-1); }
+
+/* BETA-078: unified evidence atlas — one layer at a time. */
+.atlas-layer-select { min-width: 240px; }
+.atlas-legend { margin: var(--space-2) 0; }
+.atlas-legend p { margin: 0; color: var(--text-secondary); }
+
+/* BETA-077: route-aware breadcrumb on detail pages, and the recently-viewed
+   block on the overview. */
+.breadcrumbs {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  font-size: 12.5px; color: var(--text-muted); margin-bottom: var(--space-3);
+}
+.breadcrumbs a { color: var(--accent-teal); text-decoration: none; }
+.breadcrumbs a:hover { text-decoration: underline; }
+.breadcrumbs [aria-current="page"] { color: var(--text-secondary); }
+.recent-list { margin: var(--space-4) 0; }
+.recent-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); }
+.recent-head h2 { font-size: 15px; margin: 0; }
+.recent-list ul { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
+.recent-type { color: var(--text-muted); font-size: 12px; }
+
+/* BETA-076: sticky section index on the provider / authority workbenches. */
+.workbench-index {
+  position: sticky; top: 60px; z-index: 20; display: flex; gap: 6px;
+  overflow-x: auto; padding: var(--space-2) 0; margin-bottom: var(--space-4);
+  background: color-mix(in srgb, var(--bg-base) 92%, transparent);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  border-bottom: 1px solid var(--border-subtle);
+  scrollbar-width: thin;
+}
+.workbench-index-link {
+  flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 10px; border-radius: 999px; text-decoration: none;
+  border: 1px solid var(--border-accent); color: var(--text-secondary);
+  font-size: 12.5px; white-space: nowrap;
+}
+.workbench-index-link:hover { color: var(--text-primary); background: var(--bg-elevated); }
+.workbench-index-link[aria-current="true"] {
+  background: var(--accent-teal); color: #04121d; border-color: var(--accent-teal);
+}
+.workbench-index-link.is-empty { opacity: 0.5; }
+.workbench-index-count { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.workbench-index-count:empty { display: none; }
+.workbench-totop {
+  position: fixed; right: 18px; bottom: 18px; z-index: 60;
+  padding: 6px 12px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--border-accent); background: var(--bg-surface);
+  color: var(--text-primary); box-shadow: 0 8px 24px rgba(0,0,0,.3);
+}
+.section-count { color: var(--text-muted); font-weight: 400; }
+.section-disclosure > summary { cursor: pointer; color: var(--accent-teal); margin-bottom: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .workbench-index { scroll-behavior: auto; } }
+
+/* BETA-075: treatment metric catalogue. */
+.metric-list { display: flex; flex-direction: column; gap: var(--space-3); margin-top: var(--space-3); max-height: 520px; overflow-y: auto; }
+.metric-row { border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); padding: var(--space-3); }
+.metric-row-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.metric-pick { font-weight: 600; font-size: 14px; }
+.metric-meta { display: grid; grid-template-columns: max-content 1fr; gap: 2px var(--space-4); margin: var(--space-2) 0 0; font-size: 12.5px; }
+.metric-meta dt { color: var(--text-muted); }
+.metric-meta dd { margin: 0; }
+.metric-def { margin-top: var(--space-2); }
+
+/* BETA-073: "My area" card on the overview. */
+.myarea-card {
+  margin: var(--space-6) 0; padding: var(--space-5);
+  border: 1px solid var(--border-accent); border-left: 3px solid var(--accent-teal);
+  border-radius: var(--radius-md); background: var(--bg-surface);
+}
+.myarea-card h2 { font-size: 18px; margin: 0; }
+.myarea-empty { border-left-color: var(--border-accent); }
+.myarea-head { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-3); flex-wrap: wrap; }
+.myarea-stats { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0; }
+.myarea-stat {
+  display: flex; flex-direction: column; min-width: 96px; padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  text-decoration: none; color: var(--text-primary);
+}
+.myarea-stat:hover { border-color: var(--accent-teal); background: var(--bg-elevated); }
+.myarea-stat-n { font: 700 20px/1.1 var(--display, inherit); font-variant-numeric: tabular-nums; }
+.myarea-stat-l { font-size: 12px; color: var(--text-secondary); }
+.linklike {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  color: var(--accent-teal); font: inherit; text-decoration: underline;
+}
+
 /* --- tables -------------------------------------------------------------- */
 
 .tablecard { margin-top: var(--space-4); }
@@ -421,12 +674,57 @@ main:focus { outline: none; }
 }
 .tabulator .tabulator-footer { background: var(--bg-elevated); border-color: var(--border-subtle); }
 
+/* BETA-071: per-table view controls (density, column chooser, full-table). */
+.table-view { position: relative; font-size: 12px; }
+.table-view > summary {
+  cursor: pointer; list-style: none; padding: 3px 10px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border-accent); color: var(--text-secondary);
+}
+.table-view > summary::-webkit-details-marker { display: none; }
+.table-view[open] > summary { color: var(--text-primary); background: var(--bg-elevated); }
+.table-view-panel {
+  position: absolute; right: 0; z-index: 30; margin-top: 6px; width: max(220px, 60vw);
+  max-width: 320px; max-height: 60vh; overflow: auto; padding: var(--space-3);
+  background: var(--bg-surface); border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md); box-shadow: 0 16px 40px rgba(0,0,0,.35);
+  display: flex; flex-direction: column; gap: var(--space-3);
+}
+.table-view-panel fieldset { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.table-view-panel legend { font-weight: 600; color: var(--text-secondary); padding: 0; margin-bottom: 2px; }
+.table-view-panel label { display: flex; align-items: center; gap: 6px; color: var(--text-primary); }
+.table-view-panel .tv-full { border-top: 1px solid var(--border-subtle); padding-top: var(--space-2); }
+
+/* Compact density: tighten Tabulator's cells. It re-measures row heights on
+   the redraw() the toggle triggers, so no fixed row height to fight. */
+.tablecard.density-compact .tabulator-cell,
+.tablecard.density-compact .tabulator-col-content { padding-top: 3px; padding-bottom: 3px; }
+.tablecard.density-compact .tabulator { font-size: 12px; }
+
+.tablecard.is-fulltable .tabulator { overflow-x: auto; }
+/* Keep any table overrun — a wide row, the pager, a frozen column — inside
+   the card so the page body never scrolls sideways (acceptance contract).
+   `min-width: 0` lets the card shrink below the table's intrinsic width when
+   it sits in a grid/flex parent; `overflow-x: auto` then scrolls the excess
+   inside the card. This also fixes a pre-existing ~60px page overrun on the
+   contracts table at 375px. */
+.tablecard, .tablecard > div:last-child { min-width: 0; max-width: 100%; }
+.tablecard > div:last-child { overflow-x: auto; }
+.tablecard .tabulator,
+.tablecard .tabulator-footer,
+.tablecard .tabulator-paginator { max-width: 100%; min-width: 0; }
+.tablecard .tabulator-footer { overflow-x: auto; }
+
 /* --- map ----------------------------------------------------------------- */
 
 .maplayout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .maplayout > * { min-width: 0; }
 @media (max-width: 1100px) { .maplayout { grid-template-columns: 1fr; } }
 .map { width: 100%; height: 620px; }
+/* BETA-065: the CQC-location explorer's map. A plain block; the table beside
+   it carries the same rows, so it stays modest. */
+.cqc-map { width: 100%; min-width: 0; height: 460px; margin: var(--space-3) 0;
+  border: 1px solid var(--border-accent); border-radius: var(--radius-lg);
+  overflow: hidden; background: var(--bg-base); }
 .map-workspace { min-width: 0; max-width: 100%; border: 1px solid var(--border-accent); border-radius: var(--radius-lg); overflow: hidden; background: var(--bg-base); box-shadow: 0 20px 55px rgba(0, 0, 0, .22); }
 .map-canvas { width: 100%; min-width: 0; height: 620px; }
 .map-preview { border-top: 1px solid var(--border-subtle); background: var(--bg-surface); padding: var(--space-4); }
@@ -599,11 +897,13 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .portal-nav { display: flex; flex: 1 1 auto; min-width: 0; }
 .portal-nav .offcanvas-body { display: flex; align-items: center; padding: 0; }
 .mainnav { align-items: center; min-width: 0; }
-.nav-tools { display: flex; gap: var(--space-1); margin-left: var(--space-3); padding-left: var(--space-3); border-left: 1px solid var(--border-subtle); }
-.nav-tools a { color: var(--text-muted); font-size: 12.5px; }
 .menu-toggle { display: none; }
 .theme-control { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; white-space: nowrap; }
 .theme-control select { min-width: 0; width: auto; padding: 5px 24px 5px 7px; font-size: 12px; }
+/* The mobile-only duplicate (see index.html) is hidden here and shown only
+   in the sub-900px media queries below, styled to sit in the offcanvas nav
+   list rather than the topbar. */
+.theme-control-mobile { display: none; }
 .search-icon { color: var(--accent-teal); font-size: 20px; line-height: 1; }
 .findcouncil { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 .findcouncil input { min-width: 175px; }
@@ -615,8 +915,22 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .filters-toggle { display: none; }
 .filter-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; max-width: 1440px; margin: 16px auto -16px; padding: 0 24px; }
 .filter-summary-label { color: var(--text-muted); font-size: 12px; }
+/* BETA-072: the count of what the current query returns, and any validation
+   problem with it, sit inline with the active-filter chips. */
+.filter-summary-count { color: var(--text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.filter-summary-error { color: var(--accent-red); font-size: 12px; }
+#f-year-from[aria-invalid="true"], #f-year-to[aria-invalid="true"] { border-color: var(--accent-red); }
 .filter-chip, .filter-clear { border: 1px solid var(--border-accent); border-radius: 999px; background: var(--bg-elevated); color: var(--text-primary); padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .filter-clear { background: transparent; color: var(--accent-teal); border-color: transparent; }
+.filter-chip.is-active { background: var(--accent-teal); color: #04121d; border-color: var(--accent-teal); }
+
+/* BETA-070 workforce pay explorer control strip. */
+.pay-explorer { display: flex; flex-direction: column; gap: var(--space-3); margin: var(--space-4) 0 var(--space-6); padding: var(--space-4); border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--bg-surface); }
+.pay-explorer-groups { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pay-explorer-fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-4); }
+.pay-explorer-fields label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--text-secondary); }
+.pay-explorer-fields input, .pay-explorer-fields select { min-width: 180px; }
+.pay-explorer > p { margin: 0; }
 
 @media (max-width: 1100px) {
   .topbar { gap: var(--space-3); }
@@ -633,15 +947,24 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
      remove it from layout until Bootstrap marks it open. */
   .portal-nav:not(.show) { display: none; }
   .portal-nav .offcanvas-body { display: block; padding: 16px; }
-  .portal-nav .mainnav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .portal-nav .mainnav { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
   .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
   .portal-nav .lens-menu { order: 0; }
   .portal-nav .lens-menu-panel { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 100%; margin: 4px 0 8px; box-shadow: none; }
-  .portal-nav .nav-tools { display: block; margin: 16px 0 0; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border-subtle); }
-  .portal-nav .nav-tools a { display: block; }
-  .findcouncil { order: 3; margin-left: auto; }
-  .findcouncil input { min-width: 0; width: min(35vw, 150px); }
-  .theme-control { display: none; }
+  /* BETA-069: the council navigator sits in the drawer as a full-width row.
+     It used to ride the topbar flex here at `min(35vw, 150px)`, which is what
+     clipped past the right viewport edge at 390px. `order` puts it above the
+     theme control without moving it in the DOM, where `margin-left: auto`
+     still needs it last so the desktop topbar layout is unchanged. */
+  .portal-nav .findcouncil { width: 100%; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 1; }
+  .portal-nav .findcouncil input { flex: 1; min-width: 0; width: auto; }
+  .portal-nav .findcouncil .typeahead-list { left: 0; right: 0; min-width: 0; }
+  /* Was `display: none` outright below 900px, with nothing replacing it --
+     a phone reader had no way to override "system" theme at all. Now it
+     sits in the offcanvas nav like any other item, below the council
+     navigator, with a top rule instead of the desktop left rule. */
+  .topbar > .theme-control { display: none; }
+  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 2; }
   .filterbar.offcanvas.is-mobile-filter { position: fixed; top: 0; right: 0; bottom: 0; visibility: hidden; transform: translateX(100%); width: min(92vw, 380px); height: 100%; flex-direction: column; }
   .filterbar.offcanvas.is-mobile-filter:not(.show) { display: none; }
   .filterbar.offcanvas.is-mobile-filter.show { visibility: visible; transform: none; }
@@ -651,6 +974,9 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .filterbar-body input { width: 100%; }
   .filters-toggle { display: inline-flex; margin: 12px 16px 0 auto; }
   .filter-summary { margin: 12px 0 -12px; padding: 0 16px; }
+  /* The kbd hint is a desktop affordance; on a phone there is no keyboard to
+     name and the topbar's width is better spent on the button's label. */
+  .palette-open kbd { display: none; }
   main { padding-top: 24px; }
   .evidence-strip-grid { grid-template-columns: 1fr 1fr; }
   .evidence-strip-head { flex-direction: column; }
@@ -662,20 +988,20 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .portal-nav { position: fixed; flex: 0 0 auto; max-width: 100vw; }
   .portal-nav:not(.show) { display: none; }
   .portal-nav .offcanvas-body { display: block; padding: 16px; }
-  .portal-nav .mainnav { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+  .portal-nav .mainnav { display: flex; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 4px; }
   .portal-nav .mainnav a { padding: 10px 12px; font-size: 15px; }
   .portal-nav .lens-menu-panel { position: static; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; max-width: 100%; margin: 4px 0 8px; box-shadow: none; }
-  .portal-nav .nav-tools { display: block; margin: 16px 0 0; padding: 12px 0 0; border-left: 0; border-top: 1px solid var(--border-subtle); }
-  .portal-nav .nav-tools a { display: block; }
-  .findcouncil { order: 3; margin-left: auto; }
-  .findcouncil input { min-width: 0; width: min(24vw, 170px); }
-  .theme-control { display: none; }
+  .portal-nav .findcouncil { width: 100%; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 1; }
+  .portal-nav .findcouncil input { flex: 1; min-width: 0; width: auto; }
+  .portal-nav .findcouncil .typeahead-list { left: 0; right: 0; min-width: 0; }
+  .topbar > .theme-control { display: none; }
+  .theme-control-mobile { display: flex; margin: 16px 0 0; padding: 12px 0 0; border-top: 1px solid var(--border-subtle); order: 2; }
 }
 
 @media (max-width: 340px) {
   .topbar { gap: 6px; padding-left: 10px; padding-right: 10px; }
   .brand-text { font-size: 16px; }
-  .findcouncil input { width: 88px; }
+  .palette-open { padding: 6px 8px; }
   .menu-toggle { padding-left: 6px; padding-right: 6px; }
 }
 
@@ -683,6 +1009,11 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .busybar-run { width: 40%; height: 100%; background: var(--accent-teal); animation: busyslide 1.1s ease-in-out infinite; }
 @keyframes busyslide { 0% { transform: translateX(-100%); } 100% { transform: translateX(350%); } }
 @media (prefers-reduced-motion: reduce) { .busybar-run { animation: none; width: 100%; opacity: 0.5; } }
+
+@media (max-width: 960px) {
+  .hero-split { grid-template-columns: 1fr; }
+  .hero-map { max-width: 320px; margin: 0 auto; }
+}
 
 @media (max-width: 720px) {
   .topbar { gap: var(--space-3); padding: var(--space-3) var(--space-4); }
@@ -708,9 +1039,9 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   color: var(--text-secondary); font-size: 14.5px; line-height: 1.6;
 }
 .noscript h1 { color: var(--text-primary); font-size: 20px; margin: 0 0 var(--space-4); }
-/* --space-6, not --space-5: there is no --space-5 token, and an undefined
- * custom property makes the whole declaration invalid, so this list had no
- * indent at all. Found while adding the API page's list beside it. */
+/* `--space-5` (20px) is a real token now (BETA-080); this list's indent no
+ * longer has to round up to --space-6 to stay valid. Kept at --space-6 so
+ * the rendered indent does not change. */
 .noscript ul { padding-left: var(--space-6); }
 .noscript li { margin-bottom: var(--space-2); }
 .noscript code { font-family: var(--mono); color: var(--accent-teal); }
@@ -780,6 +1111,17 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .claim-citations ul { list-style: none; margin: 0; padding: 0; }
 .claim-citations li { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle); }
 .claim-citations li:first-child { border-top: none; }
+
+/* Document-search result snippets (pages/documents.js). The matched terms
+   are marked with the portal's amber rather than Bootstrap's default mark
+   yellow, and the text colour is pinned dark on both themes: the highlight
+   is opaque, so it must carry its own contrast instead of inheriting a body
+   colour that goes near-white in dark mode. */
+.doc-snippet { margin: var(--space-2) 0; color: var(--text-secondary); }
+.doc-snippet mark {
+  background: var(--accent-amber); color: #08111f;
+  padding: 0 2px; border-radius: var(--radius-sm);
+}
 .citation-unresolved {
   color: var(--accent-red); font-family: var(--mono); font-size: 12.5px;
   word-break: break-all;
@@ -796,8 +1138,93 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
 .freshness-item { border-left: 3px solid var(--accent-teal); background: var(--bg-surface); padding: var(--space-3) var(--space-4); }
 .freshness-item .small { display: block; color: var(--text-secondary); }
 
-/* Print.
+/* --- command palette (js/palette.js) ---------------------------------------
  *
+ * One search box for the whole portal. The trigger sits with the council
+ * search in the topbar's right-hand group; the overlay is built lazily on
+ * first open, so a reader who never opens it pays for the button only.
+ * Class names mirror the operator UI's palette so the two feel identical to
+ * anyone who uses both; colours come from this stylesheet's own tokens so
+ * light and dark themes both hold.
+ */
+.palette-open {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: var(--bg-base); border: 1px solid var(--border-accent);
+  border-radius: var(--radius-sm); color: var(--text-secondary);
+  padding: 6px 10px; font-size: 13.5px; cursor: pointer;
+}
+.palette-open:hover { color: var(--text-primary); border-color: var(--accent-teal); }
+.palette-open kbd, .palette-esc {
+  font-family: var(--mono); font-size: 11px; color: var(--text-muted);
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  padding: 0 5px; background: var(--bg-elevated);
+}
+.palette-backdrop {
+  position: fixed; inset: 0; z-index: 100;
+  background: rgba(4, 9, 18, 0.66);
+  backdrop-filter: var(--glass-blur); -webkit-backdrop-filter: var(--glass-blur);
+  display: flex; justify-content: center; align-items: flex-start;
+  padding: 10vh var(--space-4) var(--space-8);
+  overscroll-behavior: contain;
+}
+.palette-backdrop[hidden] { display: none; }
+.palette {
+  width: min(680px, 100%);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-accent); border-radius: var(--radius-lg);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  display: flex; flex-direction: column;
+  max-height: 70vh; overflow: hidden;
+}
+.palette-head {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.palette-head input {
+  flex: 1; min-width: 0; border: 0; background: transparent;
+  color: var(--text-primary); font: inherit; font-size: 15px;
+  padding: 4px 0; outline: none;
+}
+.palette-head .search-icon { color: var(--text-muted); font-size: 15px; }
+.palette-list { overflow-y: auto; padding: var(--space-2); overscroll-behavior: contain; }
+.palette-item {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) auto;
+  gap: 10px; align-items: baseline;
+  padding: 7px var(--space-3); cursor: pointer;
+  border-left: 2px solid transparent; border-radius: var(--radius-sm);
+}
+.palette-item.active { background: var(--bg-surface); border-left-color: var(--accent-teal); }
+.palette-kind {
+  font: 700 10.5px/1.2 var(--display); text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted);
+}
+.palette-label {
+  color: var(--text-primary); font-size: 14px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* Same highlight treatment as document snippets: an opaque amber chip with
+   its own dark text, so the mark is readable on either theme. */
+.palette-label mark {
+  background: var(--accent-amber); color: #08111f;
+  padding: 0 2px; border-radius: var(--radius-sm);
+}
+.palette-detail { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.palette-empty { padding: var(--space-6) var(--space-3); text-align: center; color: var(--text-muted); font-size: 13.5px; }
+.palette-foot {
+  display: flex; gap: var(--space-4); padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--border-subtle);
+  font-size: 12px; color: var(--text-muted);
+}
+.palette-foot kbd {
+  font-family: var(--mono); font-size: 11px; margin-right: 3px;
+  border: 1px solid var(--border-subtle); border-radius: var(--radius-sm);
+  padding: 0 4px; background: var(--bg-base);
+}
+
+/* Print.
+
  * This evidence gets printed and carried into rooms, and the failure this
  * guards against is specific: a figure arriving on paper without the caveat
  * that governs it. So caveat bodies are forced open regardless of the
@@ -849,3 +1276,163 @@ html[data-bs-theme="light"] .topbar { background: rgba(244,247,251,.92); }
   .chart, .map { display: none; }
   .chart-empty { display: block; border: 1px dashed #888; }
 }
+
+/* BETA-088: evidence notebook. Named local collections of pinned items with
+ * private notes; everything is in localStorage and never leaves the browser. */
+.nb-hidden-input { display: none; }
+.nb-toolbar { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; margin-bottom: var(--space-4); }
+.nb-new { display: flex; gap: var(--space-2); }
+.nb-new-name, .nb-name { padding: var(--space-1) var(--space-2); }
+.nb-collections { display: flex; flex-direction: column; gap: var(--space-4); }
+.nb-collection { border: 1px solid var(--border-accent); border-radius: var(--radius-md); padding: var(--space-3); }
+.nb-collection-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); }
+.nb-name { font: 600 15px/1.2 var(--display, inherit); background: transparent; border: 1px solid transparent; color: inherit; }
+.nb-name:hover, .nb-name:focus { border-color: var(--border-subtle); }
+.nb-count { color: var(--text-muted); font-size: 13px; }
+.nb-items { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.nb-item { border-top: 1px solid var(--border-subtle); padding-top: var(--space-2); }
+.nb-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.nb-kind { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--accent-amber); }
+.nb-note { width: 100%; margin-top: var(--space-1); font: inherit; padding: var(--space-1) var(--space-2); }
+
+/* BETA-089: saved searches. A local list; "Check" re-runs the query and
+ * compares the count with the last-seen one. */
+.filter-save { margin-left: var(--space-2); }
+.ss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+.ss-item { border: 1px solid var(--border-subtle); border-radius: var(--radius-md); padding: var(--space-3); }
+.ss-item-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ss-name { font: 600 15px/1.2 var(--display, inherit); background: transparent; border: 1px solid transparent; color: inherit; padding: var(--space-1) var(--space-2); }
+.ss-name:hover, .ss-name:focus { border-color: var(--border-subtle); }
+.ss-new { color: var(--accent-amber); font-weight: 600; }
+
+/* BETA-092: record revision comparison. Field-aware and text-aware diffs;
+ * a source amendment and a pipeline normalisation are labelled apart. */
+.rev-form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.rev-form input { min-width: 240px; padding: var(--space-1) var(--space-2); }
+.rev-head { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: baseline; margin-bottom: var(--space-3); }
+.rev-table { width: 100%; border-collapse: collapse; }
+.rev-table th, .rev-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.rev-table tr.rev-changed { background: var(--caveat-bg); }
+.rev-class { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); }
+.rev-class-source { color: var(--accent-amber); }
+.rev-class-derived { color: var(--text-secondary); }
+.rev-elements { display: flex; flex-direction: column; gap: var(--space-2); padding-left: 0; }
+.rev-el { list-style: none; border-left: 3px solid var(--border-subtle); padding: var(--space-1) var(--space-3); }
+.rev-el-changed { border-left-color: var(--accent-amber); }
+.rev-el-added { border-left-color: #3fb27f; }
+.rev-el-removed { border-left-color: #d9534f; }
+.rev-was, .rev-now { font-size: 14px; margin-top: 2px; }
+.rev-was { opacity: .75; }
+.rev-tag { font: 700 11px/1 var(--display, inherit); color: var(--text-muted); margin-right: var(--space-1); }
+
+/* BETA-093: relationship pathfinder. Two endpoint pickers, a chain visual
+ * and a per-hop table — every hop carries its source. */
+.pf-controls { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: end; }
+.pf-endpoint { display: flex; flex-direction: column; gap: 2px; }
+.pf-label { font-size: 12px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; }
+.pf-endpoint select, .pf-endpoint input { padding: var(--space-1) var(--space-2); }
+.pf-endpoint input { min-width: 200px; }
+.pf-chain { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-3); }
+.pf-node { border: 1px solid var(--border-accent); border-radius: var(--radius-md); padding: var(--space-1) var(--space-2); }
+.pf-node-type { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent-amber); margin-right: var(--space-1); }
+.pf-arrow { color: var(--text-muted); }
+.pf-table { width: 100%; border-collapse: collapse; }
+.pf-table th, .pf-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.pf-basis { font-size: 11px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-subtle); color: var(--text-secondary); }
+
+/* BETA-097: temporal coverage navigator. A per-source year grid; a filled
+ * cell is a period held, an empty cell is "not collected" — never a zero. */
+.tl-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.tl-picker select, .tl-picker input { padding: var(--space-1) var(--space-2); }
+.tl-picker input { min-width: 200px; }
+.tl-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-1) 0; border-bottom: 1px solid var(--border-subtle); }
+.tl-row.tl-head { border-bottom: 2px solid var(--border-subtle); font-weight: 600; }
+.tl-source { flex: 0 0 220px; font-size: 14px; }
+.tl-cells { display: flex; flex-wrap: wrap; gap: 3px; }
+.tl-cell { display: inline-flex; align-items: center; justify-content: center; min-width: 26px; height: 24px; font-size: 12px; border-radius: 4px; }
+.tl-year { color: var(--text-muted); }
+.tl-held { background: var(--accent-amber); color: #08111f; font-weight: 600; text-decoration: none; }
+.tl-held:hover { filter: brightness(1.1); }
+.tl-gap { color: var(--text-muted); border: 1px dashed var(--border-subtle); }
+.tl-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.tl-chip { font-size: 12px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-accent); text-decoration: none; }
+
+/* BETA-094: visual research journey. A branching trail of visited routes;
+ * a branch indents under its parent, checkpoints carry a diamond. */
+.jr-tree { display: flex; flex-direction: column; gap: 2px; }
+.jr-branch { border-left: 1px solid var(--border-subtle); padding-left: var(--space-2); }
+.jr-node { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 2px 0; }
+.jr-node.jr-current .jr-link { font-weight: 700; }
+.jr-node.jr-current::before { content: "▸ "; color: var(--accent-amber); }
+.jr-diamond { color: var(--accent-amber); }
+.jr-checkpoint .jr-link { color: var(--accent-amber); }
+.jr-name { font-size: 12px; }
+
+/* BETA-095: entity co-occurrence explorer. Records naming two or more
+ * selected entities together; the passage is quoted verbatim. */
+.co-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.co-input { min-width: 320px; padding: var(--space-1) var(--space-2); }
+.co-result { border-left: 3px solid var(--border-accent); padding: var(--space-1) var(--space-3); margin: var(--space-2) 0; }
+.co-result-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.co-title { font-weight: 600; }
+.co-passage { margin: var(--space-1) 0; padding: var(--space-1) var(--space-3); border-left: 2px solid var(--accent-amber); font-size: 14px; }
+
+/* BETA-096: evidence discrepancy explorer. Both values shown; nothing is
+ * marked right or wrong. */
+.dx-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dx-picker select, .dx-input { padding: var(--space-1) var(--space-2); }
+.dx-input { min-width: 200px; }
+.dx-card { border: 1px solid var(--border-accent); border-radius: var(--radius-md); padding: var(--space-3); margin: var(--space-2) 0; }
+.dx-card h3 { margin: 0 0 var(--space-2); }
+.dx-table { width: 100%; border-collapse: collapse; }
+.dx-table th, .dx-table td { text-align: left; padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+.dx-agreed { margin: 0; padding-left: var(--space-4); }
+.dx-agreed li { padding: 2px 0; }
+
+/* BETA-098: contract diary. A dated agenda grouped by month, plus a small
+ * per-month event-count overview. Every date is transcribed from a notice. */
+.dy-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dy-controls select, .dy-id, .dy-year { padding: var(--space-1) var(--space-2); }
+.dy-id { min-width: 260px; }
+.dy-year { width: 120px; }
+.dy-overview { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; }
+.dy-bar { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; }
+.dy-bar-fill { width: 14px; background: var(--accent-teal, var(--accent-amber)); border-radius: 2px 2px 0 0; }
+.dy-month { margin: var(--space-3) 0; }
+.dy-month h3 { margin: 0 0 var(--space-1); }
+.dy-event { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); padding: 3px 0; border-bottom: 1px solid var(--border-subtle); border-left: 3px solid var(--border-subtle); padding-left: var(--space-2); }
+.dy-event.dy-award { border-left-color: var(--accent-amber); }
+.dy-event.dy-end { border-left-color: #d9534f; }
+.dy-event.dy-start { border-left-color: #3fb27f; }
+.dy-date { flex: 0 0 92px; }
+.dy-kind { font-size: 12px; color: var(--text-secondary); flex: 0 0 220px; }
+
+/* BETA-100: source-link resilience. State from collection-time metadata; the
+ * archive copy is provenance, not the live page. */
+.lk-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.lk-input { min-width: 340px; flex: 1 1 340px; padding: var(--space-1) var(--space-2); }
+.lk-sha { font-size: 11px; color: var(--text-muted); }
+.lk-overview { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.lk-overview li { display: flex; align-items: baseline; gap: var(--space-2); }
+
+/* BETA-099: document table extraction viewer. The grid the parser wrote,
+ * never a reconstruction. */
+.dt-controls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.dt-input { min-width: 280px; padding: var(--space-1) var(--space-2); }
+.dt-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; margin-bottom: var(--space-2); }
+.dt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.dt-item { border-left: 3px solid var(--border-subtle); padding: var(--space-1) var(--space-3); display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); }
+.dt-preview { flex-basis: 100%; }
+.dt-scroll { overflow-x: auto; }
+.dt-grid { border-collapse: collapse; font-size: 13px; }
+.dt-grid th, .dt-grid td { border: 1px solid var(--border-subtle); padding: 2px 8px; text-align: left; vertical-align: top; }
+.dt-grid th { background: var(--bg-elevated, rgba(127,127,127,0.08)); }
+.dt-md pre { white-space: pre-wrap; overflow-x: auto; }
+
+/* BETA-091: source publication calendar. The stated and observed cadences ride
+ * in their own table columns; the row tint only flags where the projected
+ * next-release date has passed, and carries no meaning on its own — the Status
+ * column states it in words. */
+.cal-row-overdue { box-shadow: inset 3px 0 0 var(--accent-amber); }
+.cal-row-due { box-shadow: inset 3px 0 0 var(--border-accent); }
+

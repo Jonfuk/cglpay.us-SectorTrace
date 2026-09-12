@@ -133,8 +133,8 @@ def _write(conn: sqlite3.Connection, pending: list[tuple[str, str]]) -> int:
     """One batch. The NULL guard is repeated in the UPDATE so a second run --
     or a run racing m01 -- cannot overwrite a value already captured."""
     conn.executemany(
-        "UPDATE contracts SET notice_web_url = ? "
-        "WHERE notice_id = ? AND notice_web_url IS NULL", pending)
+        "UPDATE contracts SET notice_web_url = %s "
+        "WHERE notice_id = %s AND notice_web_url IS NULL", pending)
     conn.commit()
     return len(pending)
 

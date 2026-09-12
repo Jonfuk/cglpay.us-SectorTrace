@@ -1,0 +1,602 @@
+from __future__ import annotations
+
+import hashlib
+import threading
+import time
+
+import pytest
+
+from pipeline.analysis import structured as structured_analysis
+from pipeline.analysis.budget import AnalysisCancelled, CallBudget, CostCeilingExceeded, run_batches
+from pipeline.analysis.domains import AnalysisDomainSpec, domain_registry
+from pipeline.analysis.graph import (
+    EDGE_TYPES,
+    NODE_LABELS,
+    exact_entity_attachment,
+    queue_release_projection,
+)
+from pipeline.analysis.lineage import paths as lineage_paths
+from pipeline.analysis.linking import link_signals
+from pipeline.analysis.models import (
+    AnalysisModelClient,
+    AnalysisModelConfigurationError,
+    AnalysisModelInvalidJSON,
+    AnalysisModelUnavailable,
+)
+from pipeline.analysis.narrative import NarrativeCandidate, candidate_to_signal, discover_themes
+from pipeline.analysis.operations import decide_proposal, detect_drift, save_proposal
+from pipeline.analysis.prevalence import diagnostics
+from pipeline.analysis.quality import ProgramMetrics, promotion_eligible
+from pipeline.analysis.releases import create_release, load_release
+from pipeline.analysis.structured import (
+    Observation,
+    anomaly,
+    categorical_transitions,
+    compare_periods,
+    comparisons_for_domain,
+    observations_from_table,
+)
+from pipeline.analysis.worker import AnalysisWorker
+from pipeline.web import analysis as analysis_admin
+
+
+def _spec(*rules: str) -> AnalysisDomainSpec:
+    return AnalysisDomainSpec("test", ("fixture",), "document_window", ("subject_id",),
+                              "SELECT 1", "test", cross_source_rules=rules,
+                              consolidation_key=("subject_id",))
+
+
+def test_domain_registry_has_complete_contracts():
+    registry = domain_registry()
+    assert {"da", "provider", "commissioning", "quality_safety", "legal_employment", "housing"} <= set(registry)
+    for spec in registry.values():
+        spec.validate()
+
+
+def test_release_freezes_model_resolution(conn, settings):
+    settings.claim_signal_scout_model = "scout-v1"
+    first = create_release(conn, settings, domains=["da"])
+    settings.claim_signal_scout_model = "scout-v2"
+    assert load_release(conn, first["release_id"])["models"]["scout"] == "scout-v1"
+
+
+def test_narrative_requires_exact_dual_grounded_evidence():
+    text = "The service reported high caseloads."
+    candidate = NarrativeCandidate("da", "workforce_strain", "caseload", "affirmed", "adverse",
+                                   "authority", "authority-1", "high caseloads", "high caseloads", "doc:1")
+    assert candidate_to_signal(candidate, release_id="r1", source_text=text, second_model=candidate)
+    assert candidate_to_signal(candidate, release_id="r1", source_text=text, second_model=None) is None
+
+
+def test_discovery_preserves_outliers_and_recurrence_bar():
+    passages = [{"text": "rare phrase", "document_id": "d1", "subject_id": "s1"}]
+    themes = discover_themes(passages)
+    assert themes[0]["outlier"] is True
+    assert themes[0]["passages"]
+
+
+def test_discovery_can_bound_evidence_without_losing_counts_or_progress():
+    passages = [{"text": "common phrase", "document_id": f"d{index}",
+                 "subject_id": f"s{index}"} for index in range(40)]
+    progress = []
+    themes = discover_themes(
+        passages, max_evidence_per_theme=3, max_evidence_total=3,
+        progress_callback=progress.append, progress_interval_seconds=0.1)
+
+    assert themes[0]["passage_count"] == 40
+    assert themes[0]["document_count"] == 40
+    assert themes[0]["subject_count"] == 40
+    assert len(themes[0]["passages"]) == 3
+    assert progress[-1] == 40
+
+
+def test_structured_comparison_and_anomaly_guards():
+    previous = Observation("metric", "r1", "authority", "a1", "vacancies", 10, "count", "2024", "2024")
+    current = Observation("metric", "r2", "authority", "a1", "vacancies", 15, "count", "2025", "2025")
+    assert compare_periods(previous, current)["percentage_change"] == 50
+    assert anomaly(10, [1, 1, 1, 1, 1])["robust_z"] is None
+    assert compare_periods(previous, Observation("metric", "r3", "authority", "a1", "vacancies", 1, "percent", "2025", "2025"))["comparable"] is False
+
+
+def test_parallel_structured_comparisons_match_serial_results():
+    observations = [
+        Observation("contracts", f"row-{subject}-{period}", "provider_id", f"provider-{subject}",
+                    "value_core", period + subject, "GBP", None, str(period))
+        for subject in range(120) for period in range(100)
+    ]
+    serial = comparisons_for_domain(observations)
+    parallel = AnalysisWorker(None, comparison_workers=2)._comparisons(observations)
+
+    def signature(item):
+        return (item["current"]["subject_id"], item["current"]["period_end"],
+                item["absolute_change"], item["percentage_change"])
+
+    assert sorted(map(signature, parallel)) == sorted(map(signature, serial))
+
+
+def test_postgres_schema_probe_uses_information_schema():
+    class Cursor:
+        def fetchall(self):
+            return [{"column_name": "supplier_id"}, {"column_name": "date_start"}]
+
+    class PostgresLikeConnection:
+        def __init__(self):
+            self.sql = None
+            self.parameters = None
+
+        def execute(self, sql, parameters):
+            self.sql = sql
+            self.parameters = parameters
+            return Cursor()
+
+    conn = PostgresLikeConnection()
+    assert structured_analysis._columns(conn, "contracts") == {"supplier_id", "date_start"}
+    assert "information_schema.columns" in conn.sql
+    assert conn.parameters == ("contracts",)
+
+
+def test_categorical_transitions_keep_states_and_do_not_calculate():
+    changes = categorical_transitions(
+        [{"location_id": "l1", "provider_key": "p1", "overall_rating": "Good", "rated": "2024-01-01"},
+         {"location_id": "l2", "provider_key": "p1", "overall_rating": "Requires improvement", "rated": "2025-01-01"}],
+        subject_key="provider_key", metric="overall_rating", period_key="rated",
+        source_table="cqc_locations", source_id_key="location_id", subject_type="provider_id")
+    assert changes[0]["previous"]["value"] == "Good"
+    assert changes[0]["current"]["value"] == "Requires improvement"
+    assert changes[0]["absolute_change"] is None
+
+
+def test_links_require_canonical_identity_and_block_causal_explanation():
+    spec = _spec("entity_overlap")
+    left = {"signal_id": "a", "release_id": "r", "domain_id": "test", "subject_type": "authority", "subject_id": "a1", "period_end": "2025-01-01"}
+    right = {**left, "signal_id": "b", "period_end": "2025-01-02"}
+    assert link_signals(left, right, left_spec=spec, right_spec=spec, relationship_type="entity_overlap")
+    assert link_signals(left, {**right, "subject_id": "a2"}, left_spec=spec, right_spec=spec, relationship_type="entity_overlap") is None
+    try:
+        link_signals(left, right, left_spec=spec, right_spec=spec, relationship_type="entity_overlap", explanation="caused the increase")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("causal explanation was accepted")
+
+
+def test_drift_is_proposal_only():
+    proposals = detect_drift({"expected_schema": {"value": "number"}, "observed_schema": {"value": "text"}, "extractor_agreement": .90}, {"extractor_agreement": .99})
+    assert {item["proposal_type"] for item in proposals} >= {"schema_drift", "extractor_agreement_drift"}
+
+
+def test_table_name_health_marker_is_not_schema_drift():
+    assert not any(item["proposal_type"] == "schema_drift" for item in detect_drift(
+        {"expected_schema": {"table": "committee_papers"},
+         "observed_schema": {"full_text": "25", "meeting_date": "25"}}))
+
+
+def test_model_unavailability_is_recorded(conn, settings, monkeypatch):
+    release = create_release(conn, settings, domains=["da"])
+    original_import = __import__("builtins").__import__
+
+    def no_openai(name, *args, **kwargs):
+        if name == "openai":
+            raise ImportError("test missing extra")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", no_openai)
+    client = AnalysisModelClient(settings, release_id=release["release_id"], run_id="run-model-error",
+                                 models={"scout": "test/model"}, conn=conn)
+    with pytest.raises(AnalysisModelUnavailable, match="requires the assistant extra"):
+        client.generate_json("test prompt", role="scout", domain_id="da", window_id="window-1")
+
+    row = conn.execute("SELECT status, model_id, error_detail FROM analysis_model_calls").fetchone()
+    assert row["status"] == "unavailable"
+    assert row["model_id"] == "test/model"
+    assert row["error_detail"] == "analysis model support requires the assistant extra"
+
+
+def test_permanent_analysis_configuration_error_fails_fast(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    client = AnalysisModelClient(settings, release_id=release["release_id"], run_id="run-config-error",
+                                 models={"scout": "test/model"}, conn=conn)
+    with pytest.raises(AnalysisModelConfigurationError, match="assistant extra"):
+        client.generate_json("test prompt", role="scout", domain_id="da", window_id="window-1")
+
+
+def test_analysis_cache_reuses_successful_fallback_model(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    prompt = "cached fallback prompt"
+    client = AnalysisModelClient(
+        settings, release_id=release["release_id"], run_id="run-cache-hit",
+        models={"scout": "primary/model"}, fallback_models={"scout": ["backup/model"]}, conn=conn)
+    request_sha = client.request_sha(prompt, role="scout")
+    conn.execute(
+        "INSERT INTO analysis_model_response_cache (request_sha256, response_sha256, response_json, "
+        "requested_model, actual_model, provider_id, created_at) VALUES (%s, %s, %s, "
+        "'primary/model', 'backup/model', 'provider-1', %s)",
+        (request_sha, hashlib.sha256(b'{"signal": null}').hexdigest(),
+         '{"signal": null}', "2025-01-01T00:00:00+00:00"))
+    conn.commit()
+
+    second_release = create_release(conn, settings, domains=["da"])
+    client = AnalysisModelClient(
+        settings, release_id=second_release["release_id"], run_id="run-cache-hit",
+        models={"scout": "primary/model"}, fallback_models={"scout": ["backup/model"]}, conn=conn)
+    assert client.generate_json(prompt, role="scout", domain_id="da", window_id="window-2") == {"signal": None}
+    assert client.last_cached is True
+    row = conn.execute(
+        "SELECT model_id, cached, cost_micros, request_sha256, response_cache_key "
+        "FROM analysis_model_calls "
+        "WHERE run_id = 'run-cache-hit' ORDER BY created_at DESC LIMIT 1").fetchone()
+    assert dict(row) == {"model_id": "backup/model", "cached": 1, "cost_micros": 0,
+                         "request_sha256": request_sha, "response_cache_key": request_sha}
+
+
+def test_analysis_release_captures_model_fallback_order(conn, settings, monkeypatch):
+    monkeypatch.setattr(settings, "assistant_needle_model", "x/scout", raising=False)
+    monkeypatch.setattr(settings, "assistant_needle_fallback_models",
+                        "x/scout-backup,x/scout-last", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_model", "x/extractor", raising=False)
+    monkeypatch.setattr(settings, "assistant_lfm_fallback_models",
+                        "x/extractor-backup,x/extractor-last", raising=False)
+
+    release = create_release(conn, settings, domains=["da"])
+
+    assert release["models"]["scout"] == "x/scout"
+    assert release["model_fallbacks"]["scout"] == ["x/scout-backup", "x/scout-last"]
+    assert release["model_fallbacks"]["extractor"] == [
+        "x/extractor-backup", "x/extractor-last"]
+
+
+def test_invalid_json_is_retried_once(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+
+    class RetryClient:
+        def __init__(self, connection):
+            self.conn = connection
+            self.calls = 0
+            self.last_cost_micros = 3
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            self.calls += 1
+            if self.calls == 1:
+                raise AnalysisModelInvalidJSON("malformed test response")
+            return {"signal": None}
+
+    worker = AnalysisWorker(settings, worker_id="retry-fixture-worker")
+    worker._budget = CallBudget()
+    worker._current_run_id = started["run_id"]
+    client = RetryClient(conn)
+    result = worker._model_call_with_json_retry(client, "test prompt", role="scout", domain_id="da",
+                                                window_id="window-1", run_id=started["run_id"])
+    assert result == {"signal": None}
+    assert client.calls == 2
+    assert worker._budget.calls == 1
+
+
+def test_graph_projection_isolated_from_canonical_claims():
+    assert "Claim" not in NODE_LABELS
+    assert "SUPPORTED_BY" not in EDGE_TYPES
+    assert exact_entity_attachment("entity-1", [{"exact": True}]) == "entity-1"
+    assert exact_entity_attachment("entity-1", [{"exact": False}]) is None
+
+
+def test_signal_graph_rebuild_is_durable_and_isolated(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    result = queue_release_projection(conn, release["release_id"])
+    assert result["status"] == "queued"
+    assert conn.execute("SELECT COUNT(*) AS count FROM signal_graph_projection_queue WHERE release_id = %s",
+                        (release["release_id"],)).fetchone()["count"] == 1
+
+
+def test_admin_analysis_read_models_are_admin_only(conn):
+    assert analysis_admin.overview(conn)["counts"]["automated_signals"] == 0
+    assert analysis_admin.graph(conn)["canonical_claim_isolation"] is True
+
+
+def test_adaptation_proposals_are_visible_and_decidable(conn, settings):
+    release = create_release(conn, settings, domains=["da"])
+    proposal_id = save_proposal(conn, {"proposal_type": "parse_rate_drift", "trigger": {"percentage_points": -4.5}},
+                                release_id=release["release_id"], domain_id="da")
+    conn.commit()
+
+    proposals = analysis_admin.operations(conn)["proposals"]
+    proposal = next(item for item in proposals if item["proposal_id"] == proposal_id)
+    assert proposal["release_id"] == release["release_id"]
+    assert proposal["status"] == "pending"
+    assert proposal["trigger_json"] == '{"percentage_points": -4.5}'
+
+    decide_proposal(conn, proposal_id, status="deferred", admin_reason="Review after the next pilot.")
+    conn.commit()
+    decided = next(item for item in analysis_admin.operations(conn)["proposals"] if item["proposal_id"] == proposal_id)
+    assert decided["status"] == "deferred"
+    assert decided["admin_reason"] == "Review after the next pilot."
+
+
+def test_analysis_run_controls_are_durable_and_resumable(conn, settings):
+    started = analysis_admin.start_run(
+        conn, settings, {"domains": ["da"], "run_kind": "pilot", "cost_ceiling_micros": 2500})
+    assert started["status"] == "queued"
+    assert started["run_kind"] == "pilot"
+    assert started["cost_ceiling_micros"] == 2500
+    assert started["domains"][0]["status"] == "pending"
+    assert analysis_admin.runs(conn)["runs"][0]["run_id"] == started["run_id"]
+
+    cancelled = analysis_admin.cancel_run(conn, started["run_id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["domains"][0]["status"] == "cancelled"
+
+    resumed = analysis_admin.resume_run(conn, started["run_id"])
+    assert resumed["status"] == "queued"
+    assert resumed["domains"][0]["status"] == "pending"
+
+
+def test_analysis_run_rejects_empty_domain_selection(conn, settings):
+    with pytest.raises(ValueError, match="at least one"):
+        analysis_admin.start_run(conn, settings, {"domains": []})
+
+
+def test_analysis_worker_claims_and_completes_structured_run(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    result = AnalysisWorker(settings, poll_seconds=.1, batch_size=2,
+                            worker_id="test-analysis-worker").run_once()
+    assert result["run_id"] == started["run_id"]
+    assert result["status"] == "complete"
+    assert result["domains"][0]["status"] == "complete"
+    assert analysis_admin.worker_status(conn)["worker_id"] == "test-analysis-worker"
+
+
+def test_analysis_worker_failure_is_durable_and_marks_active_domain_failed(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    worker = AnalysisWorker(settings, worker_id="test-analysis-worker")
+    worker._fail(started["run_id"], RuntimeError("database probe failed"))
+
+    failed = analysis_admin.run(conn, started["run_id"])
+    assert failed["status"] == "failed"
+    assert failed["error_detail"] == "RuntimeError: database probe failed"
+    assert failed["domains"][0]["status"] == "failed"
+    assert failed["domains"][0]["error_detail"] == "RuntimeError: database probe failed"
+
+
+def test_analysis_worker_writes_exact_structured_comparison(conn, settings):
+    common = {
+        "currency": "GBP", "source_url": "https://example.test/contract",
+        "retrieved_at": "2025-01-01T00:00:00+00:00", "http_status": 200,
+        "source_system": "fixture", "payload_sha256": "hash",
+    }
+    for notice_id, value, period in (("n1", 100, "2024-01-01"), ("n2", 125, "2025-01-01")):
+        conn.execute(
+            "INSERT INTO contracts (notice_id, supplier_id, ocid, value_core, currency, date_start, "
+            "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+            "VALUES (%s, 'provider-1', %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+            (notice_id, f"ocid-{notice_id}", value, common["currency"], period,
+             common["source_url"], common["retrieved_at"], common["http_status"],
+             common["source_system"], common["payload_sha256"]))
+    observations = observations_from_table(conn, "contracts")
+    assert comparisons_for_domain(observations)[0]["absolute_change"] == 25
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="structured-fixture-worker").run_once()
+    assert result["run_id"] == started["run_id"]
+    assert conn.execute("SELECT COUNT(*) AS count FROM structured_signals WHERE signal_id IN "
+                        "(SELECT signal_id FROM automated_signals WHERE release_id = %s)",
+                        (started["release_id"],)).fetchone()["count"] == 1
+    signal_id = conn.execute(
+        "SELECT signal_id FROM automated_signals WHERE release_id = %s",
+        (started["release_id"],)).fetchone()["signal_id"]
+    trace = lineage_paths(conn, signal_id)
+    assert {row["used_object_kind"] for row in trace if row["used_object_kind"]} >= {
+        "retrieval", "source"}
+
+
+def test_analysis_worker_processes_narrative_domain(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, poll_seconds=.1, batch_size=2,
+                            worker_id="test-narrative-worker").run_once()
+    assert result["run_id"] == started["run_id"]
+    assert result["status"] == "complete"
+    assert result["domains"][0]["status"] == "complete"
+
+
+def test_analysis_worker_extracts_dual_model_narrative_signal(conn, settings):
+    now = "2025-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
+        "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
+        "VALUES ('evidence-analysis-1', 'fixture', 'https://example.test/doc', %s, 200, 'hash-analysis', "
+        "'/data/doc.pdf', 'application/pdf', 10, 'committee_papers', 'authority-1', %s)", (now, now))
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
+        "created_at, updated_at) VALUES ('document-analysis-1', 'evidence-analysis-1', 'committee_papers', "
+        "'authority-1', 'REPORT', %s, %s)", (now, now))
+    conn.execute(
+        "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
+        "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
+        "('version-analysis-1', 'document-analysis-1', 'fixture', '1', '1', 'hash', 'complete', 1, %s)", (now,))
+    conn.execute(
+        "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
+        "text_sha256) VALUES ('element-analysis-1', 'version-analysis-1', 'PARAGRAPH', 1, "
+        "'The service reported high caseloads.', 'text-hash')")
+
+    class FakeModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            self.last_cost_micros = 7
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            return {"signal": {"signal_type": "workforce_strain", "subtype": "caseload",
+                                "assertion_status": "affirmed", "direction": "adverse",
+                                "evidence_quote": "high caseloads", "scope_quote": "high caseloads",
+                                "period_start": None, "period_end": None,
+                                "planned_or_hypothetical": False}}
+
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="model-fixture-worker",
+                            model_client_factory=FakeModelClient).run_once()
+    assert result["run_id"] == started["run_id"]
+    assert result["cost_micros"] == 14
+    signal = conn.execute("SELECT signal_type, direction, human_verified FROM automated_signals "
+                          "WHERE release_id = %s", (started["release_id"],)).fetchone()
+    assert dict(signal) == {"signal_type": "workforce_strain", "direction": "adverse", "human_verified": 0}
+    prevalence = conn.execute("SELECT positives, subjects, suppressed FROM analysis_prevalence_diagnostics "
+                              "WHERE release_id = %s", (started["release_id"],)).fetchone()
+    assert dict(prevalence) == {"positives": 1, "subjects": 1, "suppressed": 1}
+
+
+def test_analysis_worker_pauses_narrative_run_when_models_are_exhausted(conn, settings):
+    now = "2025-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO evidence_records (evidence_id, source_system, source_url, retrieved_at, http_status, "
+        "payload_sha256, raw_object_path, mime_type, content_length, source_table, source_key, created_at) "
+        "VALUES ('evidence-analysis-outage', 'fixture', 'https://example.test/outage', %s, 200, 'hash-outage', "
+        "'/data/outage.pdf', 'application/pdf', 10, 'committee_papers', 'authority-outage', %s)", (now, now))
+    conn.execute(
+        "INSERT INTO document_records (document_id, evidence_id, source_table, source_key, document_type, "
+        "created_at, updated_at) VALUES ('document-analysis-outage', 'evidence-analysis-outage', "
+        "'committee_papers', 'authority-outage', 'REPORT', %s, %s)", (now, now))
+    conn.execute(
+        "INSERT INTO document_versions (document_version_id, document_id, parser_name, parser_version, "
+        "parse_schema_version, config_hash, status, is_active, created_at) VALUES "
+        "('version-analysis-outage', 'document-analysis-outage', 'fixture', '1', '1', 'hash', 'complete', 1, %s)", (now,))
+    conn.execute(
+        "INSERT INTO document_elements (document_element_id, document_version_id, element_type, sequence, text, "
+        "text_sha256) VALUES ('element-analysis-outage', 'version-analysis-outage', 'PARAGRAPH', 1, "
+        "'The service reported high caseloads.', 'text-hash-outage')")
+
+    class UnavailableModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            self.last_cost_micros = 0
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            raise AnalysisModelUnavailable("all configured providers are rate limited")
+
+    settings.analysis_retry_cooldown_seconds = 300
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    result = AnalysisWorker(settings, batch_size=2, worker_id="outage-fixture-worker",
+                            model_client_factory=UnavailableModelClient).run_once()
+
+    assert result["run_id"] == started["run_id"]
+    assert result["status"] == "paused"
+    assert result["domains"][0]["status"] == "paused"
+    assert result["next_retry_at"]
+    assert result["domains"][0]["next_retry_at"]
+    assert result["completed_domains"] == 0
+
+
+def test_analysis_worker_limits_narrative_model_concurrency_to_four(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    state = {"active": 0, "maximum": 0, "calls": 0, "clients": 0}
+    state_lock = threading.Lock()
+
+    class ConcurrentModelClient:
+        def __init__(self, settings, **kwargs):
+            self.conn = kwargs["conn"]
+            assert self.conn is None
+            with state_lock:
+                state["clients"] += 1
+            self.last_cost_micros = 0
+            self.last_cached = False
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            with state_lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+                state["calls"] += 1
+            time.sleep(0.03)
+            with state_lock:
+                state["active"] -= 1
+            return {"signal": None}
+
+    worker = AnalysisWorker(settings, worker_id="concurrency-fixture-worker",
+                            model_client_factory=ConcurrentModelClient)
+    worker._budget = CallBudget()
+    worker._current_run_id = started["run_id"]
+    passages = [{"text": f"passage {index}", "subject_id": f"subject-{index}",
+                 "subject_type": "authority", "evidence_ref": f"element-{index}"}
+                for index in range(8)]
+    assert worker._extract_narrative_signals(
+        conn, started["run_id"], "da", domain_registry()["da"], started["release_id"], passages)
+    assert state == {"active": 0, "maximum": 4, "calls": 8, "clients": 4}
+
+
+def test_hard_cost_ceiling_forces_one_reused_model_client(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["da"]})
+    state = {"active": 0, "maximum": 0, "calls": 0, "clients": 0}
+    state_lock = threading.Lock()
+
+    class SerialModelClient:
+        def __init__(self, settings, **kwargs):
+            assert kwargs["conn"] is None
+            self.last_cost_micros = 0
+            self.last_cached = False
+            with state_lock:
+                state["clients"] += 1
+
+        def generate_json(self, prompt, *, role, domain_id, window_id):
+            with state_lock:
+                state["active"] += 1
+                state["maximum"] = max(state["maximum"], state["active"])
+                state["calls"] += 1
+            time.sleep(0.01)
+            with state_lock:
+                state["active"] -= 1
+            return {"signal": None}
+
+    settings.analysis_model_concurrency = 4
+    worker = AnalysisWorker(
+        settings, worker_id="ceiling-fixture-worker", model_client_factory=SerialModelClient)
+    worker._budget = CallBudget(ceiling_micros=100)
+    worker._current_run_id = started["run_id"]
+    passages = [{"text": f"passage {index}", "subject_id": f"subject-{index}",
+                 "subject_type": "authority", "evidence_ref": f"element-{index}"}
+                for index in range(5)]
+    assert worker._extract_narrative_signals(
+        conn, started["run_id"], "da", domain_registry()["da"],
+        started["release_id"], passages)
+    assert state == {"active": 0, "maximum": 1, "calls": 5, "clients": 1}
+
+
+def test_analysis_worker_recovers_stale_and_due_paused_runs(conn, settings):
+    started = analysis_admin.start_run(conn, settings, {"domains": ["procurement"]})
+    conn.execute(
+        "UPDATE analysis_runs SET status = 'running', updated_at = '2000-01-01T00:00:00+00:00' "
+        "WHERE run_id = %s", (started["run_id"],))
+    conn.execute(
+        "UPDATE analysis_domain_runs SET status = 'running' WHERE run_id = %s", (started["run_id"],))
+    conn.commit()
+
+    worker = AnalysisWorker(settings, worker_id="recovery-fixture-worker")
+    assert worker._claim() is None
+    stale = analysis_admin.run(conn, started["run_id"])
+    assert stale["status"] == "paused"
+    assert stale["domains"][0]["status"] == "paused"
+
+    conn.execute(
+        "UPDATE analysis_runs SET next_retry_at = '2000-01-01T00:00:00+00:00' WHERE run_id = %s",
+        (started["run_id"],))
+    conn.commit()
+    assert worker._claim() == started["run_id"]
+    recovered = analysis_admin.run(conn, started["run_id"])
+    assert recovered["status"] == "running"
+    assert recovered["automatic_retry_count"] == 1
+    assert recovered["domains"][0]["status"] == "pending"
+
+
+def test_batch_budget_stops_at_ceiling_and_boundary():
+    budget = CallBudget(ceiling_micros=10)
+    budget.before_call(10)
+    budget.record(10)
+    with pytest.raises(CostCeilingExceeded):
+        budget.before_call(1)
+    budget = CallBudget()
+    budget.cancel()
+    with pytest.raises(AnalysisCancelled):
+        run_batches([1, 2], lambda batch: batch, budget=budget)
+
+
+def test_program_and_prevalence_gates_are_conservative():
+    baseline = ProgramMetrics(.70, 1.0, 0, .90)
+    assert promotion_eligible(ProgramMetrics(.75, 1.0, 0, .89), baseline)
+    assert not promotion_eligible(ProgramMetrics(.75, .99, 0, .89), baseline)
+    assert diagnostics(positives=49, negatives=50, subjects=10, pacc=.5, emq=.5).suppressed
+    assert diagnostics(positives=50, negatives=50, subjects=10, pacc=.02, emq=.01).continue_exploration

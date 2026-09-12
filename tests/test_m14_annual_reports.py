@@ -133,7 +133,7 @@ def _seed(conn, topic, matched):
     conn.execute(
         "INSERT INTO provider_report_disclosure (provider_key, financial_year_end, topic, "
         "matched, pages_matched, search_terms, source_url, retrieved_at, http_status, "
-        "source_system, payload_sha256) VALUES ('change_grow_live','2025-03-31',?,?,0,'a, b',"
+        "source_system, payload_sha256) VALUES ('change_grow_live','2025-03-31',%s,%s,0,'a, b',"
         "'u','t',200,'s','h')", (topic, matched))
 
 

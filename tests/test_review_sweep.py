@@ -19,17 +19,17 @@ def add_report(conn, ref, concerns=None):
     conn.execute(
         "INSERT INTO pfd_reports (report_ref, report_url, matters_of_concern, "
         "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, 'https://judiciary.uk/x', '2026-08-13T00:00:00Z', "
+        "VALUES (%s, %s, %s, 'https://judiciary.uk/x', '2026-08-13T00:00:00Z', "
         "200, 'm08', 'h')", (ref, f"https://judiciary.uk/{ref}", concerns))
 
 
 def add_item(conn, ref, status="pending", item_type="pfd_concerns_in_pdf_only"):
     conn.execute(
         "INSERT INTO review_queue (module, item_type, raw_value, context_json, "
-        "status, created_at) VALUES ('m08_pfd_reports', ?, ?, '{}', ?, "
+        "status, created_at) VALUES ('m08_pfd_reports', %s, %s, '{}', %s, "
         "'2026-08-13T00:00:00Z')", (item_type, ref, status))
-    return conn.execute("SELECT id FROM review_queue WHERE raw_value = ?",
-                         (ref,)).fetchone()[0]
+    return conn.execute("SELECT id FROM review_queue WHERE raw_value = %s",
+                         (ref,)).fetchone().values().__iter__().__next__()
 
 
 @pytest.fixture
@@ -46,8 +46,8 @@ def queued(conn):
 
 
 def statuses(conn):
-    return dict(conn.execute(
-        "SELECT raw_value, status FROM review_queue").fetchall())
+    return {row["raw_value"]: row["status"] for row in conn.execute(
+        "SELECT raw_value, status FROM review_queue")}
 
 
 # --- what it closes ------------------------------------------------------------
@@ -84,14 +84,14 @@ def test_it_is_idempotent(queued):
 
     assert (first, second) == (1, 0)
     assert queued.execute(
-        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 1
+        "SELECT COUNT(*) FROM review_resolutions").fetchone().values().__iter__().__next__() == 1
 
 
 def test_it_counts_and_records_only_successful_conditional_updates(queued, monkeypatch):
     """A stale/duplicate match must not create an audit row for an update that
     did not actually move a pending item to answered."""
     item_id = queued.execute(
-        "SELECT id FROM review_queue WHERE raw_value = '2026-0001'").fetchone()[0]
+        "SELECT id FROM review_queue WHERE raw_value = '2026-0001'").fetchone().values().__iter__().__next__()
     monkeypatch.setattr(review_sweep, "RULES", {
         "duplicate_match": {
             "module": "test",
@@ -106,7 +106,7 @@ def test_it_counts_and_records_only_successful_conditional_updates(queued, monke
     assert result["total"] == 1
     assert queued.execute(
         "SELECT COUNT(*) FROM review_resolutions WHERE rule = 'duplicate_match'"
-    ).fetchone()[0] == 1
+    ).fetchone().values().__iter__().__next__() == 1
 
 
 # --- what it refuses to touch --------------------------------------------------
@@ -119,7 +119,7 @@ def test_it_never_touches_a_decision_a_person_made(queued):
 
     assert statuses(queued)["2026-0003"] == "approved"
     assert queued.execute(
-        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 1
+        "SELECT COUNT(*) FROM review_resolutions").fetchone().values().__iter__().__next__() == 1
 
 
 def test_it_does_not_touch_other_item_types(conn):
@@ -159,7 +159,7 @@ def test_a_dry_run_reports_without_closing(queued):
     assert result["dry_run"] is True
     assert statuses(queued)["2026-0001"] == "pending"
     assert queued.execute(
-        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM review_resolutions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_preview_changes_nothing(queued):
@@ -178,7 +178,7 @@ def test_a_rule_can_be_undone_in_one_operation(queued):
     assert reopened == 1
     assert statuses(queued)["2026-0001"] == "pending"
     assert queued.execute(
-        "SELECT COUNT(*) FROM review_resolutions").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM review_resolutions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_reopening_does_not_disturb_a_human_decision(queued):
@@ -243,7 +243,7 @@ def test_the_registry_rule_records_the_url_it_answered_with(conn):
     review_sweep.sweep(conn, rule="committee_url_in_registry")
 
     evidence = conn.execute(
-        "SELECT evidence FROM review_resolutions").fetchone()[0]
+        "SELECT evidence FROM review_resolutions").fetchone().values().__iter__().__next__()
     assert AUTHORITY_WEBSITES[known].committee_url in evidence
 
 
@@ -295,7 +295,7 @@ def test_the_website_rule_records_the_url_and_its_source(conn):
     review_sweep.sweep(conn, rule="authority_website_available")
 
     evidence = conn.execute(
-        "SELECT evidence FROM review_resolutions").fetchone()[0]
+        "SELECT evidence FROM review_resolutions").fetchone().values().__iter__().__next__()
     assert AUTHORITY_WEBSITES[known].base_url in evidence
     assert "registry" in evidence
 
@@ -313,13 +313,13 @@ def test_the_website_rule_is_a_single_condition_not_a_source_check(conn, setting
         "INSERT INTO authorities (ons_code, name, type, active_from, "
         "first_seen_vintage, last_seen_vintage, source_url, retrieved_at, "
         "http_status, source_system, payload_sha256) "
-        "VALUES (?, 'Testshire', 'utla', '2023-01-01', '2023', '2026', "
+        "VALUES (%s, 'Testshire', 'utla', '2023-01-01', '2023', '2026', "
         "'https://example.com/spine', '2026-01-01T00:00:00+00:00', 200, "
         "'test', 'abc')", (known,))
     conn.execute(
         "INSERT INTO authority_foi_profiles (ons_code, authority_name, "
         "home_page_url, source_url, retrieved_at, http_status, source_system, "
-        "payload_sha256) VALUES (?, 'Testshire', 'https://www.testshire.gov.uk', "
+        "payload_sha256) VALUES (%s, 'Testshire', 'https://www.testshire.gov.uk', "
         "'https://register.example', '2026-08-13T00:00:00Z', 200, 'm15', 'h')",
         (known,))
     conn.commit()
@@ -332,6 +332,6 @@ def test_the_website_rule_is_a_single_condition_not_a_source_check(conn, setting
     assert result["closed"]["authority_website_available"] == 1
     assert statuses(conn)[known] == "answered"
     evidence = conn.execute(
-        "SELECT evidence FROM review_resolutions").fetchone()[0]
+        "SELECT evidence FROM review_resolutions").fetchone().values().__iter__().__next__()
     assert "testshire.gov.uk" in evidence
     assert "foi_profile" in evidence

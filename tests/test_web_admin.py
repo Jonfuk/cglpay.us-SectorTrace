@@ -6,6 +6,15 @@ starts a crawl. The tests that matter are therefore about what it refuses --
 a second concurrent run, a limit of zero, an unparseable date, an unknown
 module -- and about the run it does start being the same run the CLI would
 have started, rather than a second implementation that drifts.
+
+Since the Phase 5 worker cutover (CLAUDE.md settled decision 10),
+`POST /api/admin/run` only *enqueues* -- it writes a `worker_jobs` row and
+returns, and nothing in this process ever executes it. `run_one_worker_cycle`
+below is what actually runs a queued job in these tests: one synchronous
+claim-execute-checkpoint-finish cycle on the calling thread, which is exactly
+what `pipeline.worker.PipelineWorker.run_once()` does for a real deployment's
+worker process -- no real background process, no sleeping, no polling loop
+with a timeout, so the suite stays fast and deterministic.
 """
 from __future__ import annotations
 
@@ -22,6 +31,7 @@ from pipeline.registry import MODULE_REGISTRY, resolve_run_order, resolve_run_wa
 from pipeline.web import admin
 from pipeline.web.jobs import Job, JobError, JobRegistry
 from pipeline.web.server import build_server
+from pipeline.worker import PipelineWorker
 
 
 @pytest.fixture
@@ -63,14 +73,23 @@ def post(client, path, body):
 
 
 def wait_for(predicate, timeout=10.0):
-    """Poll until true. Jobs are threads; the alternative is a sleep long
-    enough to be slow and short enough to be flaky."""
+    """Poll until true. A `ThreadStrategy` job (check, export) still finishes
+    on a background thread of the same process; the alternative is a sleep
+    long enough to be slow and short enough to be flaky."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if predicate():
             return True
         time.sleep(0.02)
     return False
+
+
+def run_one_worker_cycle(settings) -> dict | None:
+    """Claim and fully execute exactly one enqueued pipeline run, synchronously,
+    standing in for the separate `pipeline worker run` process a real
+    deployment would have polling the queue. Returns None if nothing was
+    queued."""
+    return PipelineWorker(settings, lease_seconds=30).run_once()
 
 
 @pytest.fixture
@@ -214,14 +233,14 @@ def test_a_run_cannot_be_started_by_a_get(client, fake_module):
 # --- running --------------------------------------------------------------------
 
 
-def test_a_run_executes_the_module_and_reports_what_it_did(client, fake_module, conn):
+def test_a_run_executes_the_module_and_reports_what_it_did(client, fake_module, conn, settings):
     started = post(client, "/api/admin/run", {"module": "a_fake"})
     assert started.status_code == 200
     job_id = started.json()["id"]
-    assert started.json()["state"] == "running"
+    assert started.json()["state"] == "running"  # queued reads as running externally
 
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running"), "the job never finished"
+    result = run_one_worker_cycle(settings)
+    assert result == {"job_id": str(job_id), "status": "finished"}
 
     finished = client.get(f"/api/admin/jobs/{job_id}").json()
     assert finished["state"] == "finished"
@@ -232,29 +251,26 @@ def test_a_run_executes_the_module_and_reports_what_it_did(client, fake_module, 
 
     # And it wrote: a run from the browser is a real run.
     assert conn.execute(
-        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone()[0] == 1
+        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone().values().__iter__().__next__() == 1
 
 
-def test_a_dry_run_rolls_back_what_it_did(client, fake_module, conn):
-    job_id = post(client, "/api/admin/run",
-                   {"module": "a_fake", "dry_run": True}).json()["id"]
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running")
+def test_a_dry_run_rolls_back_what_it_did(client, fake_module, conn, settings):
+    post(client, "/api/admin/run", {"module": "a_fake", "dry_run": True})
+    run_one_worker_cycle(settings)
 
     assert fake_module, "a dry run still runs the module"
     assert conn.execute(
-        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone()[0] == 0
+        "SELECT COUNT(*) FROM module_cursors WHERE module = 'a_fake'").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failing_module_fails_its_job_without_taking_the_server_down(
-        client, monkeypatch):
+        client, monkeypatch, settings):
     def boom(ctx):
         raise RuntimeError("the source moved")
 
     monkeypatch.setitem(MODULE_REGISTRY, "a_boom", boom)
     job_id = post(client, "/api/admin/run", {"module": "a_boom"}).json()["id"]
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running")
+    run_one_worker_cycle(settings)
 
     finished = client.get(f"/api/admin/jobs/{job_id}").json()
     # The job completed; the *module* failed, and says so in the summary the
@@ -265,10 +281,9 @@ def test_a_failing_module_fails_its_job_without_taking_the_server_down(
     assert client.get("/api/overview").status_code == 200, "the server survived"
 
 
-def test_the_log_carries_what_the_module_reported(client, fake_module):
+def test_the_log_carries_what_the_module_reported(client, fake_module, settings):
     job_id = post(client, "/api/admin/run", {"module": "a_fake"}).json()["id"]
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running")
+    run_one_worker_cycle(settings)
 
     text = " ".join(line["text"] for line
                      in client.get(f"/api/admin/jobs/{job_id}").json()["log"])
@@ -276,10 +291,9 @@ def test_the_log_carries_what_the_module_reported(client, fake_module):
     assert "a_fake" in text
 
 
-def test_the_log_is_delivered_incrementally_by_index(client, fake_module):
+def test_the_log_is_delivered_incrementally_by_index(client, fake_module, settings):
     job_id = post(client, "/api/admin/run", {"module": "a_fake"}).json()["id"]
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running")
+    run_one_worker_cycle(settings)
 
     everything = client.get(f"/api/admin/jobs/{job_id}").json()
     assert everything["log"][0]["i"] == 0
@@ -299,11 +313,13 @@ def test_a_missing_job_is_a_404(client):
     assert client.get("/api/admin/jobs/999").status_code == 404
 
 
-def test_jobs_lists_them_newest_first(client, fake_module):
+def test_jobs_lists_them_newest_first(client, fake_module, settings):
     first = post(client, "/api/admin/run", {"module": "a_fake"}).json()["id"]
-    assert wait_for(lambda: client.get("/api/admin/jobs").json()["running"] is None)
+    run_one_worker_cycle(settings)
+    assert client.get("/api/admin/jobs").json()["running"] is None
     second = post(client, "/api/admin/run", {"module": "a_fake"}).json()["id"]
-    assert wait_for(lambda: client.get("/api/admin/jobs").json()["running"] is None)
+    run_one_worker_cycle(settings)
+    assert client.get("/api/admin/jobs").json()["running"] is None
 
     listed = client.get("/api/admin/jobs").json()
     assert [job["id"] for job in listed["jobs"]][:2] == [second, first]
@@ -314,28 +330,28 @@ def test_jobs_lists_them_newest_first(client, fake_module):
 # --- one at a time --------------------------------------------------------------
 
 
-def test_a_second_run_is_refused_while_one_is_going(client, monkeypatch):
-    """Not queued. The warehouse has one write slot, so a second run would
-    wait on the first anyway, and two runs against the same public sources at
-    once is what the rate limit exists to prevent."""
-    release = threading.Event()
+def test_a_second_run_is_refused_while_one_is_going(client, monkeypatch, settings):
+    """Not a queue you can stack up behind. Two runs against the same public
+    sources at once is what the per-host rate limit exists to prevent, and a
+    second worker process would only wait on the advisory lock anyway --
+    see pipeline/worker.py.
 
-    def slow(ctx):
-        release.wait(timeout=10)
-
-    monkeypatch.setitem(MODULE_REGISTRY, "a_slow", slow)
+    A run enqueued but not yet claimed already holds the slot: refusing a
+    second one does not need the first to actually be *executing*, only
+    queued, which is why this test never has to run a worker cycle to make
+    its point.
+    """
+    monkeypatch.setitem(MODULE_REGISTRY, "a_slow", lambda ctx: None)
     first = post(client, "/api/admin/run", {"module": "a_slow"}).json()["id"]
 
-    try:
-        second = post(client, "/api/admin/run", {"module": "a_slow"})
-        assert second.status_code == 409
-        # The refusal says which job is in the way, so the page can offer it.
-        assert second.json()["job_id"] == first
-        assert "already running" in second.json()["error"]
-    finally:
-        release.set()
+    second = post(client, "/api/admin/run", {"module": "a_slow"})
+    assert second.status_code == 409
+    # The refusal says which job is in the way, so the page can offer it.
+    assert second.json()["job_id"] == first
+    assert "already running" in second.json()["error"]
 
-    assert wait_for(lambda: client.get("/api/admin/jobs").json()["running"] is None)
+    run_one_worker_cycle(settings)
+    assert client.get("/api/admin/jobs").json()["running"] is None
     # And the slot is free again afterwards.
     assert post(client, "/api/admin/run", {"module": "a_slow"}).status_code == 200
 
@@ -459,27 +475,23 @@ def _memory_settings():
     return settings
 
 
-def test_a_jobs_log_only_carries_its_own_threads(client, monkeypatch):
-    """The server keeps serving while a run goes on. Another tab's review
-    decision is not part of this job's log."""
+def test_a_worker_jobs_log_handler_is_detached_once_the_job_finishes(
+        client, fake_module, settings):
+    """`_EventLogHandler` (pipeline/worker.py) is attached to the root logger
+    only for the length of one job's execution. Unlike admin's old, in-process
+    `_JobLogHandler` it does not filter by thread -- a worker process executes
+    exactly one job at a time by construction (the advisory lock), so there is
+    nothing else concurrent in it to filter out; see the module's docstring.
+    What still has to hold is that the handler comes back off: a log line
+    emitted after the job has finished must not retroactively appear in its
+    log.
+    """
     import structlog
 
-    release = threading.Event()
-    seen = threading.Event()
+    job_id = post(client, "/api/admin/run", {"module": "a_fake"}).json()["id"]
+    run_one_worker_cycle(settings)
 
-    def slow(ctx):
-        seen.set()
-        release.wait(timeout=10)
-
-    monkeypatch.setitem(MODULE_REGISTRY, "a_slow", slow)
-    job_id = post(client, "/api/admin/run", {"module": "a_slow"}).json()["id"]
-    assert seen.wait(timeout=10)
-
-    # Logged from the test's thread, which is not one of the run's.
     structlog.get_logger().info("web.something_else", detail="not part of the run")
-    release.set()
-    assert wait_for(lambda: client.get(f"/api/admin/jobs/{job_id}").json()["state"]
-                     != "running")
 
     text = " ".join(line["text"] for line
                      in client.get(f"/api/admin/jobs/{job_id}").json()["log"])
@@ -492,14 +504,32 @@ def test_a_jobs_log_only_carries_its_own_threads(client, monkeypatch):
 def test_the_web_runs_modules_through_the_same_code_as_the_cli():
     """Not a style point. The connection per module, the rollback on failure,
     the audit-count deltas and the write-slot discipline are all in
-    runner.run_waves, and a second implementation would drift from them."""
+    runner.run_waves, and a second implementation would drift from them.
+
+    Execution moved from `admin.start_run` to `PipelineWorker._run_pipeline_job`
+    in the Phase 5 worker cutover (CLAUDE.md settled decision 10); the
+    guarantee that matters -- that a run started from the browser calls the
+    exact function the CLI does -- now has to be checked against the code
+    that actually calls it.
+    """
+    import inspect
+
+    from pipeline import cli, worker
+
+    assert "runner.run_waves" in inspect.getsource(cli._run_waves)
+    assert "runner.run_waves" in inspect.getsource(worker.PipelineWorker._run_pipeline_job)
+
+
+def test_the_worker_command_configures_the_logging_the_job_log_depends_on():
+    """The capture reads the root logger, which is empty until
+    `configure_logging` points structlog at stdlib. That call lives in the CLI
+    command, one file away from the code that relies on it -- the worker's
+    equivalent of the same requirement `cli.web` has always had."""
     import inspect
 
     from pipeline import cli
 
-    assert runner.run_waves is admin.runner.run_waves
-    assert "runner.run_waves" in inspect.getsource(cli._run_waves)
-    assert "runner.run_waves" in inspect.getsource(admin.start_run)
+    assert "configure_logging" in inspect.getsource(cli.worker_run)
 
 
 def test_the_web_command_configures_the_logging_the_job_log_depends_on():

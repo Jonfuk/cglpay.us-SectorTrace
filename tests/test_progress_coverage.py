@@ -16,7 +16,7 @@ import re
 
 import pytest
 
-from pipeline.registry import MODULE_REGISTRY, discover_modules
+from pipeline.registry import MODULE_REGISTRY, discover_modules, module_meta
 
 _REAL_MODULE_RE = re.compile(r"^m\d{2}_[a-z_]+$")
 
@@ -27,7 +27,8 @@ def _discovered():
 
 
 def _real_modules() -> list[str]:
-    return sorted(n for n in MODULE_REGISTRY if _REAL_MODULE_RE.match(n))
+    return sorted(n for n in MODULE_REGISTRY
+                  if _REAL_MODULE_RE.match(n) and not module_meta(n).operator_only)
 
 
 def test_every_module_reports_progress():
@@ -37,11 +38,11 @@ def test_every_module_reports_progress():
         f"these modules report no progress and will show only a pulsing bar: {silent}")
 
 
-def test_all_twenty_modules_are_covered():
+def test_all_modules_are_covered():
     """A sanity check on the check: if discovery broke, the assertion above
     would pass vacuously over an empty list.
     """
-    assert len(_real_modules()) == 29
+    assert len(_real_modules()) == 35
 
 
 @pytest.mark.parametrize("name", [

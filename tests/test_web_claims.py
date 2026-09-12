@@ -44,7 +44,7 @@ def seeded(conn):
         "amount, value_text, source_url, retrieved_at, http_status, source_system, "
         "payload_sha256) VALUES ('April 2026', '21 and over', "
         "'national_living_wage', 12.71, '12.71', 'https://gov.uk/rates', "
-        "'2026-01-01T00:00:00Z', 200, 'm17', 'a' * 64)")
+        "'2026-01-01T00:00:00Z', 200, 'm17', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')")
     conn.commit()
     return conn
 

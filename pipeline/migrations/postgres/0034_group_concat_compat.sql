@@ -7,11 +7,11 @@
 -- exports/echarts.py (1), exports/provenance.py (1).
 --
 -- The alternative was writing those nine queries twice, once per backend.
--- That is the same trade this project already took for parameter
--- placeholders (see pipeline/sqldialect.py): a query that exists twice is a
--- query that will eventually differ in one copy, and the difference will be
--- found by somebody reading an export that disagrees with the portal. So the
--- name is defined here instead, and the nine queries stay one query each.
+-- That is the same trade this project already took for parameter placeholders
+-- (see pipeline/sqldialect.py): a query that exists twice is a query that will
+-- eventually differ in one copy, and the difference will be found by somebody
+-- reading an export that disagrees with the portal. So the name is defined
+-- here instead, and the nine queries stay one query each.
 --
 -- SQLite 3.44 added `string_agg` as an alias for GROUP_CONCAT, which would
 -- have solved this from the other direction and needed nothing here. This

@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3
-
 from pipeline import db
 
 
@@ -9,20 +7,23 @@ def test_apply_migrations_is_idempotent(settings):
     conn = db.get_connection(settings)
     first = db.apply_migrations(conn, settings.migrations_dir)
     second = db.apply_migrations(conn, settings.migrations_dir)
-    assert "0001_core.sql" in first
+    # The PostgreSQL test schema is migrated once per worker in conftest.py;
+    # this test verifies that applying the current tree again is a no-op.
+    assert first == []
     assert second == []
     conn.close()
 
 
-def test_core_infra_tables_exist(conn: sqlite3.Connection):
+def test_core_infra_tables_exist(conn: db.Connection):
     tables = {
-        r["name"]
-        for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+        r["tablename"]
+        for r in conn.execute(
+            "SELECT tablename FROM pg_tables WHERE schemaname = current_schema()")
     }
     assert {"parse_failures", "review_queue", "module_cursors", "http_cache", "schema_migrations"} <= tables
 
 
-def test_upsert_dedupes_on_natural_key(conn: sqlite3.Connection):
+def test_upsert_dedupes_on_natural_key(conn: db.Connection):
     conn.execute(
         "CREATE TABLE widgets (ons_code TEXT PRIMARY KEY, name TEXT NOT NULL)"
     )
@@ -33,7 +34,7 @@ def test_upsert_dedupes_on_natural_key(conn: sqlite3.Connection):
     assert rows[0]["name"] == "Updated"
 
 
-def test_upsert_preserve_keeps_a_decision_across_a_rerun(conn: sqlite3.Connection):
+def test_upsert_preserve_keeps_a_decision_across_a_rerun(conn: db.Connection):
     """The candidate modules re-upsert every link they find, carrying
     verified = 0. Without `preserve` that un-promotes anything re-found.
     """
@@ -59,7 +60,7 @@ def test_upsert_preserve_keeps_a_decision_across_a_rerun(conn: sqlite3.Connectio
     assert row["title"] == "Re-found"
 
 
-def test_upsert_preserve_still_writes_on_insert(conn: sqlite3.Connection):
+def test_upsert_preserve_still_writes_on_insert(conn: db.Connection):
     conn.execute(
         "CREATE TABLE doodads (url TEXT PRIMARY KEY, verified INTEGER NOT NULL DEFAULT 0)")
     db.upsert(conn, "doodads", {"url": "https://x/a.pdf", "verified": 1},
@@ -77,12 +78,13 @@ def test_candidate_modules_preserve_the_decision_columns():
     tables = {"cdp_document_candidates", "committee_paper_candidates",
                "foi_request_candidates", "workforce_census_metrics"}
     found = set()
-    for path in sorted((Path(__file__).resolve().parents[1] / "pipeline" / "modules").glob("*.py")):
+    for path in sorted((Path(__file__).resolve().parents[1] / "pipeline" / "modules").rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not isinstance(node, ast.Call):
                 continue
             func = node.func
-            if not (isinstance(func, ast.Attribute) and func.attr == "upsert"):
+            if not (isinstance(func, ast.Attribute)
+                    and func.attr in {"upsert", "upsert_many"}):
                 continue
             if not (node.args and isinstance(node.args[1], ast.Constant)
                      and node.args[1].value in tables):
@@ -97,7 +99,7 @@ def test_candidate_modules_preserve_the_decision_columns():
     assert found == tables
 
 
-def test_record_parse_failure_and_review_item(conn: sqlite3.Connection):
+def test_record_parse_failure_and_review_item(conn: db.Connection):
     db.record_parse_failure(conn, "m01_procurement", "value_core", "£not-a-number", "could not parse currency amount")
     db.record_review_item(conn, "m01_procurement", "buyer_name", "Some Unmatched Council")
 
@@ -109,7 +111,7 @@ def test_record_parse_failure_and_review_item(conn: sqlite3.Connection):
     assert review[0]["status"] == "pending"
 
 
-def test_audit_tables_do_not_duplicate_on_rerun(conn: sqlite3.Connection):
+def test_audit_tables_do_not_duplicate_on_rerun(conn: db.Connection):
     """Constraint 5: re-running a module must not append duplicate audit
     rows, or the review-queue count reported at each stage is meaningless.
     """
@@ -121,14 +123,14 @@ def test_audit_tables_do_not_duplicate_on_rerun(conn: sqlite3.Connection):
     assert conn.execute("SELECT COUNT(*) c FROM review_queue").fetchone()["c"] == 1
 
 
-def test_distinct_audit_items_are_still_separate_rows(conn: sqlite3.Connection):
+def test_distinct_audit_items_are_still_separate_rows(conn: db.Connection):
     db.record_review_item(conn, "m02_tribunals", "unmatched_respondent", "L'Oreal UK")
     db.record_review_item(conn, "m02_tribunals", "unmatched_respondent", "Durham County Council")
     db.record_review_item(conn, "m01_procurement", "unmatched_respondent", "L'Oreal UK")
     assert conn.execute("SELECT COUNT(*) c FROM review_queue").fetchone()["c"] == 3
 
 
-def test_resolved_review_item_is_not_reopened_by_a_rerun(conn: sqlite3.Connection):
+def test_resolved_review_item_is_not_reopened_by_a_rerun(conn: db.Connection):
     db.record_review_item(conn, "m02_tribunals", "unmatched_respondent", "L'Oreal UK")
     conn.execute("UPDATE review_queue SET status = 'resolved', resolved_at = '2026-01-01'")
 
@@ -139,7 +141,7 @@ def test_resolved_review_item_is_not_reopened_by_a_rerun(conn: sqlite3.Connectio
     assert row["context_json"] is None  # untouched — a human already dealt with it
 
 
-def test_cursor_round_trip(conn: sqlite3.Connection):
+def test_cursor_round_trip(conn: db.Connection):
     assert db.get_cursor(conn, "m01_procurement") is None
     db.set_cursor(conn, "m01_procurement", "2024-01-01")
     assert db.get_cursor(conn, "m01_procurement") == "2024-01-01"
@@ -147,7 +149,7 @@ def test_cursor_round_trip(conn: sqlite3.Connection):
     assert db.get_cursor(conn, "m01_procurement") == "2024-02-01"
 
 
-def test_restricted_tables_are_discoverable(conn: sqlite3.Connection):
+def test_restricted_tables_are_discoverable(conn: db.Connection):
     # Names deliberately don't match real schema tables (e.g.
     # 'restricted_tribunal_parties') since the conn fixture applies every
     # real migration and a same-named CREATE TABLE here would collide once

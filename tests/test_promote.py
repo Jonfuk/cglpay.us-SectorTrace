@@ -10,11 +10,10 @@ rather than a habit of the code above it.
 from __future__ import annotations
 
 import json
-import sqlite3
 
 import pytest
 
-from pipeline import promote
+from pipeline import catalog, db, promote
 
 
 @pytest.fixture
@@ -67,7 +66,7 @@ def document(httpx_mock):
 
 def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
     """The trigger. Not a convention the code above is trusted to follow."""
-    with pytest.raises(sqlite3.IntegrityError, match="without a human"):
+    with pytest.raises(db.IntegrityError, match="without a human"):
         seeded.execute(
             "INSERT INTO cdp_documents (authority_ons_code, document_url, "
             "document_type, source_url, retrieved_at, http_status, source_system, "
@@ -87,7 +86,7 @@ def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
      "'E10000016', 'https://wdtk.com/request/9', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
 ])
 def test_every_evidence_table_is_guarded(seeded, table, columns, values):
-    with pytest.raises(sqlite3.IntegrityError, match="without a human"):
+    with pytest.raises(db.IntegrityError, match="without a human"):
         seeded.execute(f"INSERT INTO {table} ({columns}) VALUES ({values})")
 
 
@@ -96,7 +95,7 @@ def test_the_guard_is_satisfied_by_a_real_promotion(seeded, settings, document):
                      promoted_by="Jon", fields={"document_type": "strategy"},
                      settings=settings)
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 1
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
 
 
 # --- what promotion refuses ----------------------------------------------------
@@ -126,8 +125,8 @@ def test_a_document_that_does_not_answer_is_not_promoted(seeded, settings, httpx
                          promoted_by="Jon", fields={"document_type": "strategy"},
                          settings=settings)
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 0
-    assert seeded.execute("SELECT COUNT(*) FROM evidence_promotions").fetchone()[0] == 0
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 0
+    assert seeded.execute("SELECT COUNT(*) FROM evidence_promotions").fetchone().values().__iter__().__next__() == 0
 
 
 def test_a_failed_fetch_leaves_nothing_behind(seeded, settings, httpx_mock):
@@ -142,7 +141,7 @@ def test_a_failed_fetch_leaves_nothing_behind(seeded, settings, httpx_mock):
                          settings=settings)
 
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
 
 def test_an_unknown_candidate_is_refused(seeded, settings):
@@ -209,7 +208,7 @@ def test_it_keeps_the_candidate_as_it_read_at_the_time(seeded, settings, documen
                      settings=settings)
 
     context = json.loads(seeded.execute(
-        "SELECT candidate_context_json FROM evidence_promotions").fetchone()[0])
+        "SELECT candidate_context_json FROM evidence_promotions").fetchone().values().__iter__().__next__())
 
     assert context["title"] == "Kent CDP strategy"
     assert context["confidence"] == 0.75
@@ -222,7 +221,7 @@ def test_the_confirmed_type_beats_the_guess(seeded, settings, document):
                      settings=settings)
 
     assert seeded.execute(
-        "SELECT document_type FROM cdp_documents").fetchone()[0] == "needs_assessment"
+        "SELECT document_type FROM cdp_documents").fetchone().values().__iter__().__next__() == "needs_assessment"
 
 
 def test_the_candidate_is_marked_verified(seeded, settings, document):
@@ -246,7 +245,7 @@ def test_search_properties_do_not_travel_to_the_evidence(seeded, settings, httpx
     promote.promote(seeded, "committee_paper", "https://kent.gov.uk/paper.pdf",
                      promoted_by="Jon", settings=settings)
 
-    columns = {d[1] for d in seeded.execute("PRAGMA table_info(committee_papers)")}
+    columns = {d["name"] for d in catalog.columns_of(seeded, "committee_papers")}
     assert "matched_terms" not in columns
     row = seeded.execute("SELECT committee_name, report_title FROM committee_papers").fetchone()
     assert row["committee_name"] == "Health Committee"
@@ -278,7 +277,7 @@ def test_rejection_is_bulk_and_promotion_is_not(seeded, settings):
 
     assert count == 1
     assert seeded.execute(
-        "SELECT rejected FROM committee_paper_candidates").fetchone()[0] == 1
+        "SELECT rejected FROM committee_paper_candidates").fetchone().values().__iter__().__next__() == 1
     assert not hasattr(promote, "promote_many")
 
 
@@ -292,6 +291,25 @@ def test_rejecting_nothing_is_not_an_error(seeded):
     assert promote.reject(seeded, "cdp_document", [], rejected_by="Jon") == 0
 
 
+def test_rejection_is_quarantined_with_its_reason(seeded):
+    """A rejected candidate becomes listable/retryable the same way parse
+    failures and archive mismatches are (migration 0103), not just a flag on
+    the candidate row that carries no reason."""
+    promote.reject(
+        seeded, "committee_paper", ["https://kent.gov.uk/paper.pdf"],
+        rejected_by="Jon", note="a COVID grant report")
+
+    row = seeded.execute(
+        "SELECT kind, module, item_identity, reason, payload_json, retry_state "
+        "FROM quarantine_items WHERE item_identity = %s",
+        ("https://kent.gov.uk/paper.pdf",)).fetchone()
+    assert row["kind"] == "rejected_candidate"
+    assert row["module"] == "committee_paper_promotion"
+    assert row["reason"] == "a COVID grant report"
+    assert row["payload_json"]["rejected_by"] == "Jon"
+    assert row["retry_state"] == "pending"
+
+
 def test_reset_does_not_delete_evidence(seeded, settings, document):
     """Evidence has its own provenance and its own promotion record. Undoing a
     judgement about a candidate is not the same act as deleting a document."""
@@ -300,9 +318,9 @@ def test_reset_does_not_delete_evidence(seeded, settings, document):
                      settings=settings)
     promote.reset(seeded, "cdp_document", "https://kent.gov.uk/cdp.pdf")
 
-    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone()[0] == 1
+    assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
 
 def test_history_is_newest_first(seeded, settings, httpx_mock):
@@ -388,7 +406,7 @@ def test_restore_flags_reports_before_it_writes(seeded, settings, document):
 
     assert len(promote.restore_flags(seeded, dry_run=True)) == 1
     assert seeded.execute(
-        "SELECT verified FROM cdp_document_candidates").fetchone()[0] == 0
+        "SELECT verified FROM cdp_document_candidates").fetchone().values().__iter__().__next__() == 0
 
     restored = promote.restore_flags(seeded)
     row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()

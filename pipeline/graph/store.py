@@ -1,11 +1,17 @@
 """Small, lifecycle-owning wrapper around the official Neo4j driver."""
 from __future__ import annotations
 
+import json
 import re
+import time
 from collections.abc import Iterable
 from typing import Any
 
+import structlog
+
 from pipeline.config import Settings
+
+log = structlog.get_logger()
 
 PROJECTOR_VERSION = "1"
 _RELATIONSHIP_TYPE = re.compile(r"^[A-Z][A-Z0-9_]{0,62}$")
@@ -146,10 +152,13 @@ class GraphStore:
 
     def upsert_relationships(self, rows: Iterable[dict]) -> int:
         items = list(rows)
+        grouped: dict[str, list[dict]] = {}
         for row in items:
             relationship_type = row["relationship_type"]
             if not _RELATIONSHIP_TYPE.fullmatch(relationship_type):
                 raise GraphStoreError(f"Unsafe graph relationship type {relationship_type!r}.")
+            grouped.setdefault(relationship_type, []).append(row)
+        for relationship_type, group in grouped.items():
             self._write(
                 f"UNWIND $rows AS row MATCH (a:Entity {{entity_id: row.subject_entity_id}}) "
                 f"MATCH (b:Entity {{entity_id: row.object_entity_id}}) "
@@ -158,7 +167,7 @@ class GraphStore:
                 "r.claim_id = row.claim_id, r.valid_from = row.valid_from, r.valid_to = row.valid_to, "
                 "r.confidence = row.confidence, r.derivation_type = row.derivation_type, "
                 "r.derivation_version = row.derivation_version, r.sectortrace_managed = true",
-                {"rows": [row]},
+                {"rows": group},
             )
         return len(items)
 
@@ -181,5 +190,50 @@ class GraphStore:
 
     def _write(self, query: str, parameters: dict) -> None:
         driver = self._require_driver()
+        started = time.monotonic()
         with driver.session(database=self.settings.neo4j_database) as session:
             session.run(query, parameters).consume()
+        # Benchmarking only (performance.md:586), never evidence: nothing here
+        # is a `graph_*` warehouse row or portal-reachable, so it cannot become
+        # the cross-layer arithmetic docs/CAVEATS.md forbids. Logged only for
+        # an actual `UNWIND $rows` batch -- schema DDL and `clear_managed_data`
+        # pass no `rows` and are not the per-batch throughput this exists to
+        # watch.
+        rows = parameters.get("rows")
+        if isinstance(rows, list) and rows:
+            log.info(
+                "graph.store_unwind_batch", rows=len(rows),
+                # `default=str` because a row can carry a datetime-shaped
+                # value from the warehouse; approximate is enough for a
+                # benchmarking byte count, and must never be the reason a
+                # write fails.
+                bytes=len(json.dumps(rows, default=str).encode("utf-8")),
+                duration_seconds=round(time.monotonic() - started, 4),
+            )
+
+    def jvm_metrics(self) -> dict[str, Any] | None:
+        """Best-effort JVM heap/page-cache read for benchmarking (performance.md:586).
+
+        Out of scope for this Bolt client by default: Neo4j 5 dropped the
+        `dbms.queryJmx` procedure this used to answer, and heap/page-cache
+        live only in the server's own metrics exporter (Prometheus/CSV/JMX),
+        which is an operator deployment concern this process has no route to
+        -- there is no equivalent Cypher call to fall back to. The attempt
+        below costs nothing when it fails (an older server, or a build with
+        the legacy procedure restored, would still answer it) and a rebuild
+        must never fail because a benchmarking read did, so every outcome is
+        logged and swallowed rather than raised.
+        """
+        driver = self._require_driver()
+        try:
+            with driver.session(database=self.settings.neo4j_database) as session:
+                record = session.run(
+                    "CALL dbms.queryJmx('java.lang:type=Memory') YIELD attributes "
+                    "RETURN attributes"
+                ).single()
+        except Exception as exc:
+            log.info("graph.jvm_metrics_unavailable", reason=str(exc))
+            return None
+        attributes = dict(record["attributes"]) if record else None
+        log.info("graph.jvm_metrics", available=attributes is not None)
+        return attributes

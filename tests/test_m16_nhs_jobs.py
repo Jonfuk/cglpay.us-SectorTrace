@@ -56,7 +56,7 @@ def test_reads_every_advert_on_the_page():
 
 def test_every_advert_carries_its_fields_and_not_just_a_title():
     """Regression. Each advert nests two more <ul>/<li> lists for the salary
-    and contract fields, so the obvious `<li ...>(.*?)</li>` pattern ends the
+    and contract fields, so the obvious `<li ...>(.*%s)</li>` pattern ends the
     advert at the first nested </li>. That version returned ten adverts with a
     title, a reference and every other column NULL — which downstream is
     indistinguishable from ten employers who published no pay.
@@ -526,7 +526,7 @@ def test_an_unrecognised_page_is_not_read_as_an_employer_with_no_vacancies(
         "WHERE item_type = 'nhs_jobs_results_unrecognised'").fetchone()["c"] == 1
     for absent in ("nhs_jobs_search_no_matches", "nhs_jobs_search_matched_nothing"):
         assert conn.execute(
-            "SELECT COUNT(*) c FROM review_queue WHERE item_type = ?",
+            "SELECT COUNT(*) c FROM review_queue WHERE item_type = %s",
             (absent,)).fetchone()["c"] == 0
 
 
@@ -775,7 +775,7 @@ def _insert_advert(conn, reference, title, posted, salary_min=30000.0, salary_ma
         "employer_name_raw, job_title, advert_url, salary_raw, salary_min, salary_max, "
         "salary_period, salary_basis, posted_date, searched_variant, source_url, "
         "retrieved_at, http_status, source_system, payload_sha256) VALUES "
-        "(?, 'change_grow_live', 'exact', ?, ?, 'https://x', 'raw', ?, ?, ?, 'range', ?, "
+        "(%s, 'change_grow_live', 'exact', %s, %s, 'https://x', 'raw', %s, %s, %s, 'range', %s, "
         "'Change Grow Live', 'https://u', '2026-08-11T00:00:00Z', 200, 'nhs_jobs', 'h')",
         (reference, employer, title, salary_min, salary_max, period, posted))
 

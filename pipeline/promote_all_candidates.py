@@ -24,20 +24,14 @@ Three rules, mirroring the ones the UI is built around:
     `--document-type`; the script refuses to promote a CDP candidate without
     it rather than copying the guess across.
 
-It fetches real documents, so back up the warehouse first. It writes to
-whichever warehouse the configuration names — a PostgreSQL one when
-`.env` sets `DATABASE_URL`, the SQLite file otherwise. `--db` forces the
-SQLite file and refuses to be ignored by a `.env` that points elsewhere.
+It fetches real documents, so back up the PostgreSQL warehouse first. It writes
+to the warehouse named by `DATABASE_URL`.
 
 Whatever the target, the non-dry-run path confirms with you before writing
 anything, and a shared PostgreSQL warehouse is the case that matters most:
 it is the warehouse other sessions read.
 
-    # SQLite copy (./start.sh backup first)
-    uv run python -m pipeline.promote_all_candidates --by "Your Name" \
-        --db data/dev-warehouse.db
-
-    # the configured warehouse, PostgreSQL or SQLite
+    # the configured PostgreSQL warehouse
     uv run python -m pipeline.promote_all_candidates --by "Your Name"
 
 `--dry-run` lists what would be promoted and writes nothing; `--yes` skips the
@@ -47,7 +41,6 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-from pathlib import Path
 
 import structlog
 
@@ -64,7 +57,7 @@ def _undecided_urls(conn: sqlite3.Connection, spec: dict) -> list[str]:
     candidate whose flag was reset by a module re-run is not in here — that is
     `promotions_without_flag`'s job, and it is a repair, not a promotion.
     """
-    return [row[0] for row in conn.execute(
+    return [row[spec["url_column"]] for row in conn.execute(
         f"SELECT {spec['candidate_url_column']} FROM {spec['candidate_table']} "
         "WHERE verified = 0 AND rejected = 0 ORDER BY 1")]
 
@@ -125,8 +118,6 @@ def main() -> None:
                         help="restrict to one candidate kind")
     parser.add_argument("--document-type",
                         help="confirmed document type for every CDP candidate")
-    parser.add_argument("--db", type=Path,
-                        help="force the SQLite warehouse at this path")
     parser.add_argument("--dry-run", action="store_true",
                         help="report what would be promoted and write nothing")
     parser.add_argument("--yes", action="store_true",
@@ -134,20 +125,11 @@ def main() -> None:
     args = parser.parse_args()
 
     settings = get_settings()
-    if args.db:
-        # A --db names a file, so it is a SQLite target and must be one even
-        # when .env names a PostgreSQL warehouse: silently ignoring it would
-        # mean the run went to whatever .env said while the operator believes
-        # it is writing to the file they typed. The config treats an unset
-        # DATABASE_URL as SQLite for exactly this reason.
-        settings.database_path = args.db
-        settings.database_url = None
-
     conn = db.get_connection(settings)
     try:
         db.apply_migrations(conn)
         todo, needing_type = _plan(conn, args.kind, args.document_type)
-        target = settings.redacted_database_url or str(settings.database_path)
+        target = settings.redacted_database_url
         log.info("promote_all.start", by=args.by, kind=args.kind or "all",
                   warehouse=target, dry_run=args.dry_run,
                   candidates=len(todo), needing_document_type=needing_type)

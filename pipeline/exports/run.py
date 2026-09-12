@@ -18,7 +18,7 @@ from pathlib import Path
 # Order matters, and only for the last one: `bundle` zips what is in the export
 # directory, so under `all` it must run after the three targets that put files
 # there. A bundle taken first would be a zip of the previous run.
-TARGETS: tuple[str, ...] = ("sheets", "geojson", "echarts", "docs", "bundle")
+TARGETS: tuple[str, ...] = ("sheets", "geojson", "echarts", "docs", "ndtms", "bundle")
 
 
 class ExportError(ValueError):
@@ -37,6 +37,7 @@ def run_targets(conn, targets: list[str], base: Path, docs_dir: Path, settings,
     from pipeline.exports import docs as docs_export
     from pipeline.exports import echarts as echarts_export
     from pipeline.exports import geojson as geojson_export
+    from pipeline.exports import ndtms as ndtms_export
     from pipeline.exports import sheets as sheets_export
 
     unknown = [name for name in targets if name not in TARGETS]
@@ -66,9 +67,12 @@ def run_targets(conn, targets: list[str], base: Path, docs_dir: Path, settings,
             except bundle_export.BundleError as exc:
                 raise ExportError(str(exc)) from None
             noun = "bundles"
+        elif name == "ndtms":
+            paths = ndtms_export.export_all(conn, base / "ndtms")
+            noun = "files"
         else:
             paths = [docs_export.write_data_dictionary(
-                conn, settings.migrations_dir, docs_dir)]
+                conn, settings.migrations_dir / "postgres", docs_dir)]
             noun = "documents"
 
         results.append({

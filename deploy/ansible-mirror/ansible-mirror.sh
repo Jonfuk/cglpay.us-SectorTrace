@@ -14,6 +14,8 @@
 # configured and goes straight to the playbook.
 #
 #   ./ansible-mirror.sh --reconfigure   # re-run the setup questions
+#   ./ansible-mirror.sh --enable-frontend  # persist the generated frontend
+#   ./ansible-mirror.sh --legacy-frontend  # persist the serving rollback
 #
 # Anything else you pass is handed to ansible-playbook, so
 # `./ansible-mirror.sh --check` does a dry run.
@@ -33,10 +35,19 @@ VAULT_FILE="group_vars/all/vault.yml"
 LOCAL_FILE="group_vars/all/zz-local.yml"
 
 RECONFIGURE=0
+FRONTEND_OVERRIDE=""
 PLAYBOOK_ARGS=()
 for arg in "$@"; do
     if [ "$arg" = "--reconfigure" ]; then
         RECONFIGURE=1
+    elif [ "$arg" = "--enable-frontend" ] || [ "$arg" = "--legacy-frontend" ]; then
+        frontend_choice="true"
+        [ "$arg" = "--legacy-frontend" ] && frontend_choice="false"
+        if [ -n "$FRONTEND_OVERRIDE" ] && [ "$FRONTEND_OVERRIDE" != "$frontend_choice" ]; then
+            echo "Choose either --enable-frontend or --legacy-frontend, not both." >&2
+            exit 2
+        fi
+        FRONTEND_OVERRIDE="$frontend_choice"
     else
         PLAYBOOK_ARGS+=("$arg")
     fi
@@ -143,26 +154,77 @@ run_setup_wizard() {
     cat <<'BANNER'
 
 ================================================================
- SectorTrace MIRROR setup
+ SectorTrace deployment setup — mirror or beta
 ================================================================
-This box will run the same stack as a SectorTrace deployment,
-with nothing collecting into it: the warehouse arrives from an
-existing deployment, and its raw archive is pulled out of that
-deployment's S3 bucket onto this box's local disk.
+This script provisions either of two things. Both run the same
+stack (PostgreSQL, Neo4j, the app, Caddy) and share everything
+except how the warehouse is treated once it arrives:
 
-Two things follow from that, and they are worth knowing before
-you answer anything:
+  1) A disaster-recovery MIRROR of an existing deployment. Nothing
+     collects into it, and the warehouse is REPLACED WHOLESALE on
+     every sync — review decisions, promotions and document work
+     done here are discarded at the next one. Read it; do not work
+     in it.
+  2) A BETA deployment that builds a chosen git branch, seeds its
+     own database from an existing deployment ONCE, and is then
+     left alone — an ordinary writable database for testing that
+     branch's changes without touching production.
 
-  * The warehouse here is REPLACED WHOLESALE on every sync.
-    Review decisions, promotions and document processing done on
-    this box are discarded at the next one. Do that work on the
-    source deployment.
-  * This box will hold the source's data, restricted_ tables
-    included. It needs the same care the source gets.
+Either way this box holds the source's data, restricted_ tables
+included, and needs the same care the source gets.
 
 Press Enter to accept a default shown in brackets.
 
 BANNER
+
+    echo "--- What is this box for? ---------------------------------------"
+    echo
+    echo "  1) Disaster-recovery mirror (read-only, wiped and replaced nightly)"
+    echo "  2) Beta deployment (pins a branch, seeds once, stays local and writable)"
+    echo
+    local role_choice mirror_role
+    role_choice="$(ask_choice 'Choose' '1' 2)"
+    case "$role_choice" in
+        1) mirror_role="dr_mirror" ;;
+        2) mirror_role="beta" ;;
+    esac
+
+    local deploy_git_branch="" recurring_sync="true" serve_nuxt="true"
+    if [ "$mirror_role" = "beta" ]; then
+        echo
+        echo "--- Which branch does this box build and run? -------------------"
+        echo "Every time you re-run this script, the playbook re-fetches and"
+        echo "resets this box's checkout to origin/<branch> before building —"
+        echo "this box always tracks the branch's tip, and any change made"
+        echo "directly on the box itself is discarded. That is on purpose."
+        echo
+        deploy_git_branch="$(ask 'Branch to deploy' 'beta')"
+
+        echo
+        echo "--- Reseed automatically, or once by hand? -----------------------"
+        echo "A database testing writes can't survive without vanishing at the"
+        echo "next sync is not a testing database. The default seeds this box"
+        echo "once — you run the sync yourself, whenever you want fresh data —"
+        echo "and nothing after that touches the warehouse unless you ask."
+        echo
+        if ask_yes_no "Also reseed on a nightly timer (overwrites local test data)?" "n"; then
+            recurring_sync="true"
+        else
+            recurring_sync="false"
+        fi
+
+    fi
+
+    echo
+    echo "--- Serve the generated public frontend ------------------------"
+    echo "The public portal uses the existing Python server and APIs."
+    echo "Admin has its own setting. Node is needed only for the build."
+    if [ -n "$FRONTEND_OVERRIDE" ]; then
+        serve_nuxt="$FRONTEND_OVERRIDE"
+        echo "Using the frontend choice supplied on the command line."
+    elif ! ask_yes_no "Serve the generated public frontend on this box?" "y"; then
+        serve_nuxt="false"
+    fi
 
     # --- Domain and contact ---
     echo "--- This mirror's domain ---------------------------------------"
@@ -403,14 +465,16 @@ BANNER
     fi
 
     # --- When ---
-    echo
-    echo "--- When to sync -----------------------------------------------"
-    echo "Nightly. Leave time after the source's own backup (03:15 by"
-    echo "default) and its offsite copy — syncing before those have run"
-    echo "just restores last night's snapshot again."
-    echo
-    local sync_time
-    sync_time="$(ask 'Sync time (HH:MM, UTC)' '04:30')"
+    local sync_time="04:30"
+    if [ "$mirror_role" = "dr_mirror" ] || [ "$recurring_sync" = "true" ]; then
+        echo
+        echo "--- When to sync -----------------------------------------------"
+        echo "Nightly. Leave time after the source's own backup (03:15 by"
+        echo "default) and its offsite copy — syncing before those have run"
+        echo "just restores last night's snapshot again."
+        echo
+        sync_time="$(ask 'Sync time (HH:MM, UTC)' '04:30')"
+    fi
 
     # --- Being told when it stops ---
     echo
@@ -509,6 +573,12 @@ EOF
 # what is here overrides the tracked defaults without making vars.yml dirty.
 domain: $(yaml_quote "$domain")
 
+mirror_role: $(yaml_quote "$mirror_role")
+deploy_git_branch: $(yaml_quote "$deploy_git_branch")
+mirror_recurring_sync_enabled: $recurring_sync
+serve_nuxt: $serve_nuxt
+admin_ui_variant: nuxt
+
 mirror_source_label: $(yaml_quote "$source_label")
 mirror_sync_mode: $(yaml_quote "$sync_mode")
 mirror_sync_time: $(yaml_quote "$sync_time")
@@ -573,6 +643,12 @@ else
 fi
 
 # --- Run the playbook -------------------------------------------------------------
+
+# Extra vars apply the choice in this run even if zz-local.yml previously said
+# otherwise. The role persists it using lineinfile, which respects --check.
+if [ -n "$FRONTEND_OVERRIDE" ]; then
+    PLAYBOOK_ARGS+=(--extra-vars "{\"serve_nuxt\":$FRONTEND_OVERRIDE,\"mirror_frontend_override\":$FRONTEND_OVERRIDE}")
+fi
 
 echo "==> Running the playbook"
 if [ -n "$VAULT_PW_FILE" ]; then

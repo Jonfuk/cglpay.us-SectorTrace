@@ -48,7 +48,7 @@ def seeded(conn):
     conn.execute(
         "INSERT INTO workforce_census_page_text (census_year, page_number, "
         " page_text, source_url, retrieved_at, http_status, source_system, "
-        " payload_sha256) VALUES (2024, 6, ?, 'https://nhsbn.example/c.pdf', "
+        " payload_sha256) VALUES (2024, 6, %s, 'https://nhsbn.example/c.pdf', "
         " '2026-08-01T00:00:00Z', 200, 'm06_workforce_census', 'cen123')",
         (PAGE_TEXT,))
     for metric, segment, value, line in (
@@ -60,7 +60,7 @@ def seeded(conn):
             "INSERT INTO workforce_census_metrics (census_year, metric, "
             " workforce_segment, value, unit, source_page, raw_text, verified, "
             " source_url, retrieved_at, http_status, source_system, "
-            " payload_sha256) VALUES (2024, ?, ?, ?, 'percent', 6, ?, 0, "
+            " payload_sha256) VALUES (2024, %s, %s, %s, 'percent', 6, %s, 0, "
             " 'https://nhsbn.example/c.pdf', '2026-08-01T00:00:00Z', 200, "
             " 'm06_workforce_census', 'cen123')",
             (metric, segment, value, line))

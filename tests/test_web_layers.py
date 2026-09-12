@@ -51,7 +51,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO authorities (ons_code, name, type, region, geometry_geojson, "
             " active_from, first_seen_vintage, last_seen_vintage, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (?, ?, 'county', 'West Midlands', ?, '2021-04-01', '2024', '2026', "
+            "VALUES (%s, %s, 'county', 'West Midlands', %s, '2021-04-01', '2024', '2026', "
             " 'https://ons.example/b', '2026-08-01T00:00:00Z', 200, 'ons', 'x')",
             (ons_code, name, GEOMETRY))
 
@@ -63,8 +63,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " supplier_name_raw, title, value_core, currency, date_published, "
             " procedure_type, psr_basis, source_url, retrieved_at, http_status, "
             " source_system, payload_sha256) "
-            "VALUES (?, ?, 'A Council', ?, 'Supplier Ltd', 'Treatment services', "
-            " ?, 'GBP', '2025-06-01', 'open', 'psr', 'https://find.example/n', "
+            "VALUES (%s, %s, 'A Council', %s, 'Supplier Ltd', 'Treatment services', "
+            " %s, 'GBP', '2025-06-01', 'open', 0, 'https://find.example/n', "
             " '2026-08-01T00:00:00Z', 200, 'find_a_tender', 'abc123')",
             (notice_id, f"ocds-{notice_id}", ons_code, value))
 
@@ -80,8 +80,8 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             " local_authority_raw, local_authority_ons_code, region, overall_rating, "
             " latitude, longitude, registration_status, source_url, retrieved_at, "
             " http_status, source_system, payload_sha256) "
-            "VALUES (?, 'prov1', 'A regulated service', 'Birmingham', ?, "
-            " 'West Midlands', 'Good', ?, ?, 'Registered', 'https://cqc.example/l', "
+            "VALUES (%s, 'prov1', 'A regulated service', 'Birmingham', %s, "
+            " 'West Midlands', 'Good', %s, %s, 'Registered', 'https://cqc.example/l', "
             " '2026-08-01T00:00:00Z', 200, 'cqc', 'c')",
             (location_id, ons_code, latitude, longitude))
 
@@ -97,7 +97,7 @@ def warehouse(conn: sqlite3.Connection) -> sqlite3.Connection:
             "INSERT INTO fingertips_la_values (indicator_id, area_code, area_type_id, "
             " time_period, area_name, ons_code, area_level, value, time_period_sortable, "
             " source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (92454, ?, 102, ?, 'Birmingham', ?, 'local_authority', ?, ?, "
+            "VALUES (92454, %s, 102, %s, 'Birmingham', %s, 'local_authority', %s, %s, "
             " 'https://fingertips.example/v', '2026-08-01T00:00:00Z', 200, 'ohid', 'f')",
             (ons_code, period, ons_code, value, period))
 
@@ -235,15 +235,19 @@ def geographyjs() -> str:
     return (PORTAL / "js" / "pages" / "geography.js").read_text(encoding="utf-8")
 
 
-def test_the_map_toggles_are_built_from_the_payload(geographyjs):
-    """The toggle panel iterates the payload's layers and renders each
-    layer's caveats from the payload — so a layer added to /api/v1/layers
-    gains a toggle here with its caveat by construction, and a layer with no
-    caveats cannot be toggled on at all."""
+def test_the_atlas_selector_is_built_from_the_closed_registry(geographyjs):
+    """BETA-078: one selector, driven by /api/v1/atlas_layers. Exactly one
+    layer is shown at a time — the point layers still come from
+    /api/v1/layers, but there is no multi-overlay checkbox panel — and each
+    layer's caveat is rendered from the registry entry, so a layer added to
+    the registry gains an option here with its caveat by construction."""
+    assert "fetchJSON('atlas_layers')" in geographyjs
     assert "fetchJSON('layers')" in geographyjs
-    assert "Object.entries(layerPayload.layers" in geographyjs
-    assert "layer.caveats.join(' ')" in geographyjs
+    assert "atlas-layer-select" in geographyjs
+    assert "layer.caveat" in geographyjs
     assert "pinnedCaveat" in geographyjs
+    # no multi-select overlay panel survives
+    assert "state.layers.add(" not in geographyjs and "layer-toggle" not in geographyjs
 
 
 def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs):
@@ -255,6 +259,28 @@ def test_the_point_layers_use_positron_and_keep_authority_navigation(geographyjs
     assert "function addLayer(map, key, layer, authorityGeo)" in geographyjs
     assert "map.on('click', `${key}-point`, (event) => select(" in geographyjs
     assert "href: `#/authorities/${code}`" in geographyjs
+
+
+def test_the_map_falls_back_to_a_local_style_when_the_basemap_is_unreachable(geographyjs):
+    """Settled decision 6: both front ends render with the network cable
+    unplugged. The CARTO basemap is this page's one documented exception (the
+    test above pins that its URLs stay), but when it cannot be fetched
+    MapLibre never fires 'load' and the choropleth is never added — the reader
+    gets the text alternative only. The offline path swaps to a local
+    no-source style and draws the same layers on it. Pinned against the
+    source, because this suite runs with no browser."""
+    assert "function localMapStyle()" in geographyjs
+    assert "version: 8, sources: {}" in geographyjs
+    # The layer-adding code is shared between the normal and the fallback path
+    # rather than duplicated, and runs at most once.
+    assert "function drawAuthorityLayers()" in geographyjs
+    assert "if (layersDrawn) return; layersDrawn = true;" in geographyjs
+    assert "map.on('load', drawAuthorityLayers);" in geographyjs
+    # The fallback only fires when no style ever loaded — a late tile/glyph
+    # error on a working map must not blank it.
+    assert "map.on('error', () => {" in geographyjs
+    assert "if (styleFallbackTried || layersDrawn || map.isStyleLoaded()) return;" in geographyjs
+    assert "map.setStyle(localMapStyle(), { diff: false });" in geographyjs
 
 
 def test_no_layer_caveat_text_is_hardcoded_in_the_map_page(geographyjs):

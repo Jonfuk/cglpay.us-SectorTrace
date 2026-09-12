@@ -84,6 +84,49 @@ def test_the_image_role_is_on_the_chart_and_not_around_the_button(components):
     assert "role" not in wrap
 
 
+# --- BETA-074: inspectable visualisations -----------------------------------
+
+
+def test_series_toggles_are_keyboard_operable_buttons(components):
+    body = function_body(components, "export function mountChart(")
+    # HTML <button>s, not the mouse-only canvas legend, carrying state as
+    # aria-pressed and dispatching the same ECharts action.
+    assert "chart-series-toggle" in body
+    assert "'aria-pressed'" in body
+    assert "type: 'legendToggleSelect'" in body
+    # a chart that declared no legend gets a hidden one so the action lands
+    assert "legend: { show: false, data: seriesNames }" in body
+
+
+def test_zoom_and_reset_are_opt_in(components):
+    body = function_body(components, "export function mountChart(")
+    assert "if (zoom && !option.toolbox)" in body
+    assert "dataZoom:" in body and "restore:" in body
+    # saveAsImage stays out of the toolbox feature set -- the DOM button
+    # draws the caveat in, which the toolbox export cannot
+    assert "saveAsImage:" not in body and "saveAsImage :" not in body
+
+
+def test_missing_periods_are_annotated_not_closed(components):
+    body = function_body(components, "export function mountChart(")
+    assert "missingNote" in body and "chart-missing-note" in body
+
+
+def test_a_chart_can_link_to_its_table_and_back(components):
+    mount = function_body(components, "export function mountChart(")
+    assert "chart-to-table" in mount and "tableHref" in mount
+    card = components[components.index("export function tableCard("):]
+    assert "options.anchorId" in card
+
+
+def test_the_pay_page_proves_the_contract(components):
+    pay = (PORTAL / "js" / "pages" / "pay.js").read_text(encoding="utf-8")
+    assert "zoom: true" in pay          # time-series + scatter
+    assert "tableHref: '#pay-wage-table'" in pay
+    assert "anchorId: 'pay-wage-table'" in pay
+    assert "missingNote:" in pay
+
+
 def test_the_save_button_does_not_print():
     """It is a control. `.btn` is already dropped by the print block, which is
     why the button carries that class rather than a bespoke one."""

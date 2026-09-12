@@ -62,7 +62,7 @@ def _normalise_org_name(name: str) -> str:
 
 def _existing(conn, table: str, key: dict) -> dict | None:
     row = conn.execute(
-        f"SELECT * FROM {table} WHERE {' AND '.join(f'{k} = ?' for k in key)}",
+        f"SELECT * FROM {table} WHERE {' AND '.join(f'{k} = %s' for k in key)}",
         tuple(key.values())).fetchone()
     return dict(row) if row else None
 

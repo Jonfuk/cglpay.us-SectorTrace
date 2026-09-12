@@ -1,0 +1,6 @@
+<script setup lang="ts">
+import type { DocumentSearchHit } from '~/types/documents'
+defineProps<{ rows: DocumentSearchHit[]; selected?: string }>()
+defineEmits<{ read: [row: DocumentSearchHit] }>()
+</script>
+<template><div class="st-document-results"><article v-for="row in rows" :key="row.document_element_id" class="atlas-panel atlas-panel-body" :class="{ 'is-selected': row.document_element_id === selected }"><h2>{{ row.title ?? 'Document title not supplied' }}</h2><p class="atlas-footnote">{{ row.document_type ?? 'Public document' }}<span v-if="row.page_number != null"> · Page {{ row.page_number }}</span></p><p v-if="row.title_basis !== 'source_label'" class="atlas-footnote">Display title. Basis: {{ row.title_basis ?? 'Not supplied' }}</p><p class="st-result-excerpt">{{ row.snippet ?? row.text ?? 'No extractable passage returned' }}</p><p class="atlas-footnote">Published: {{ row.published_at ?? 'Not supplied' }} · Retrieved: {{ row.retrieved_at ?? 'Not supplied' }}</p><div class="atlas-actions"><button type="button" class="atlas-button" @click="$emit('read', row)">Read passage</button><StLink v-if="row.source_url" :href="row.source_url">Open source</StLink></div></article></div></template>

@@ -2,14 +2,18 @@
 name = "sub-misuse-evidence-pipeline"
 version = "0.1.0"
 description = "England-wide substance misuse sector evidence pipeline for a trade union pay campaign evidence base"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
     "httpx>=0.27",
     "tenacity>=8.2",
     "pydantic>=2.6",
     "pydantic-settings>=2.2",
     "structlog>=24.1",
-    "typer>=0.12",
+    # Trogon 0.6 introspects Click command objects. Typer 0.26 moved to a
+    # vendored Click layer that Trogon cannot see, so keep the compatible
+    # external-Click integration until Trogon supports that Typer release.
+    "typer>=0.12,<0.26",
+    "trogon>=0.6",
     # Progress display and the run summary. Previously present only as a
     # transitive dependency of typer; pipeline/console.py imports it
     # directly, so it is declared rather than relied on by accident.
@@ -21,6 +25,26 @@ dependencies = [
     # Analysis is deliberately local and bounded; it never becomes a second
     # evidence store.  Neo4j itself remains optional in the graph extra below.
     "networkx>=3.2",
+    # The SectorTrace ontology (pipeline/nlp/ontology/, BETA-034B) is a
+    # hand-maintained controlled vocabulary: YAML because it carries comments
+    # and reads without quoting/commas, and it must load with no extra
+    # installed (034C's classifier depends on it and is always-on). Already
+    # present transitively; declared here rather than relied on by accident,
+    # the same call made for `rich` above.
+    "pyyaml>=6.0",
+    # PostgreSQL 18 is the only application database (performance.md Phase 1,
+    # Architecture Decision Review). psycopg and psycopg_pool are therefore
+    # core dependencies, not the optional `postgres` extra they used to be:
+    # there is no longer a driver-less SQLite path for a checkout, CI, or a
+    # test to fall back to. `psycopg[binary]` avoids a libpq build step on
+    # Windows, where development happens; a deployment that would rather link
+    # the system libpq installs plain `psycopg` itself, and nothing here
+    # depends on which. The Python adapter remains available with the core
+    # PostgreSQL set even while embeddings.py uses pgvector's text form; Phase
+    # 3 may use it for typed vector parameters.
+    "psycopg[binary]>=3.1",
+    "psycopg_pool>=3.2",
+    "pgvector>=0.3",
 ]
 
 [project.scripts]
@@ -45,6 +69,14 @@ pipeline = "pipeline.cli:app"
 sheets = [
     "gspread>=6.0",
     "google-auth>=2.28",
+]
+
+# Offline PMTiles generation for the authority-boundary map. These packages
+# stay out of the application image: the generated archive is the runtime
+# artefact and the standard-library server only serves its bytes.
+maps = [
+    "mapbox-vector-tile>=2.0",
+    "mercantile>=1.2",
 ]
 
 # Reading PFD reports that were scanned rather than typed. An extra, not a
@@ -78,31 +110,16 @@ sheets = [
 #
 #   uv sync --extra ocr
 #
-# onnxruntime is pinned below 1.20 because this project targets Python 3.10
-# and 1.20 onwards ships no cp310 wheel. Raise it when requires-python does.
+# onnxruntime was pinned below 1.20 while requires-python was ">=3.10": 1.20
+# onwards ships no cp310 wheel. requires-python is now ">=3.11", so that floor
+# is gone -- raised to >=1.20 for cp313 wheels (1.16-1.19 top out at cp312).
 # `cpu-headless` is OnnxTR's own extra: CPU inference and the headless build
 # of OpenCV. The plain `cpu` extra pulls the desktop OpenCV, whose GUI
 # libraries are of no use to a pipeline and do not exist on a server.
 ocr = [
     "onnxtr[cpu-headless]>=0.8",
-    "onnxruntime>=1.16,<1.20",
+    "onnxruntime>=1.20",
     "pypdfium2>=4.0",
-]
-
-# The PostgreSQL backend. An extra rather than a dependency because SQLite
-# remains the default and must keep working with no driver installed at all:
-# a fresh checkout, CI, and every test that does not name a backend open a
-# file, and none of them should need a database driver on the machine.
-#
-# `psycopg[binary]` rather than plain `psycopg` so there is no libpq build
-# step on Windows, where development happens. A LAN or production deployment
-# that would rather link the system libpq installs `psycopg` itself; nothing
-# in this codebase depends on which.
-#
-# psycopg_pool is separate from psycopg and has to be asked for by name.
-postgres = [
-    "psycopg[binary]>=3.1",
-    "psycopg_pool>=3.2",
 ]
 
 storage = [
@@ -122,6 +139,66 @@ documents = [
 # SQLite-only collection run must remain runnable without a graph service.
 graph = [
     "neo4j>=5.20",
+]
+
+# An optional, disabled-by-default collection transport (scrapy.md, Phase
+# 0/1). `pipeline/transports/scrapy_transport.py` is not imported by
+# `pipeline/http.py`, `pipeline/registry.py`, `pipeline/runner.py`, or any
+# production module — a plain `uv sync` runs the whole pipeline exactly as
+# before, and `SCRAPY_ENABLED` (Settings, off by default) gates the runner
+# itself even once this extra is installed, so having the package on disk is
+# never enough to select it. See the module docstring for the rest.
+#
+# scrapy-playwright is declared here rather than left for a later browser
+# extra because scrapy.md's target architecture threads a `meta={"playwright":
+# True}` request through the same Scrapy engine — but installing this extra
+# pulls only the Python packages, never a browser binary: Playwright ships
+# its Chromium/Firefox/WebKit builds behind a separate `playwright install`
+# command, and nothing here calls it. That keeps "a normal installation does
+# not require browser binaries" true even with `uv sync --extra scrapy` run,
+# and a browser pilot (scrapy.md Phase 3) is the point at which an operator
+# would run `playwright install` on a worker image — never the ordinary
+# portal runtime, which does not install this extra at all.
+scrapy = [
+    "scrapy>=2.11",
+    "scrapy-playwright>=0.0.35",
+]
+
+# The semantic-analysis layer's model, local-only, first-use download,
+# excluded from the Railway image -- the same pattern as `documents` and
+# `ocr`. Nothing in `pipeline/nlp/` imports it at module load: chunking needs
+# nothing, and `--model stub` gives CI and offline development a deterministic
+# embedder with no weights on disk. `uv sync --extra nlp` is the opt-in that
+# turns on real embeddings and `--mode semantic` / `hybrid` search.
+#
+# 034A added sentence-transformers (it pulls torch + transformers +
+# huggingface_hub). 034D adds gliner for zero-shot entity spans -- it reuses
+# the same torch/transformers stack, so the extra does not grow a second
+# heavy tree. spaCy / medSpaCy join when the assertion tranche (034E) lands
+# -- see docs/semantic-analysis.md.
+#
+# 034G adds setfit for the claim-prediction bake-off. It pulls `datasets` and
+# `scikit-learn` (its classifier head); scikit-learn is pinned explicitly
+# because the SetFit arm is not the only user -- it is also a dependency
+# nothing else declares. The project's OWN logreg head (claims_train.py) is
+# pure Python + numpy and needs neither, so the default test suite covers the
+# bake-off's logreg path without this extra; the SetFit path sits behind the
+# `slow` pytest marker. See docs/claim-predictions-spec.md.
+#
+# SetFit 1.2.0 supports the Transformers 5 import layout, including the moved
+# `default_logdir` symbol. Keep the lower bound above the patched release for
+# CVE-2026-9856 and cap the major line so a future Transformers 6 migration is
+# deliberate. This does NOT touch the always-on app/Railway image: that one
+# installs `postgres storage graph` only and pulls no transformers at all. The
+# `nlp` extra is the local document-analysis worker's
+# (`deploy/Dockerfile.documents`), which is the only deployed image where
+# transformers is installed.
+nlp = [
+    "sentence-transformers>=3.0,<6",
+    "transformers>=5.10.4,<6",
+    "gliner>=0.2.13",
+    "setfit>=1.2",
+    "scikit-learn>=1.4",
 ]
 
 # The documentation site. An extra rather than a dependency-group because a
@@ -156,6 +233,50 @@ docs = [
     "mkdocs-git-revision-date-localized-plugin>=1.2",
 ]
 
+# BETA-107: a natural-language operator layer. It is an extra, not a
+# dependency, and everything about it is off by default:
+# `Settings.assistant_enabled` is False, `pipeline/assistant/` is importable
+# with none of this installed, and the Railway image does not install
+# `[assistant]` (Procfile / railway.toml pin the base install). The offline
+# test suite never makes a call.
+#
+# Two adapters, both OpenAI-chat-compatible over HTTP so neither needs a
+# native runtime in-process: a router leg and an answerer leg, configured
+# independently. BETA-107 reached a local Needle 2 / Ollama pair; BETA-114
+# retargeted both at OpenRouter (a CPU-only VPS could not route in time — see
+# `docs/assistant.md`). `openai` is the only pin — the client library for
+# both `/v1` endpoints; the model slugs and the key are configuration.
+assistant = [
+    "openai>=1.40,<2",
+]
+# Pipeline observability (performance.md:632, the last Phase 5 item). An
+# extra, not a dependency, for the same reason `neo4j` above is: most
+# deployments and every offline test run must keep working with no collector
+# anywhere near them, and `pipeline/telemetry.py` already degrades to a no-op
+# when this is not installed or `OTEL_ENABLED` is unset -- the import lives
+# inside `configure_telemetry()`, never at module scope, so a checkout without
+# this extra never fails to import anything that imports that module.
+#
+# The OTLP HTTP exporter is included (not left for later) because
+# `OTEL_EXPORTER_ENDPOINT` is a real, documented configuration knob from the
+# start -- shipping the API/SDK alone and telling an operator to add the
+# exporter themselves before export can ever work is a worse first release
+# than one more pinned package. Traces and metrics both go out over the same
+# `/v1/traces` and `/v1/metrics` HTTP paths a collector already exposes, so one
+# exporter package covers both signals; nothing here talks gRPC.
+otel = [
+    "opentelemetry-api>=1.27",
+    "opentelemetry-sdk>=1.27",
+    "opentelemetry-exporter-otlp-proto-http>=1.27",
+]
+
+# Open Jobs' Parquet reader is optional and isolated from the default
+# installation. The collector remains disabled until the deployed source
+# contract is validated; operators can opt in with `uv sync --extra open-jobs`.
+open-jobs = [
+    "pyarrow>=25,<26",
+]
+
 # Dev tooling lives in a dependency-group, not an optional-dependency extra,
 # so a plain `uv sync` (which start.sh runs) installs it by default. As an
 # extra it was omitted from the default sync, and running the startup script
@@ -164,6 +285,7 @@ docs = [
 dev = [
     "pytest>=8.0",
     "pytest-httpx>=0.30",
+    "pytest-xdist>=3.6",
     "ruff>=0.6",
 ]
 
@@ -213,5 +335,8 @@ packages = ["pipeline"]
 testpaths = ["tests"]
 markers = [
     "integration: hits live external sources, skipped by default",
+    "maps: requires the optional offline PMTiles build dependencies",
+    "serial: shares process-global state and runs outside the xdist lane",
+    "slow: needs a heavy optional model (e.g. a real SetFit fine-tune); skipped by default",
 ]
-addopts = "-m 'not integration'"
+addopts = "-m 'not integration and not slow'"

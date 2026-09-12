@@ -5,9 +5,12 @@ reads the warehouse; this reads the *pipeline* -- which modules exist, what
 each one depends on, when it last got anywhere -- and is the only place in the
 web layer that causes anything to happen to the outside world.
 
-Everything it hands back about a run comes from pipeline/runner.py, so the run
-a browser starts is the run the CLI would have started. The planning below is
-the one piece deliberately duplicated from `cli.run`, whose own version is
+Everything it hands back about a run is planned here and executed in
+pipeline/worker.py (a separate `pipeline worker` process, since the Phase 5
+worker cutover -- CLAUDE.md settled decision 10), through the same
+`pipeline.runner.run_waves` the CLI calls directly, so the run a browser
+starts is the run the CLI would have started. The planning below is the one
+piece deliberately duplicated from `cli.run`, whose own version is
 interleaved with the messages it prints to a terminal; the two are held
 together by a test that asserts they resolve identical waves rather than by a
 shared function that would have to serve both a browser and a console.
@@ -16,7 +19,7 @@ from __future__ import annotations
 
 import structlog
 
-from pipeline import db, runner
+from pipeline import db
 from pipeline.registry import (
     MODULE_REGISTRY,
     DependencyCycleError,
@@ -75,6 +78,7 @@ def modules(conn) -> dict:
             "name": name,
             "wave": waves.get(name),
             "supports_since": meta[name].supports_since,
+            "operator_only": meta[name].operator_only,
             "since_note": meta[name].since_note,
             "depends_on": list(meta[name].depends_on),
             "depends_note": meta[name].depends_note,
@@ -144,7 +148,29 @@ def _whole(name: str, value) -> int:
 
 
 def start_run(registry_of_jobs, settings, body: dict):
-    """Plan a run, claim the single job slot, and start it."""
+    """Plan a run, claim the single job slot, and enqueue it.
+
+    Enqueue, not start: since the Phase 5 worker cutover (CLAUDE.md settled
+    decision 10) this only ever writes a `worker_jobs` row for a separate
+    `pipeline worker` process to claim and execute -- see
+    pipeline/worker.py's `PipelineWorker`, which is what actually calls
+    `runner.run_waves` now. Nothing under this module runs a module directly
+    any more; the planning below (`plan()`, resolving `waves` here rather
+    than in the worker) is still deliberately duplicated from `cli.run` for
+    the reason the module docstring gives, and is unchanged by where
+    execution ends up happening.
+    """
+    if not settings.pipeline_worker_enabled:
+        # A deployment-topology fact (Settings.pipeline_worker_enabled), not
+        # a guess: refusing here beats enqueuing a row nothing will ever
+        # claim, which would sit reading "running" until someone noticed and
+        # asked why a crawl from three days ago had never finished.
+        raise JobError(
+            "No pipeline worker is configured for this deployment "
+            "(PIPELINE_WORKER_ENABLED=false). Start one with "
+            "`pipeline worker run` (./start.sh worker) before running a "
+            "module from here.", status=503)
+
     module = str(body.get("module") or "").strip()
     if not module:
         raise JobError("Which module? Pass a module name or 'all'.")
@@ -166,39 +192,23 @@ def start_run(registry_of_jobs, settings, body: dict):
 
     shape = plan(module, since, limit)
     waves = shape["waves"]
-    known = registry()
-
-    def work() -> list[dict]:
-        # Migrations first, on a writable connection, exactly as `cli.run`
-        # does: a warehouse built before a module's tables arrived would
-        # otherwise fail part-way through the run rather than before it.
-        conn = db.get_connection(settings)
-        try:
-            db.apply_migrations(conn)
-        finally:
-            conn.close()
-
-        summary = runner.run_waves(waves, jobs, settings, since, dry_run, limit,
-                                    _LoggingObserver())
-        # Exceptions are already inside the rows; surface them as text so the
-        # summary survives JSON.
-        return [{**row, "error": (f"{type(row['error']).__name__}: {row['error']}"
-                                   if row.get("error") is not None else None)}
-                 for row in summary]
 
     label = module if module != "all" else f"all ({len(shape['targets'])} modules)"
     if dry_run:
         label = f"{label} — dry run"
 
-    return registry_of_jobs.start(
-        kind="run", label=label,
+    return registry_of_jobs.enqueue_pipeline_run(
+        label=label,
         args={"module": module, "since": since, "dry_run": dry_run,
                "limit": limit, "jobs": jobs},
-        work=work,
-        # The threads whose log lines belong to this job. runner.execute_module
-        # renames its thread to the module it is running, so these are the
-        # names that will appear on the records.
-        thread_names=set(shape["targets"]) | {name for name in known},
+        # What the worker reads back on claim. `waves` is resolved here,
+        # once, at request time -- the same moment `cli.run` would have
+        # resolved it -- rather than re-resolved inside the worker process
+        # against whatever MODULE_REGISTRY that process happens to have
+        # discovered; a dependency added between enqueue and claim should not
+        # retroactively change what an already-queued run does.
+        arguments={"waves": waves, "since": since, "dry_run": dry_run,
+                    "limit": limit, "jobs": jobs},
     )
 
 
@@ -244,71 +254,8 @@ def start_export(registry_of_jobs, settings, body: dict):
         kind="export", label=f"export {target}",
         args={"target": target}, work=work, thread_names=set())
 
-
-class _LoggingObserver(runner.RunObserver):
-    """A run reported through structlog, which the job's handler is capturing.
-
-    The CLI's observer paints a progress bar; there is no bar here, and the
-    honest equivalent of one over HTTP is a line saying what started and what
-    it did. `phase()` calls from inside modules come through the same way, so
-    the browser sees "m05_cqc — paging provider index" while it happens.
-    """
-
-    def run_starting(self, total_modules: int) -> None:
-        log.info("run.starting", modules=total_modules)
-
-    def wave_starting(self, names: list[str], width: int) -> None:
-        log.info("run.wave", modules=", ".join(names), at_a_time=width)
-
-    def module_progress(self, name: str):
-        return _phase_reporter(name)
-
-    def module_finished(self, row: dict) -> None:
-        if row["status"] == "failed":
-            log.warning("run.module_failed", module=row["module"],
-                         error=str(row.get("error")), seconds=round(row["elapsed"], 1))
-        else:
-            log.info("run.module_done", module=row["module"],
-                      seconds=round(row["elapsed"], 1), rows=row.get("rows", 0),
-                      review=row.get("review", 0), failures=row.get("failures", 0))
-
-
-class _PhaseReporter:
-    """The ProgressReporter shape, logging instead of drawing.
-
-    `track` must yield the items unchanged -- it is wrapped around real loops
-    inside modules, and anything clever here would change what a run collects.
-    """
-
-    def __init__(self, module: str) -> None:
-        self._module = module
-
-    def phase(self, text: str) -> None:
-        log.info("run.phase", module=self._module, phase=text)
-
-    def track(self, items, description: str, total: int | None = None):
-        log.info("run.phase", module=self._module, phase=description,
-                  items=(total if total is not None else _length_of(items)))
-        return iter(items)
-
-
-def _length_of(items) -> str:
-    try:
-        return len(items)
-    except TypeError:
-        return "?"
-
-
-class _phase_reporter:  # noqa: N801 - used as a context manager, not a class
-    """`module_progress` has to be a context manager; there is nothing to tear
-    down on this side, so this is the whole of it."""
-
-    def __init__(self, module: str) -> None:
-        self._module = module
-
-    def __enter__(self) -> _PhaseReporter:
-        log.info("run.module_starting", module=self._module)
-        return _PhaseReporter(self._module)
-
-    def __exit__(self, *exc_info) -> bool:
-        return False
+# There used to be a `_LoggingObserver`/`_PhaseReporter` pair here, reporting
+# a module run through structlog for the job log to capture. They moved to
+# pipeline/worker.py's `_CheckpointingObserver`/`_PhaseReporter` with the
+# execution they were reporting on: since the Phase 5 worker cutover this
+# module never runs a module itself, so it has nothing left to observe.

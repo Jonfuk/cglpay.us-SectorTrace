@@ -4,6 +4,7 @@ import inspect
 
 import pytest
 
+from pipeline import catalog
 from pipeline.modules import m06_workforce_census as census
 
 # --- segment classification ------------------------------------------------------
@@ -129,7 +130,7 @@ def test_the_module_writes_no_verification_markdown():
     supplementing it.
 
     The worklist printed `UPDATE workforce_census_metrics SET verified = 1
-    WHERE census_year = ?` at the top -- twenty flags on one statement,
+    WHERE census_year = %s` at the top -- twenty flags on one statement,
     attributed to nobody. Migration 0033 refuses that statement, so a module
     still generating a document that instructs it would be handing the operator
     a route the database aborts. Asserted against the source rather than the
@@ -148,7 +149,7 @@ def test_metrics_table_has_no_provider_column(conn):
     """The census publishes sector aggregates only; attributing a figure to a
     named provider would be inference presented as measurement.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(workforce_census_metrics)")]
+    columns = [r["name"] for r in catalog.columns_of(conn, "workforce_census_metrics")]
     assert not any("provider" in c for c in columns)
 
 

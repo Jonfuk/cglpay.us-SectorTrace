@@ -518,8 +518,21 @@ def run(ctx: ModuleContext) -> None:
         # having fetched nothing — five modules lost to one module's open
         # transaction. This is the same fault m11 had, in the one module that
         # had no commit of its own at all.
+        #
+        # PostgreSQL (performance.md Phase 1) has no single writer slot to
+        # contend over, but the commit stays: it still releases this
+        # transaction's row locks on `authorities` before three minutes of
+        # network fetching, rather than holding them across it — the
+        # "releases locks before network/CPU work" case Phase 4's commit
+        # audit keeps, not one it removes.
         if not ctx.dry_run:
             conn.commit()
+            # Rebuild the derived PostGIS geometry from the geojson just
+            # written. No-op unless the warehouse is PostgreSQL with PostGIS;
+            # see pipeline/geo.py.
+            from pipeline import geo
+
+            geo.refresh_authority_geometry(conn)
 
         # --- Historical vintages: detect retirements and resolve successors ---
         # Snapshots are pooled by calendar epoch across both series so a

@@ -37,6 +37,11 @@ EXPORTABLE = {
     # markers — rows with no number in them, which is not what somebody
     # downloading this is after.
     "ndtms": ("estimates", "ndtms"),
+    # `recent`, not the year/area/term aggregates on the same page — those
+    # are already-computed summaries, not a corpus a reader downloads rows
+    # from. See WINDOWED below: `recent` itself is capped at 50, so this key
+    # only names *which* part of the payload the complete export replaces.
+    "pfd": ("recent", "pfd"),
 }
 
 # Endpoints whose /api/v1 payload is a *window* onto something larger, because
@@ -49,8 +54,10 @@ EXPORTABLE = {
 # corpus with nothing in the file saying so — a CSV that looks complete is
 # worse than one that is visibly partial, because nobody checks. Making the
 # easy path raise means that cannot be reintroduced by a caller who reaches for
-# it without knowing this happened.
-WINDOWED = {"contracts"}
+# it without knowing this happened. `pfd` joined this set for the same reason:
+# its `recent` key is `LIMIT 50` against a 1,500+ row corpus — see
+# `public_queries.all_pfd_reports`.
+WINDOWED = {"contracts", "pfd"}
 
 NOTE = (
     "All figures are from public-domain sources and carry their own source URL "

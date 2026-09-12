@@ -33,6 +33,8 @@ STOP_APP={{ 1 if mirror_stop_app_during_sync else 0 }}
 ARCHIVE_SYNC={{ 1 if mirror_archive_sync else 0 }}
 ARCHIVE_WORKERS={{ mirror_archive_workers }}
 GRAPH_REBUILD={{ 1 if mirror_graph_rebuild else 0 }}
+NLP_REBUILD={{ 1 if mirror_nlp_rebuild else 0 }}
+NLP_EMBED_MODEL="{{ mirror_nlp_embed_model }}"
 METRICS_DIR="{{ mirror_metrics_dir }}"
 {% if mirror_sync_mode == 'tunnel' %}
 TUNNEL_UNIT="sectortrace-mirror-tunnel.service"
@@ -132,6 +134,15 @@ cd "$STATE_DIR"
 
 compose_sync() {
     docker compose -f docker-compose.sync.yml run --rm sync "$@"
+}
+
+# The semantic-analysis layer runs in the documents worker, not the sync
+# container: it is the only image on this box with the `nlp` extra (torch,
+# sentence-transformers). Same whole-of-data/ view and the same .env, so it
+# reaches this box's warehouse exactly as `compose_sync` does; the entrypoint
+# is `pipeline`, so the arguments are a bare subcommand.
+compose_documents() {
+    docker compose -f docker-compose.documents.yml run --rm documents "$@"
 }
 
 publish_metrics() {
@@ -359,6 +370,24 @@ if [ "$GRAPH_REBUILD" -eq 1 ] && [ "$DO_WAREHOUSE" -eq 1 ]; then
     # report. --clear because this is a replacement, not a merge.
     say "rebuilding the evidence graph"
     compose_sync graph rebuild --clear || fail "graph rebuild failed"
+fi
+
+if [ "$NLP_REBUILD" -eq 1 ] && [ "$DO_WAREHOUSE" -eq 1 ]; then
+    # Same reasoning as the graph rebuild above: document_chunks and
+    # document_embeddings are a projection of the warehouse, so they are
+    # rebuilt after it moved, never before. This exists because a managed
+    # source (Railway) has no `nlp` extra and so never populates
+    # document_embeddings itself — without this step, semantic / hybrid
+    # search on this box has nothing to work with.
+    #
+    # `nlp chunk` first: chunking needs no model, is version-stamped and
+    # idempotent, and the source may not have run it. `nlp embed` is
+    # resume-safe — it only touches chunks with no vector for this model —
+    # but after a wholesale warehouse replace that is all of them. The model
+    # weights persist in {{ state_dir }}/nlp-cache between runs.
+    say "rebuilding the semantic-analysis layer (chunks + embeddings, model: $NLP_EMBED_MODEL)"
+    compose_documents nlp chunk || fail "nlp chunk failed"
+    compose_documents nlp embed --model "$NLP_EMBED_MODEL" || fail "nlp embed failed"
 fi
 
 if [ -n "$DEFERRED_FAILURE" ]; then

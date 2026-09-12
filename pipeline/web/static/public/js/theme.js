@@ -54,6 +54,17 @@ export const THEME = {
   },
 };
 
+// Secondary chart text (series data-labels, graph node labels) that is set
+// directly on an ECharts option rather than through the registered theme's
+// own title/legend/tooltip styling. An option-level colour always wins over
+// the theme, so a page that hardcodes one defeats light mode outright —
+// this was found as a real bug (light-mode chart titles and labels reading
+// pale-on-white) before this helper existed; every such colour now reads
+// through it instead of repeating the literal.
+export function chartLabelColor() {
+  return document.documentElement.dataset.bsTheme === 'light' ? '#132238' : '#e6edf3';
+}
+
 let registered = false;
 
 export function registerTheme() {
@@ -79,8 +90,12 @@ export function applyPortalTheme(choice = 'system') {
     ? (window.matchMedia?.('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
     : theme;
   root.dataset.portalTheme = theme;
-  const select = document.querySelector('#theme-select');
-  if (select) select.value = theme;
+  // Two controls share this class: the topbar one (desktop and wide
+  // viewports) and a duplicate inside the mobile offcanvas nav (the topbar
+  // one is `display: none` below 900px with nothing else reachable there —
+  // see .theme-control-mobile in styles.css). Both stay in sync regardless
+  // of which one a reader used.
+  for (const select of document.querySelectorAll('.theme-select')) select.value = theme;
   window.dispatchEvent(new CustomEvent('portalthemechange'));
 }
 
@@ -88,11 +103,13 @@ export function initPortalTheme() {
   let choice = 'system';
   try { choice = localStorage.getItem(THEME_KEY) || choice; } catch (e) { /* private mode */ }
   applyPortalTheme(choice);
-  document.querySelector('#theme-select')?.addEventListener('change', (event) => {
-    const next = event.target.value;
-    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
-    applyPortalTheme(next);
-  });
+  for (const select of document.querySelectorAll('.theme-select')) {
+    select.addEventListener('change', (event) => {
+      const next = event.target.value;
+      try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* private mode */ }
+      applyPortalTheme(next);
+    });
+  }
   window.matchMedia?.('(prefers-color-scheme: light)').addEventListener('change', () => {
     if (document.documentElement.dataset.portalTheme === 'system') applyPortalTheme('system');
   });

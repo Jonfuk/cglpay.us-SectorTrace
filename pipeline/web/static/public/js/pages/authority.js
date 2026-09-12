@@ -18,9 +18,12 @@
 'use strict';
 
 import { el, replace, fetchJSON, num, gbp, isoDate } from '/app.js';
+import { myAreaToggle } from '/js/myarea.js';
+import { notebookButton } from '/js/notebook.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, tableCard, escapeHtml, shareButton,
-          findingBlock, evidenceMeta } from '/js/components.js';
+          findingBlock, evidenceMeta, workbenchNav } from '/js/components.js';
+import { pushRecent } from '/js/recent.js';
 
 const TYPE_LABELS = {
   county: 'County council',
@@ -60,17 +63,21 @@ async function renderOne(main, code) {
   try {
     data = await fetchJSON(`authorities/${encodeURIComponent(code)}`);
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderOne(main, code)));
+    replace(main, errorCard(error, () => renderOne(main, code)));
     return () => {};
   }
 
   const authority = data.authority || {};
+  // BETA-077: leave a trail back to this authority.
+  pushRecent({ type: 'authority', id: authority.ons_code || code, name: authority.name || code });
   const type = TYPE_LABELS[authority.type] || authority.type || 'Local authority';
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('p', {}, el('a', { href: '#/geography' }, '← Map of all authorities'),
         ' · ', el('a', { href: `#/compare?ons_code=${code}` },
-          'Compare with other authorities →')),
+          'Compare with other authorities →'),
+        ' · ', el('a', { href: `#/relationships?ons_code=${code}` },
+          'Who it commissions →')),
       el('h1', { text: authority.name || code }),
       el('p', { class: 'lede' },
         `${type} · ${authority.region || 'region not recorded'} · `,
@@ -80,7 +87,11 @@ async function renderOne(main, code) {
           title: `SectorTrace — ${authority.name || code}`,
           text: 'Explore published local-authority evidence in SectorTrace.',
           label: 'Share this authority',
-        }))),
+        }),
+        // BETA-073: keep this authority as the reader's local starting point.
+        myAreaToggle(authority.ons_code || code, authority.name),
+        notebookButton({ kind: 'authority', ref: authority.ons_code || code,
+          label: authority.name || code }))),
     el('details', { class: 'read-first' },
       el('summary', { text: 'How to read this authority workbench' }),
       el('p', { text: 'Grant allocation, budgeted spend, treatment estimates and contracts come from different sources. They are shown side by side, never combined into a score.' })),
@@ -98,7 +109,8 @@ async function renderOne(main, code) {
     el('div', { id: 'grant-budget' }),
     el('div', { id: 'drilldown' }),
     el('div', { id: 'treatment' }),
-    el('div', { id: 'contracts' }));
+    el('div', { id: 'contracts' }),
+    el('div', { id: 'comparators' }));
   replace(main, page);
 
   renderCoverage(page.querySelector('#coverage'), data);
@@ -106,8 +118,29 @@ async function renderOne(main, code) {
   renderDrillDown(page.querySelector('#drilldown'), data);
   renderTreatment(page.querySelector('#treatment'), data, charts);
   renderContracts(page.querySelector('#contracts'), data, code);
+  renderComparators(page.querySelector('#comparators'), data);
 
-  return () => disposeCharts(charts);
+  // BETA-076: sticky section index with counts, scroll-spy, back-to-top and
+  // ?section= deep links.
+  const comparatorCount = ['rough_sleeping', 'statutory_homelessness',
+    'temporary_accommodation'].filter(
+    (k) => (data.comparators?.[k]?.rows || []).length).length;
+  const sections = [
+    { id: 'coverage', label: 'Coverage' },
+    { id: 'grant-budget', label: 'Grant & budget',
+      count: (data.grant?.rows?.length || 0) + (data.budget?.rows?.length || 0) },
+    { id: 'drilldown', label: 'Budget detail', count: data.budget_detail?.rows?.length || 0,
+      available: (data.budget_detail?.rows?.length || 0) > 0 },
+    { id: 'treatment', label: 'Treatment' },
+    { id: 'contracts', label: 'Contracts', count: data.contracts?.total || 0,
+      available: (data.contracts?.total || 0) > 0 },
+    { id: 'comparators', label: 'Homelessness comparators', count: comparatorCount,
+      available: comparatorCount > 0 },
+  ];
+  const wb = workbenchNav(page, sections, { routePath: `/authorities/${code}` });
+  page.insertBefore(wb.nav, page.querySelector('#coverage'));
+
+  return () => { wb.cleanup(); disposeCharts(charts); };
 }
 
 // --- coverage (W-12) ---------------------------------------------------------
@@ -184,7 +217,7 @@ function renderGrantBudget(container, data, charts) {
     charts.push(mountChart(container.querySelector('#grant-chart'), {
       grid: { left: 8, right: 24, top: 60, bottom: 8, containLabel: true },
       title: { text: 'Public health grant', left: 0, top: 0,
-        textStyle: { fontSize: 15, color: '#e6edf3' } },
+        textStyle: { fontSize: 15 } },
       legend: { top: 30, type: 'scroll' },
       tooltip: {
         trigger: 'axis', axisPointer: { type: 'shadow' },
@@ -228,7 +261,7 @@ function renderGrantBudget(container, data, charts) {
     charts.push(mountChart(container.querySelector('#budget-chart'), {
       grid: { left: 8, right: 24, top: 60, bottom: 8, containLabel: true },
       title: { text: 'Budgeted public health spend', left: 0, top: 0,
-        textStyle: { fontSize: 15, color: '#e6edf3' } },
+        textStyle: { fontSize: 15 } },
       tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
       xAxis: { type: 'category', data: budget.map((r) => r.financial_year) },
       yAxis: { type: 'value', axisLabel: { formatter: (v) => gbp(v) } },
@@ -380,7 +413,7 @@ function drawIndicator(container, indicator, rows, england, charts) {
   charts.push(mountChart(container, {
     title: {
       text: indicator.indicator_name, subtext: indicator.unit || '',
-      left: 0, top: 0, textStyle: { fontSize: 15, color: '#e6edf3' },
+      left: 0, top: 0, textStyle: { fontSize: 15 },
       subtextStyle: { color: '#8b949e' },
     },
     grid: { top: 76 },
@@ -513,4 +546,114 @@ function renderContracts(container, data, code) {
       provenanceFromRows(notices, {
         module: 'm01_procurement', tables: ['contracts', 'supplier_aliases'],
       }) || el('span', {}))));
+}
+
+// --- comparators (Modules 29-31) ---------------------------------------------
+
+/* Rough sleeping, statutory homelessness and temporary accommodation —
+ * requested and built specifically to sit beside this authority's own
+ * substance-misuse evidence, because the two are widely documented as
+ * overlapping populations. Three separate tables, three separate caveats,
+ * never a combined figure: the whole point of a comparator is that the
+ * reader draws the inference, not this page. */
+function renderComparators(container, data) {
+  const comparators = data.comparators || {};
+  const roughSleeping = comparators.rough_sleeping?.rows || [];
+  const statutoryHomelessness = comparators.statutory_homelessness?.rows || [];
+  const temporaryAccommodation = comparators.temporary_accommodation?.rows || [];
+
+  if (!roughSleeping.length && !statutoryHomelessness.length
+    && !temporaryAccommodation.length) {
+    replace(container, section(
+      'Comparators',
+      'Rough sleeping and homelessness figures for this authority, shown '
+      + 'beside its substance-misuse evidence because the two populations '
+      + 'are widely documented to overlap.',
+      noData('rough sleeping and homelessness comparators',
+        './start.sh run m29_rough_sleeping m30_statutory_homelessness m31_temporary_accommodation')));
+    return;
+  }
+
+  replace(container, section(
+    'Comparators',
+    'Rough sleeping and homelessness figures for this authority, shown '
+    + 'beside its substance-misuse evidence above because the two '
+    + 'populations are widely documented to overlap — never combined, '
+    + 'ratioed or scored against it.',
+    el('div', { class: 'panel' },
+      renderRoughSleeping(roughSleeping, comparators.rough_sleeping?.caveat),
+      renderStatutoryHomelessness(statutoryHomelessness,
+        comparators.statutory_homelessness?.caveat),
+      renderTemporaryAccommodation(comparators.temporary_accommodation || {}))));
+}
+
+function renderRoughSleeping(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', { style: 'margin-bottom:20px;' },
+    el('h3', { class: 'small muted', text: 'Rough sleeping (MHCLG annual snapshot)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Rough sleeping', [
+      { title: 'Year', field: 'snapshot_year', width: 90 },
+      { title: 'Estimated count', field: 'count_text', width: 140 },
+      { title: 'Rate per 100k', field: 'rate_text', width: 130 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm29_rough_sleeping', tables: ['rough_sleeping_snapshot'],
+    }) || el('span', {}));
+}
+
+function renderStatutoryHomelessness(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', { style: 'margin-bottom:20px;' },
+    el('h3', { class: 'small muted', text: 'Statutory homelessness (MHCLG H-CLIC, quarterly)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Statutory homelessness', [
+      { title: 'Quarter', field: 'quarter_label', width: 200 },
+      { title: 'Households assessed', field: 'total_initial_assessments_text', width: 160 },
+      { title: 'Owed a duty', field: 'total_owed_duty', width: 120 },
+      { title: 'Prevention duty', field: 'prevention_duty_owed', width: 130 },
+      { title: 'Relief duty', field: 'relief_duty_owed', width: 110 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm30_statutory_homelessness', tables: ['statutory_homelessness_snapshot'],
+    }) || el('span', {}));
+}
+
+// BETA-064: the bed-and-breakfast "of which" measure codes, as published.
+const TA_BREAKDOWN_LABEL = {
+  bb_households: 'Households in B&B',
+  bb_households_with_children: 'of which: with children',
+};
+
+function renderTemporaryAccommodation(comparator) {
+  const rows = comparator.rows || [];
+  if (!rows.length) return el('span', {});
+  const breakdown = comparator.breakdown || [];
+  return el('div', {},
+    el('h3', { class: 'small muted', text: 'Temporary accommodation (MHCLG H-CLIC, quarterly)' }),
+    pinnedCaveat(comparator.caveat, 'Read before comparing'),
+    tableCard('Temporary accommodation', [
+      { title: 'Quarter', field: 'quarter_label', width: 200 },
+      { title: 'Households in TA', field: 'total_households_ta_text', width: 150 },
+      { title: 'With children', field: 'households_ta_with_children', width: 130 },
+      { title: 'Children in TA', field: 'children_in_ta', width: 130 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    breakdown.length
+      ? el('div', {},
+          el('h4', { class: 'small muted', text: 'Bed-and-breakfast breakdown (Table TA1)' }),
+          pinnedCaveat(comparator.breakdown_caveat, 'Read before comparing'),
+          tableCard('B&B breakdown', [
+            { title: 'Quarter', field: 'quarter_label', width: 200 },
+            { title: 'Measure', field: 'measure_label', width: 220 },
+            { title: 'Households', field: 'households_text', width: 130 },
+          ], breakdown.map((r) => ({
+            ...r, measure_label: TA_BREAKDOWN_LABEL[r.measure] || r.measure,
+          })), { height: Math.min(300, 60 + breakdown.length * 32) }))
+      : el('span', {}),
+    provenanceFromRows(rows.concat(breakdown), {
+      module: 'm31_temporary_accommodation',
+      tables: breakdown.length
+        ? ['temporary_accommodation_snapshot', 'temporary_accommodation_breakdowns']
+        : ['temporary_accommodation_snapshot'],
+    }) || el('span', {}));
 }

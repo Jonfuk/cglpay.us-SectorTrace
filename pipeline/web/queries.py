@@ -1,31 +1,25 @@
-"""Everything the UI reads, on a connection that cannot write.
+"""Everything the UI reads, on a PostgreSQL connection that cannot write.
 
 The browser is a general database viewer — it will run a table scan, a sort on
 an unindexed column, and whatever SQL someone types into the query box. Two
 guards make that safe to expose rather than merely convenient:
 
-  * **`mode=ro` plus `query_only`.** The read-only URI stops writes to the
-    warehouse at the driver level, and `query_only` extends that to anything
-    the connection later attaches. Neither depends on inspecting the SQL, so
-    neither can be talked around by a statement nobody anticipated.
-
-  * **A deadline on every statement.** SQLite's progress handler aborts a
+  * **A deadline on every statement.** PostgreSQL's statement timeout aborts a
     query that outstays it. `la_revenue_budgets` has 237k rows and the
     Fingertips views join across two more, so an ordinary-looking sort can run
     for minutes; the alternative to a deadline is a page that hangs with no
     way to cancel and a thread stuck behind it.
 
-Read-only is not a permission boundary between people. Anyone who can reach
-this server can already open the file with `sqlite3`. It is a boundary between
-*this tool* and the warehouse: a viewer that can only view cannot corrupt the
-evidence base through a mis-click, and that is what it is for.
+Read-only is not a permission boundary between people. It is a boundary between
+*this tool* and the warehouse: reads go through a SELECT-only role
+(DATABASE_RO_URL) so a viewer that can only view cannot corrupt the evidence
+base through a mis-click, and that is what it is for.
 """
 from __future__ import annotations
 
-import sqlite3
-import time
+import json
+import re
 from contextlib import contextmanager
-from pathlib import Path
 from typing import Any, Iterator
 
 from pipeline import catalog, db
@@ -42,12 +36,6 @@ MAX_PAGE_SIZE = 500
 # that a mistake is a message rather than a hang.
 QUERY_TIMEOUT_SECONDS = 20.0
 
-# How often SQLite consults the progress handler, in VM instructions. Small
-# enough to notice a deadline promptly, large enough that the callback is not
-# itself a cost.
-_PROGRESS_INSTRUCTIONS = 10_000
-
-
 class QueryError(Exception):
     """A query that could not run, with a message meant for the person who
     typed it rather than a traceback."""
@@ -62,123 +50,69 @@ def readonly_connection(settings: Settings | None = None):
     database is not answering"), and they deserve an answer rather than a
     stack trace.
 
-    Read-only means something different on each backend, and on PostgreSQL it
-    means something *better*:
-
-      * SQLite — `mode=ro` on the URI plus `PRAGMA query_only`, both enforced
-        by the driver rather than by inspecting the SQL, so neither can be
-        talked around by a statement nobody anticipated.
-      * PostgreSQL — `DATABASE_RO_URL`, a role holding `SELECT` and nothing
-        else, plus `default_transaction_read_only` on the connection. The
-        session setting is the belt; the role is the braces, and the role is
-        the one that survives a bug in this file. A session setting is
-        something this application *asks for*; a role without INSERT cannot be
-        talked into one whatever the code does.
+    PostgreSQL read-only means `DATABASE_RO_URL`, a role holding `SELECT` and
+    nothing else, plus `default_transaction_read_only` on the connection. The
+    session setting is the belt; the role is the braces, and the role is the
+    one that survives a bug in this file.
 
     With no `DATABASE_RO_URL` configured this falls back to `DATABASE_URL` —
     which works, and is weaker: reads then run as the role that owns the
     schema, so the only thing standing between the SQL box and a write is the
-    session setting. That is a real difference from the SQLite path, not a
-    tidiness point, so the fallback is logged rather than taken quietly. See
+    session setting. That is a weaker deployment posture, so the fallback is
+    logged rather than taken quietly. See
     pipeline/migrations/postgres/README.md for the role definitions.
     """
     settings = settings or get_settings()
 
-    if settings.database_backend == "postgres":
-        import structlog
+    import structlog
 
-        from pipeline import pg
+    from pipeline import pg
 
-        url = settings.database_ro_url or settings.database_url
-        if not settings.database_ro_url:
-            structlog.get_logger().warning(
-                "web.readonly_without_a_reader_role",
-                database=settings.redacted_database_url,
-                note="reads are running as the schema owner; set DATABASE_RO_URL "
-                     "to a SELECT-only role so a write is refused by the server "
-                     "rather than by a session setting")
-        try:
-            # Borrowed, not opened: `close()` gives it back. Opening one to
-            # the LAN server is 68ms, which the web layer was paying on every
-            # request — more than most of the queries it then ran. See
-            # `pg.read_pool`.
-            return pg.connect_pooled(
-                url, application_name="sectortrace-web",
-                statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
-        except db.Error as exc:
-            raise QueryError(
-                f"Could not reach the PostgreSQL warehouse at "
-                f"{settings._redact(url)}: {exc}"
-            ) from exc
-
-    path = Path(settings.database_path).resolve()
-    if not path.exists():
+    url = settings.database_ro_url or settings.database_url
+    if not url:
         raise QueryError(
-            f"No warehouse at {path}. Run a module first — e.g. "
-            "`./start.sh run m00_geography` — and the database will be created."
-        )
-
-    # SQLite's URI form wants forward slashes on every platform, and an
-    # absolute Windows path (C:/...) needs the extra leading slash to sit in
-    # the authority-less form the parser expects.
-    as_posix = path.as_posix()
-    uri = f"file:{as_posix}?mode=ro" if as_posix.startswith("/") else f"file:/{as_posix}?mode=ro"
-
+            "No DATABASE_URL configured. PostgreSQL is the only application "
+            "database (performance.md Phase 1).")
+    if not settings.database_ro_url and settings.environment.lower() in {
+            "production", "prod"}:
+        raise QueryError(
+            "DATABASE_RO_URL is required for production read paths. Use a "
+            "PostgreSQL role with SELECT only; an owner connection is not a "
+            "read-only deployment guard.")
+    if not settings.database_ro_url:
+        structlog.get_logger().warning(
+            "web.readonly_without_a_reader_role",
+            database=settings.redacted_database_url,
+            note="reads are running as the schema owner; set DATABASE_RO_URL "
+                 "to a SELECT-only role so a write is refused by the server "
+                 "rather than by a session setting")
     try:
-        conn = sqlite3.connect(uri, uri=True, timeout=5.0)
-    except db.OperationalError as exc:
-        # The usual cause is a WAL database whose -shm file is missing and
-        # cannot be created by a read-only connection: SQLite needs shared
-        # memory to read a WAL, and read-only cannot make it. Any pipeline
-        # command re-creates it.
+        # Borrowed, not opened: `close()` gives it back. Opening one to the LAN
+        # server is 68ms, which the web layer was paying on every request —
+        # more than most of the queries it then ran. See `pg.read_pool`.
+        return pg.connect_pooled(
+            url, application_name="sectortrace-web",
+            statement_timeout_ms=int(QUERY_TIMEOUT_SECONDS * 1000))
+    except db.Error as exc:
         raise QueryError(
-            f"Could not open {path} for reading: {exc}. If the database is in "
-            "WAL mode and was left without its -shm file, run any pipeline "
-            "command (e.g. `./start.sh list-modules`) to restore it."
+            f"Could not reach the PostgreSQL warehouse at "
+            f"{settings._redact(url)}: {exc}"
         ) from exc
-
-    conn.row_factory = sqlite3.Row
-    # Belt and braces over mode=ro: query_only also covers databases ATTACHed
-    # later, which the read-only flag on the main database does not.
-    conn.execute("PRAGMA query_only = ON")
-    return conn
 
 
 @contextmanager
 def deadline(conn, seconds: float = QUERY_TIMEOUT_SECONDS) -> Iterator[None]:
     """Abort statements on this connection that run longer than `seconds`.
 
-    On PostgreSQL this is a no-op, because the equivalent is already in place
-    and is not a context manager: `readonly_connection` sets
-    `statement_timeout` on the session, so every statement carries the
-    deadline whether or not anyone remembered to wrap it. The server cancels
-    and raises `QueryCanceled`, which `_run` turns into the same message the
-    SQLite path produces.
-
-    A no-op rather than an error because the callers should not have to ask
-    which backend they are on — `with deadline(conn):` reads the same and
-    means the same, and the only difference is where the timer lives.
-
-    The one behavioural difference worth naming: the argument is honoured on
-    SQLite and ignored on PostgreSQL, where the session's timeout wins. Both
-    callers that pass a value pass a shorter one for a cheap probe, so the
-    effect is a probe that may run for the full 20s instead of 2s rather than
-    one that outlives its deadline.
+    A no-op: the deadline is already in place and is not a context manager.
+    `readonly_connection` sets `statement_timeout` on the session, so every
+    statement carries it whether or not anyone remembered to wrap it. The
+    server cancels and raises `QueryCanceled`, which `_run` turns into a
+    timed-out message. `with deadline(conn):` stays at the call sites because
+    it reads clearly and means the deadline is enforced; `seconds` is ignored
+    because the session's timeout wins.
     """
-    if db.backend_of(conn) == "postgres":
-        yield
-        return
-
-    expires_at = time.monotonic() + seconds
-
-    def _abort_if_late() -> int:
-        return 1 if time.monotonic() > expires_at else 0
-
-    conn.set_progress_handler(_abort_if_late, _PROGRESS_INSTRUCTIONS)
-    try:
-        yield
-    finally:
-        conn.set_progress_handler(None, 0)
+    yield
 
 
 def escape_like(term: str) -> str:
@@ -306,6 +240,87 @@ def object_type(conn, name: str) -> str | None:
     return catalog.object_type(conn, name)
 
 
+# BETA-083: one-line descriptions for the tables an operator opens most. Not
+# exhaustive — an undescribed table simply has no description line. Kept short
+# and factual; the authoritative account of a source table is its migration
+# comment and docs/SOURCES.md.
+SCHEMA_DESCRIPTIONS = {
+    "authorities": "One row per English local authority (ONS geography).",
+    "providers": "Tracked provider organisations; `is_target` marks campaign subjects.",
+    "provider_identifiers": "External ids (charity number, company number) per provider.",
+    "contracts": "Procurement notices matched to the sector keyword set.",
+    "council_spend": "Published council payment lines from spend-transparency files.",
+    "public_health_grants": "Public health grant allocations per authority per year.",
+    "la_revenue_budgets": "Local-authority budgeted spend, by section and line code.",
+    "fingertips_indicators": "OHID Fingertips indicator catalogue.",
+    "fingertips_la_values": "Per-authority Fingertips values with 95% intervals.",
+    "ndtms_la_statistics": "NDTMS modelled local-authority estimates.",
+    "cqc_locations": "CQC-registered locations for tracked providers.",
+    "hse_enforcement_notices": "HSE enforcement notices matched to a provider.",
+    "pfd_reports": "Coroners' Prevention of Future Deaths reports (metadata).",
+    "pfd_provider_mentions": "A provider mentioned in a PFD report; `mention_type` distinguishes recipient from body text.",
+    "sar_documents": "Safeguarding Adult Review documents from the National SAR Library.",
+    "tribunal_cases": "Employment tribunal cases with a provider as a party.",
+    "document_records": "Parsed documents (committee papers, CDP documents).",
+    "document_elements": "One row per parsed element of a document version.",
+    "document_versions": "Parse versions of a document; `is_active` is the current one.",
+    "evidence_records": "The provenance envelope: source URL, retrieval time, payload hash.",
+    "review_queue": "Candidates awaiting a human decision.",
+    "run_ledger": "One durable row per run of the shared module runner.",
+    "schema_migrations": "Which migration files have been applied.",
+    "parse_failures": "Rows a module could not parse, with a logged reason.",
+}
+
+
+def schema_graph(conn: db.Connection) -> dict:
+    """A read-only schema graph (BETA-083): every table and view with its
+    columns, its foreign-key edges (table- and column-level) and a short
+    description where one is registered.
+
+    Composed from the existing catalogue helpers; no new SQL surface and no
+    row reads. The table browser's own restricted-table gate, timeout and row
+    caps are unchanged — this only describes the shape.
+    """
+    objects = sorted(catalog.list_objects(conn), key=lambda o: (o["type"], o["name"]))
+    with _guarded(conn):
+        counts = catalog.row_counts(
+            conn, [o["name"] for o in objects if o["type"] == "table"])
+
+    fk_cols = catalog.foreign_key_columns(conn)
+    fk_by_child: dict[str, dict[str, dict]] = {}
+    for edge in fk_cols:
+        fk_by_child.setdefault(edge["child"], {})[edge["from_col"]] = {
+            "table": edge["parent"], "column": edge["to_col"],
+        }
+
+    tables = []
+    for obj in objects:
+        name = obj["name"]
+        cols = catalog.columns_of(conn, name)
+        fks = fk_by_child.get(name, {})
+        tables.append({
+            "name": name,
+            "type": obj["type"],
+            "restricted": is_restricted(name),
+            "rows": counts.get(name),
+            "description": SCHEMA_DESCRIPTIONS.get(name),
+            "columns": [
+                {
+                    "name": c["name"], "type": c["type"],
+                    "notnull": c["notnull"], "pk": c["pk"],
+                    "fk": fks.get(c["name"]),
+                }
+                for c in cols
+            ],
+        })
+
+    return {
+        "tables": tables,
+        "edges": [list(pair) for pair in catalog.foreign_keys(conn)],
+        "described": sum(1 for t in tables if t["description"]),
+    }
+
+
 def columns_of(conn, name: str) -> list[dict]:
     return catalog.columns_of(conn, name)
 
@@ -313,30 +328,17 @@ def columns_of(conn, name: str) -> list[dict]:
 def _default_order(conn, name: str) -> str:
     """The ORDER BY that makes paging a table stable, or `""` if there is none.
 
-    SQLite has `rowid`, a stable per-row identifier every ordinary table has,
-    and the probe below is how you find out whether this one does — WITHOUT
-    ROWID tables and views do not.
-
-    PostgreSQL has no equivalent. `ctid` looks like one and is not: it is a
-    physical location that moves when a row is updated and when VACUUM
-    reclaims space, so paging by it would silently repeat and skip rows —
-    which is the precise failure this function exists to prevent, arrived at
-    by a different route. The primary key is the honest answer, and a table
-    without one has no stable order to offer; the caller reports `ordered:
-    False` and the UI says so, exactly as it already does for a view.
+    The primary key is the answer. PostgreSQL's `ctid` looks like a per-row
+    identifier and is not: it is a physical location that moves when a row is
+    updated and when VACUUM reclaims space, so paging by it would silently
+    repeat and skip rows — the precise failure this function exists to prevent.
+    A table without a primary key has no stable order to offer; the caller
+    reports `ordered: False` and the UI says so, exactly as it does for a view.
     """
-    if db.backend_of(conn) == "postgres":
-        key = catalog.primary_key(conn, name)
-        if not key:
-            return ""
-        return " ORDER BY " + ", ".join(_quote(column) for column in key)
-
-    try:
-        with deadline(conn, 2.0):
-            conn.execute(f"SELECT rowid FROM {_quote(name)} LIMIT 0")
-        return " ORDER BY rowid"
-    except db.Error:
+    key = catalog.primary_key(conn, name)
+    if not key:
         return ""
+    return " ORDER BY " + ", ".join(_quote(column) for column in key)
 
 
 def read_table(
@@ -352,9 +354,10 @@ def read_table(
     """One page of a table or view, with the columns and the matching count.
 
     Paging without an ORDER BY is only stable if the underlying query has a
-    stable order, which a view's does not have to. Tables are ordered by rowid
-    by default for exactly that reason; for a view, `ordered` comes back False
-    and the UI says so rather than letting page 2 quietly overlap page 1.
+    stable order, which a view's does not have to. Tables are ordered by their
+    primary key by default for exactly that reason; for a view, or a table with
+    no primary key, `ordered` comes back False and the UI says so rather than
+    letting page 2 quietly overlap page 1.
     """
     kind = object_type(conn, name)
     if kind is None:
@@ -373,7 +376,7 @@ def read_table(
         # URL fragment without the person having to say which column it is in.
         params["q"] = f"%{escape_like(search)}%"
         clauses = " OR ".join(
-            f"CAST({_quote(c)} AS TEXT) LIKE :q ESCAPE '\\'" for c in column_names
+            f"CAST({_quote(c)} AS TEXT) LIKE %(q)s ESCAPE '\\'" for c in column_names
         )
         where = f" WHERE ({clauses})"
 
@@ -396,7 +399,7 @@ def read_table(
     params = {**params, "limit": limit, "offset": offset}
     rows = _run(
         conn,
-        f"SELECT * FROM {_quote(name)}{where}{order_sql} LIMIT :limit OFFSET :offset",
+        f"SELECT * FROM {_quote(name)}{where}{order_sql} LIMIT %(limit)s OFFSET %(offset)s",
         params,
     )
 
@@ -423,8 +426,8 @@ def _row_to_json(row, column_names: list[str]) -> list[Any]:
     across joined tables, and a dict would silently drop one of them.
     """
     values: list[Any] = []
-    for index in range(len(column_names)):
-        value = row[index]
+    for column_name in column_names:
+        value = row[column_name]
         if isinstance(value, bytes):
             # BLOBs are archived payloads, not display material. Say what it
             # is rather than mangling it through a decode that may not hold.
@@ -445,6 +448,8 @@ def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dic
     sql = sql.strip().rstrip(";").strip()
     if not sql:
         raise QueryError("Nothing to run.")
+    if _has_statement_separator(sql):
+        raise QueryError("Only one SQL statement may be run at a time.")
 
     limit = max(1, min(int(limit), MAX_PAGE_SIZE))
     with deadline(conn):
@@ -479,6 +484,32 @@ def run_select(conn: db.Connection, sql: str, limit: int = MAX_PAGE_SIZE) -> dic
         "limit": limit,
         "truncated": truncated,
     }
+
+
+def _has_statement_separator(sql: str) -> bool:
+    """Whether ``sql`` contains a semicolon outside quoted/commented text."""
+    quote: str | None = None
+    i = 0
+    while i < len(sql):
+        char = sql[i]
+        if quote:
+            if char == quote:
+                if i + 1 < len(sql) and sql[i + 1] == quote:
+                    i += 2
+                    continue
+                quote = None
+            i += 1
+            continue
+        if char in ("'", '"'):
+            quote = char
+        elif char == "-" and i + 1 < len(sql) and sql[i + 1] == "-":
+            newline = sql.find("\n", i + 2)
+            i = len(sql) if newline < 0 else newline
+            continue
+        elif char == ";":
+            return True
+        i += 1
+    return False
 
 
 # --- review queue -------------------------------------------------------------
@@ -544,18 +575,18 @@ def review_filter_sql(
     if status and status != "all":
         if status not in ALL_REVIEW_STATUSES:
             raise QueryError(f"Unknown status {status!r}.")
-        where.append("q.status = :status")
+        where.append("q.status = %(status)s")
         params["status"] = status
     if module:
-        where.append("q.module = :module")
+        where.append("q.module = %(module)s")
         params["module"] = module
     if item_type:
-        where.append("q.item_type = :item_type")
+        where.append("q.item_type = %(item_type)s")
         params["item_type"] = item_type
     if search:
         params["q"] = f"%{escape_like(search)}%"
         where.append(
-            "(q.raw_value LIKE :q ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE :q ESCAPE '\\')"
+            "(q.raw_value LIKE %(q)s ESCAPE '\\' OR COALESCE(q.context_json, '') LIKE %(q)s ESCAPE '\\')"
         )
 
     return (f" WHERE {' AND '.join(where)}" if where else ""), params
@@ -603,7 +634,7 @@ def review_items(
         "    SELECT MAX(id) FROM review_decisions e WHERE e.review_item_id = q.id)"
         f"{clause} "
         f"ORDER BY q.created_at {direction}, q.id {direction} "
-        "LIMIT :limit OFFSET :offset",
+        "LIMIT %(limit)s OFFSET %(offset)s",
         params,
     )
 
@@ -619,9 +650,96 @@ def review_items(
     }
 
 
+# Context keys that identify the organisation / place a review item is about,
+# tried in order. The first that is present becomes the cluster's org token.
+_CLUSTER_ID_KEYS = (
+    "provider_key", "ons_code", "authority_ons_code", "buyer_ons_code",
+    "sab_name", "board", "authority", "register_name", "employer_name",
+    "recipient_name", "notice_number",
+)
+_CLUSTER_URL_KEYS = ("source_url", "url", "page_url", "source_page", "notice_web_url")
+_DOMAIN_RE = re.compile(r"https?://([^/]+)", re.IGNORECASE)
+
+
+def _cluster_token(raw_value: str | None, context_json: str | None) -> str:
+    """A deterministic organisation/source token for grouping.
+
+    The same (module, item_type, token) always lands in the same cluster, and
+    the token is derived only from stored fields — a context id key, else a
+    URL's host, else the item's own short raw value. Grouping is a reading
+    aid, never a judgement, so an unhelpful token ('(none)') is fine.
+    """
+    context: dict = {}
+    if context_json:
+        try:
+            parsed = json.loads(context_json)
+            if isinstance(parsed, dict):
+                context = parsed
+        except (TypeError, ValueError):
+            context = {}
+    for key in _CLUSTER_ID_KEYS:
+        value = context.get(key)
+        if value:
+            return str(value).strip().lower()[:80]
+    for key in _CLUSTER_URL_KEYS:
+        value = context.get(key)
+        if value:
+            match = _DOMAIN_RE.search(str(value))
+            if match:
+                return match.group(1).lower()
+    raw = (raw_value or "").strip().lower()
+    return raw[:80] if raw else "(none)"
+
+
+_CLUSTER_SCAN_CAP = 5000
+
+
+def review_clusters(conn: db.Connection, *, status: str = "pending") -> dict:
+    """Pending review items grouped by (module, item_type, org token).
+
+    Display only: the cluster is a way to see 40 "unknown committee URL for
+    Kent" items as one row instead of forty. Every bulk action still recounts
+    its exact id set transactionally before it decides anything — grouping
+    changes what a reviewer looks at, not what a decision touches.
+    """
+    rows = _run(
+        conn,
+        "SELECT id, module, item_type, raw_value, context_json FROM review_queue "
+        "WHERE status = %(status)s ORDER BY created_at, id LIMIT %(cap)s",
+        {"status": status, "cap": _CLUSTER_SCAN_CAP})
+
+    buckets: dict[tuple[str, str, str], dict] = {}
+    for row in rows:
+        token = _cluster_token(row["raw_value"], row["context_json"])
+        key = (row["module"], row["item_type"], token)
+        bucket = buckets.setdefault(key, {
+            "module": row["module"], "item_type": row["item_type"],
+            "token": token, "count": 0, "item_ids": [], "sample_raw": row["raw_value"],
+        })
+        bucket["count"] += 1
+        if len(bucket["item_ids"]) < 200:
+            bucket["item_ids"].append(row["id"])
+
+    clusters = sorted(
+        buckets.values(),
+        key=lambda b: (-b["count"], b["module"], b["item_type"], b["token"]))
+    return {
+        "status": status,
+        "scanned": len(rows),
+        "truncated": len(rows) >= _CLUSTER_SCAN_CAP,
+        "cluster_count": len(clusters),
+        "clusters": clusters,
+        "caveat": (
+            "Grouping is a reading aid, not a judgement: items land in one "
+            "cluster because they share a module, type and a token derived "
+            "from stored fields, not because a decision on one applies to the "
+            "rest. Every action still confirms its own id set."),
+    }
+
+
 def review_item(conn: db.Connection, item_id: int) -> dict | None:
     """One item with its full decision history, newest first."""
-    rows = _run(conn, "SELECT * FROM review_queue WHERE id = ?", (item_id,))
+    rows = _run(conn, "SELECT * FROM review_queue WHERE id = %s", (item_id,))
     if not rows:
         return None
 
@@ -631,7 +749,7 @@ def review_item(conn: db.Connection, item_id: int) -> dict | None:
         for row in _run(
             conn,
             "SELECT id, decision, status_before, note, decided_by, decided_at, context_json "
-            "FROM review_decisions WHERE review_item_id = ? "
+            "FROM review_decisions WHERE review_item_id = %s "
             "ORDER BY decided_at DESC, id DESC",
             (item_id,),
         )
@@ -647,7 +765,7 @@ def recent_decisions(conn: db.Connection, limit: int = 20) -> list[dict]:
             "SELECT d.id, d.decision, d.note, d.decided_by, d.decided_at, "
             "       q.id AS item_id, q.module, q.item_type, q.raw_value "
             "FROM review_decisions d JOIN review_queue q ON q.id = d.review_item_id "
-            "ORDER BY d.decided_at DESC, d.id DESC LIMIT ?",
+            "ORDER BY d.decided_at DESC, d.id DESC LIMIT %s",
             (max(1, min(int(limit), 200)),),
         )
     ]
@@ -667,7 +785,7 @@ def parse_failures(conn: db.Connection, limit: int = 200) -> list[dict]:
             "SELECT module, reason, field_name, COUNT(*) AS n, "
             "       MIN(created_at) AS first_seen, MAX(created_at) AS last_seen "
             "FROM parse_failures GROUP BY module, reason, field_name "
-            "ORDER BY n DESC LIMIT ?",
+            "ORDER BY n DESC LIMIT %s",
             (max(1, min(int(limit), 500)),),
         )
     ]
@@ -677,7 +795,6 @@ def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     """The landing screen: what is in the queue, what has been decided, and
     what the warehouse holds."""
     settings = settings or get_settings()
-    path = Path(settings.database_path)
     facets = review_facets(conn)
 
     objects = catalog.list_objects(conn)
@@ -686,11 +803,16 @@ def overview(conn: db.Connection, settings: Settings | None = None) -> dict:
     migrations = _run(
         conn, "SELECT COUNT(*) AS n FROM schema_migrations")[0]["n"]
     failures = _run(conn, "SELECT COUNT(*) AS n FROM parse_failures")[0]["n"]
+    # The warehouse identity and size, PostgreSQL-side. `path` keeps its key so
+    # the admin overview's shape is unchanged; it now carries the redacted
+    # database URL rather than a file path, and the size is the whole database.
+    size_bytes = _run(
+        conn, "SELECT pg_database_size(current_database()) AS n")[0]["n"]
 
     return {
         "database": {
-            "path": str(path),
-            "size_bytes": path.stat().st_size if path.exists() else 0,
+            "path": settings.redacted_database_url or "(DATABASE_URL unset)",
+            "size_bytes": size_bytes,
             "tables": tables,
             "views": views,
             "migrations": migrations,

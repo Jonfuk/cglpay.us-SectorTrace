@@ -12,6 +12,9 @@
 'use strict';
 
 import { initPortalTheme, registerTheme } from '/js/theme.js';
+import { initPalette } from '/js/palette.js';
+import { parseFilters, serializeFilters, validateFilters, chipLabels }
+  from '/js/filterstate.js';
 
 // --- DOM helpers -------------------------------------------------------------
 
@@ -23,6 +26,24 @@ export function el(tag, props, ...children) {
     else if (key === 'text') node.textContent = value;
     else if (key.startsWith('on')) node.addEventListener(key.slice(2), value);
     else if (key === 'dataset') Object.assign(node.dataset, value);
+    else node.setAttribute(key, value === true ? '' : value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+
+/* Same contract as `el()` — attributes via setAttribute, text via
+ * textContent, never innerHTML — but in the SVG namespace, which
+ * `document.createElement` cannot produce. Used by the overview hero's
+ * region map; nothing else in the portal draws its own SVG. */
+export function svgEl(tag, props, ...children) {
+  const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+  for (const [key, value] of Object.entries(props || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === 'text') node.textContent = value;
     else node.setAttribute(key, value === true ? '' : value);
   }
   for (const child of children.flat()) {
@@ -45,6 +66,65 @@ export function sourceLink(url, label) {
   if (!/^https?:\/\//i.test(text)) return document.createTextNode(label || text || '—');
   return el('a', { href: text, target: '_blank', rel: 'noopener noreferrer' },
     label || text);
+}
+
+/* Arrow-key roving highlight for a typeahead's `<ul role="listbox">`, shared
+ * by every typeahead on the portal — the top-bar council search, the filter
+ * bar's provider search, and the authority/provider pickers on
+ * `compare.js`/`treatment.js`. All five declare (or should declare, for
+ * consistency) `role="combobox"`, but until now only implemented "Enter
+ * selects the first match" — the roles overpromised what arrow keys and a
+ * screen reader's activedescendant announcement actually did. Written once
+ * here rather than five times; `styles.css`'s `li[aria-selected="true"]`
+ * rule already existed and expected this, unused, before this. `input` must
+ * have an `id` for `aria-activedescendant` to reference into. Call the
+ * returned `reset()` every time `list`'s `<li>` children are replaced — the
+ * old highlighted option no longer exists once that happens. */
+export function typeaheadKeyboard(input, list) {
+  let active = -1;
+  const options = () => Array.from(list.children);
+
+  const reset = () => {
+    active = -1;
+    input.removeAttribute('aria-activedescendant');
+  };
+
+  const setActive = (index) => {
+    const opts = options();
+    if (!opts.length) { reset(); return; }
+    active = index;
+    opts.forEach((li, i) => {
+      li.id = `${input.id}-opt-${i}`;
+      li.setAttribute('aria-selected', String(i === active));
+    });
+    input.setAttribute('aria-activedescendant', opts[active].id);
+    opts[active].scrollIntoView({ block: 'nearest' });
+  };
+
+  const move = (delta) => {
+    const count = options().length;
+    if (!count) return;
+    const next = active < 0 ? (delta > 0 ? 0 : count - 1)
+      : (active + delta + count) % count;
+    setActive(next);
+  };
+
+  input.addEventListener('keydown', (event) => {
+    if (list.hidden) return;
+    if (event.key === 'ArrowDown') { event.preventDefault(); move(1); }
+    else if (event.key === 'ArrowUp') { event.preventDefault(); move(-1); }
+    else if (event.key === 'Escape') { list.hidden = true; reset(); }
+    else if (event.key === 'Enter') {
+      const opts = options();
+      const target = active >= 0 ? opts[active] : opts[0];
+      if (target) {
+        event.preventDefault();
+        target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+      }
+    }
+  });
+
+  return reset;
 }
 
 // --- formatting --------------------------------------------------------------
@@ -104,7 +184,17 @@ const cache = new Map();
 export async function fetchJSON(endpoint, params = {}, { fresh = false } = {}) {
   const url = new URL(`/api/v1/${endpoint}`, location.origin);
   for (const [key, value] of Object.entries(params)) {
-    if (value !== null && value !== undefined && value !== '') {
+    if (value === null || value === undefined || value === '') continue;
+    // An array becomes repeated params (`?k=a&k=b`), the shape the server's
+    // repeatable parameters (`ons_code`, `provider_key`) expect — not the
+    // comma-joined single value `set()` would produce.
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item !== null && item !== undefined && item !== '') {
+          url.searchParams.append(key, item);
+        }
+      }
+    } else {
       url.searchParams.set(key, value);
     }
   }
@@ -117,7 +207,15 @@ export async function fetchJSON(endpoint, params = {}, { fresh = false } = {}) {
     let payload = null;
     try { payload = await response.json(); } catch (e) { /* not JSON */ }
     if (!response.ok) {
-      throw new Error((payload && payload.error) || `HTTP ${response.status}`);
+      const err = new Error((payload && payload.error) || `HTTP ${response.status}`);
+      // BETA-068: the server attaches a structured unavailable envelope for a
+      // capability it cannot serve on this build (missing migration, absent
+      // extension, section timeout). Carry it so the route catch can render a
+      // feature-specific state with retry and a diagnostic reference instead
+      // of a bare message.
+      if (payload && payload.error_detail) err.detail = payload.error_detail;
+      err.status = response.status;
+      throw err;
     }
     cache.set(key, payload);
     return payload;
@@ -169,33 +267,17 @@ export function subscribe(fn) {
 function writeStateToUrl() {
   const [path, rawQuery] = (location.hash.slice(1) || '/').split('?');
   const existing = rawQuery ? new URLSearchParams(rawQuery) : null;
-  const params = new URLSearchParams();
-  for (const [key, value] of Object.entries(state)) {
-    if (value !== null && value !== undefined && value !== '') params.set(key, value);
-  }
-  // Page-owned query keys survive a filter change. The compare page's
-  // selection is the whole page — `#/compare?ons_code=...&ons_code=...` —
-  // and a filter change must not wipe it out of a URL that is a shareable
-  // comparison.
-  if (existing) {
-    for (const key of existing.keys()) {
-      if (!(key in state)) {
-        for (const value of existing.getAll(key)) params.append(key, value);
-      }
-    }
-  }
+  // One serializer (BETA-072): shared filter keys in their schema shape,
+  // page-owned keys (compare's `ons_code`, contracts' `q`, pay's `source`)
+  // carried through untouched so one URL restores both.
+  const params = serializeFilters(state, existing);
   const query = params.toString();
   const target = `#${path}${query ? `?${query}` : ''}`;
   if (location.hash !== target) history.replaceState(null, '', target);
 }
 
 function readStateFromUrl() {
-  const params = parseHash().params;
-  setState({
-    provider: params.get('provider') || null,
-    yearFrom: params.get('yearFrom') || null,
-    yearTo: params.get('yearTo') || null,
-  }, { silent: true });
+  setState(parseFilters(parseHash().params), { silent: true });
 }
 
 /** Global filters as API params. Pages pass this straight through, so a filter
@@ -228,19 +310,110 @@ const ROUTES = {
   '/pfd': () => import('/js/pages/pfd.js'),
   '/authorities': () => import('/js/pages/authority.js'),
   '/compare': () => import('/js/pages/compare.js'),
+  '/relationships': () => import('/js/pages/relationships.js'),
   '/claims': () => import('/js/pages/claims.js'),
   '/coverage': () => import('/js/pages/coverage.js'),
+  '/documents': () => import('/js/pages/documents.js'),
+  '/catalogue': () => import('/js/pages/catalogue.js'),
+  '/cqc': () => import('/js/pages/cqc.js'),
+  '/changes': () => import('/js/pages/changes.js'),
+  '/calendar': () => import('/js/pages/calendar.js'),
+  '/notebook': () => import('/js/notebook.js'),
+  '/saved': () => import('/js/savedsearch.js'),
+  '/revisions': () => import('/js/pages/revisions.js'),
+  '/pathfinder': () => import('/js/pages/pathfinder.js'),
+  '/timeline': () => import('/js/pages/timeline.js'),
+  '/journey': () => import('/js/journey.js'),
+  '/cooccurrence': () => import('/js/pages/cooccurrence.js'),
+  '/discrepancies': () => import('/js/pages/discrepancies.js'),
+  '/diary': () => import('/js/pages/diary.js'),
+  '/links': () => import('/js/pages/links.js'),
+  '/doctables': () => import('/js/pages/doctables.js'),
+};
+
+/* One <title> per route. Until now all thirteen shared index.html's static
+ * title, so browser history could not tell two routes apart, a bookmark
+ * named itself after whichever page was open first, and nothing announced
+ * the change to a screen reader. Deep dives keep their section name rather
+ * than fetching the entity just for the tab — the page's own h1 carries the
+ * specifics once data arrives. */
+const ROUTE_TITLES = {
+  '/': 'Overview',
+  '/pay': 'Pay & benchmarks',
+  '/contracts': 'Funding & contracts',
+  '/geography': 'Places',
+  '/treatment': 'Treatment data',
+  '/providers': 'Providers',
+  '/relationships': 'Relationships',
+  '/pfd': 'Safety & legal',
+  '/authorities': 'Authorities',
+  '/compare': 'Compare authorities',
+  '/claims': 'Evidence-backed claims',
+  '/coverage': 'Coverage & limitations',
+  '/documents': 'Document search',
+  '/catalogue': 'Dataset catalogue',
+  '/cqc': 'CQC-registered locations',
+  '/changes': 'What changed?',
+  '/calendar': 'Publication calendar',
+  '/notebook': 'Evidence notebook',
+  '/saved': 'Saved searches',
+  '/revisions': 'Compare revisions',
+  '/pathfinder': 'Relationship pathfinder',
+  '/timeline': 'Coverage timeline',
+  '/journey': 'Research journey',
+  '/cooccurrence': 'Co-occurrence explorer',
+  '/discrepancies': 'Evidence discrepancies',
+  '/diary': 'Contract diary',
+  '/links': 'Source-link resilience',
+  '/doctables': 'Document tables',
 };
 
 let disposeCurrent = null;
+/* The base route of the previous render. Filter changes re-render the whole
+ * page through the state subscription — same route, new data — and those
+ * must not steal focus from whatever control the reader is using. Only a
+ * change of route does that, and only after the first paint (focusing #main
+ * on initial load would fight the reader's own starting point). */
+let renderedBase = null;
+
+/* BETA-077 navigation continuity.
+ *
+ * `scrollByHash` remembers where the reader was on each URL, so returning to a
+ * list from a detail page (back button, or a breadcrumb) lands where they left
+ * it rather than at the top. `lastListHash` remembers the *full* hash — filters
+ * and all — of the last bare list route for each base, so a detail page's
+ * "back to Providers" link restores the exact filtered list it was opened
+ * from. Both are session-only and hold no personal data. */
+const scrollByHash = new Map();
+const lastListHash = new Map();
+let lastRenderedHash = null;
+
+const CRUMB_PARENTS = {
+  '/providers': ['Providers', '#/providers'],
+  '/authorities': ['Places', '#/geography'],
+};
 
 async function render() {
   const { path, params } = parseHash();
+  const hereHash = location.hash || '#/';
+  // Save where we were before this render replaces the page.
+  if (lastRenderedHash && lastRenderedHash !== hereHash) {
+    scrollByHash.set(lastRenderedHash, window.scrollY);
+  }
   // Deep dives share their base module: /providers/:key is the providers
   // module with a key, /authorities/:ons_code the authority module with one.
   const base = path.startsWith('/providers/') ? '/providers'
     : path.startsWith('/authorities/') ? '/authorities' : path;
   const load = ROUTES[base] || ROUTES['/'];
+  const routeLabel = ROUTE_TITLES[base];
+  document.title = routeLabel ? `${routeLabel} · SectorTrace` : 'SectorTrace';
+  const navigating = renderedBase !== null && renderedBase !== base;
+  renderedBase = base;
+  // BETA-077: on a bare list route (no `/key` suffix), remember the full hash
+  // — filters included — as the place a detail page opened from.
+  if (path === base) lastListHash.set(base, hereHash);
+  // BETA-072: the previous page's match count does not describe this one.
+  if (navigating) resultCount = null;
   updateFilterVisibility(base);
 
   for (const link of document.querySelectorAll('.mainnav a')) {
@@ -276,8 +449,12 @@ async function render() {
       '/contracts': ['Public money', 'money'], '/geography': ['Service access · Public money', 'access'],
       '/treatment': ['Service access', 'access'], '/pfd': ['Safety & legal', 'safety'],
       '/claims': ['Safety & legal · Accountability', 'accountability'],
+      '/documents': ['Accountability', 'accountability'],
       '/coverage': ['Accountability', 'accountability'], '/authorities': ['Service access · Accountability', 'access'],
-      '/compare': ['Accountability', 'accountability'], '/': ['Accountability', 'accountability'],
+      '/compare': ['Accountability', 'accountability'],
+      // No '/' entry (BETA-069): the overview hero already carries an
+      // "Accountability" lens badge in its kicker, and the extra route-lens
+      // strip above it stacked into a visible duplicate at phone widths.
     };
     const lens = lensByRoute[base];
     if (lens && !main.querySelector(':scope > .route-lens')) {
@@ -286,12 +463,65 @@ async function render() {
         el('span', { text: lens[0] }));
       main.prepend(cue);
     }
+
+    // BETA-077: a route-aware breadcrumb on a detail page. `path !== base`
+    // means a `/key` suffix — a provider or authority detail. The parent
+    // crumb links back to the exact filtered list the reader came from
+    // (`lastListHash`), falling back to the section's own route. The entity
+    // crumb is read from the page's own <h1> so the router does not need to
+    // know each page's naming.
+    if (path !== base && CRUMB_PARENTS[base]) {
+      const [parentLabel, parentFallback] = CRUMB_PARENTS[base];
+      const parentHref = lastListHash.get(base) || parentFallback;
+      // The <h1>'s first text node — some heroes append status badges to it.
+      const h1 = main.querySelector('.hero h1');
+      const entity = (h1?.firstChild?.nodeType === Node.TEXT_NODE
+        ? h1.firstChild.textContent : h1?.textContent || '').trim();
+      const crumbs = el('nav', { class: 'breadcrumbs', 'aria-label': 'Breadcrumb' },
+        el('a', { href: '#/' }, 'Overview'),
+        el('span', { 'aria-hidden': 'true', text: '›' }),
+        el('a', { href: parentHref }, `Back to ${parentLabel.toLowerCase()}`),
+        entity ? el('span', { 'aria-hidden': 'true', text: '›' }) : null,
+        entity ? el('span', { 'aria-current': 'page', text: entity }) : null);
+      main.prepend(crumbs);
+    }
+
+    // The page content changed wholesale, but focus stayed on the nav link
+    // that was clicked — a screen reader has no idea anything happened.
+    // #main carries tabindex="-1" for exactly this; preventScroll keeps the
+    // reader where they were instead of jumping the viewport to the top.
+    if (navigating) main.focus({ preventScroll: true });
+
+    // BETA-094: record this visit on the local research trail. Loaded on
+    // demand so app.js and journey.js do not import each other; a failure
+    // here must never stop a page rendering.
+    import('/js/journey.js')
+      .then((m) => m.recordVisit({ hash: hereHash, route: base.replace(/^\//, ''), label: routeLabel }))
+      .catch(() => {});
+
+    // BETA-077: restore scroll for a URL we have seen before (back/forward,
+    // or a breadcrumb to a list); a fresh navigation starts at the top.
+    lastRenderedHash = hereHash;
+    if (scrollByHash.has(hereHash)) {
+      const y = scrollByHash.get(hereHash);
+      requestAnimationFrame(() => window.scrollTo(0, y));
+    } else if (navigating) {
+      window.scrollTo(0, 0);
+    }
   } catch (error) {
-    replace(main, el('div', { class: 'section' },
-      el('div', { class: 'chart-error' },
+    // components.js imports from this module, so pull the renderer lazily to
+    // keep the module graph acyclic at load time (BETA-068).
+    let card;
+    try {
+      const mod = await import('/js/components.js');
+      card = mod.unavailableCard(error, () => render());
+    } catch (e) {
+      card = el('div', { class: 'chart-error' },
         el('strong', { text: 'This section could not be loaded.' }),
         el('span', { class: 'small', text: error.message }),
-        el('button', { class: 'btn', onclick: () => render() }, 'Retry'))));
+        el('button', { class: 'btn', onclick: () => render() }, 'Retry'));
+    }
+    replace(main, el('div', { class: 'section' }, card));
   }
 }
 
@@ -318,24 +548,76 @@ function updateFilterVisibility(base) {
   renderFilterSummary();
 }
 
+// Cached once by initFilterBar so a chip can show "Provider: Change Grow
+// Live" rather than the raw key.
+let providerNames = new Map();
+
+// BETA-072: the last page's "N notices match" count, so the filter summary
+// can say how much the current query returns. A page sets it after its fetch
+// and the router clears it before the next page renders.
+let resultCount = null;
+
+/** Pages call this after loading so the shared summary can show the count.
+ *  `null` clears it (a page with no single countable result). */
+export function setFilterResultCount(count, noun = 'result') {
+  resultCount = (count === null || count === undefined)
+    ? null : { count: Number(count), noun };
+  renderFilterSummary();
+}
+
 function renderFilterSummary() {
   const summary = $('#filter-summary');
   const s = getState();
-  const active = Object.entries(s).filter(([, value]) => value);
+  const chips = chipLabels(s, { providerName: providerNames.get(s.provider) });
+  const errors = validateFilters(s);
   summary.replaceChildren();
-  summary.hidden = active.length === 0;
-  if (!active.length) return;
-  summary.append(el('span', { class: 'filter-summary-label', text: 'Showing:' }));
-  for (const [key, value] of active) {
-    const label = key === 'provider' ? `Provider: ${value}` : `${key === 'yearFrom' ? 'From' : 'To'} ${value}`;
-    summary.append(el('button', { class: 'filter-chip', type: 'button', onclick: () => setState({ [key]: null }) }, `${label} ×`));
+  // The summary is the active-filter surface: no chips and no error means
+  // nothing to show, even if a page reported a count (its own hero already
+  // states totals).
+  summary.hidden = chips.length === 0 && !errors.length;
+  if (summary.hidden) return;
+
+  if (chips.length) {
+    summary.append(el('span', { class: 'filter-summary-label', text: 'Showing:' }));
+    for (const chip of chips) {
+      summary.append(el('button', {
+        class: 'filter-chip', type: 'button',
+        'aria-label': `Remove filter ${chip.text}`,
+        onclick: () => setState({ [chip.key]: null }),
+      }, `${chip.text} ×`));
+    }
   }
-  summary.append(el('button', { class: 'filter-clear', type: 'button', onclick: () => clearFilters() }, 'Clear all'));
+  if (resultCount && chips.length) {
+    const { count, noun } = resultCount;
+    summary.append(el('span', { class: 'filter-summary-count',
+      text: `${count.toLocaleString('en-GB')} ${noun}${count === 1 ? '' : 's'}` }));
+  }
+  if (errors.length) {
+    summary.append(el('span', { class: 'filter-summary-error', role: 'alert',
+      text: errors.join(' ') }));
+  }
+  if (chips.length) {
+    summary.append(el('button', { class: 'filter-clear', type: 'button',
+      onclick: () => clearFilters() }, 'Clear all'));
+    // BETA-089: keep this exact search — route plus its whole filter query —
+    // in the local saved-search list. Loaded on demand so app.js and
+    // savedsearch.js do not import each other.
+    summary.append(el('button', { class: 'filter-save', type: 'button',
+      onclick: () => import('/js/savedsearch.js').then((m) => m.promptSave(location.hash)) },
+      'Save search'));
+  }
 }
 
+/** Clear-all (BETA-072): the whole hash query, not only the shared keys — a
+ *  reader who clicks "Clear all" expects the page-local search and explorer
+ *  filters gone too. The route path stays. */
 function clearFilters() {
-  setState({ provider: null, yearFrom: null, yearTo: null });
+  const [path] = (location.hash.slice(1) || '/').split('?');
   for (const control of document.querySelectorAll('#filterbar [data-filter]')) control.value = '';
+  const note = $('#filter-note');
+  if (note) note.textContent = '';
+  history.replaceState(null, '', `#${path}`);
+  setState({ provider: null, yearFrom: null, yearTo: null });
 }
 
 // --- global filter bar -------------------------------------------------------
@@ -351,6 +633,7 @@ async function initFilterBar() {
     $('#filter-note').textContent = 'Filters unavailable: ' + e.message;
     return;
   }
+  providerNames = new Map(providers.map((p) => [p.provider_key, p.canonical_name]));
 
   const input = $('#f-provider');
   const list = $('#f-provider-list');
@@ -360,6 +643,8 @@ async function initFilterBar() {
   const fuse = window.Fuse
     ? new window.Fuse(providers, { keys: ['canonical_name', 'provider_key'], threshold: 0.4 })
     : null;
+
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const applyProvider = (key, label) => {
     input.value = label || '';
@@ -381,6 +666,7 @@ async function initFilterBar() {
         onmousedown: () => applyProvider(p.provider_key, p.canonical_name),
       }, p.is_target ? `★ ${p.canonical_name}` : p.canonical_name)),
     ]);
+    resetKeyboard();
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   };
@@ -389,8 +675,27 @@ async function initFilterBar() {
   input.addEventListener('input', showMatches);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
 
-  $('#f-year-from').addEventListener('change', (e) => setState({ yearFrom: e.target.value || null }));
-  $('#f-year-to').addEventListener('change', (e) => setState({ yearTo: e.target.value || null }));
+  // BETA-072: validate the year range before it becomes state. An invalid
+  // pair (out of bounds, or from > to) is refused with an inline message
+  // rather than sent to an endpoint that would 400 or silently return
+  // nothing.
+  const applyYear = (key, raw) => {
+    const next = { ...getState(), [key]: raw || null };
+    const errors = validateFilters(next);
+    const note = $('#filter-note');
+    if (errors.length) {
+      note.textContent = errors[0];
+      $('#f-year-from').setAttribute('aria-invalid', String(Boolean(errors.length)));
+      $('#f-year-to').setAttribute('aria-invalid', String(Boolean(errors.length)));
+      return;
+    }
+    note.textContent = '';
+    $('#f-year-from').removeAttribute('aria-invalid');
+    $('#f-year-to').removeAttribute('aria-invalid');
+    setState({ [key]: raw || null });
+  };
+  $('#f-year-from').addEventListener('change', (e) => applyYear('yearFrom', e.target.value));
+  $('#f-year-to').addEventListener('change', (e) => applyYear('yearTo', e.target.value));
   // Reset walks the controls rather than naming them, so a filter added to the
   // bar is cleared by this without anyone remembering to come back here. It
   // also keeps `data-filter` honest: a wrong key stops reset working, which is
@@ -444,7 +749,16 @@ async function initFindCouncil() {
     list.hidden = true;
     input.setAttribute('aria-expanded', 'false');
     if (code) location.hash = `#/authorities/${code}`;
+    // BETA-069: the field now lives inside the section drawer. Picking a
+    // council navigates via a listbox option (not an <a>), so the drawer's
+    // link-click auto-close does not fire — close it here.
+    const nav = $('#portal-nav');
+    if (nav?.classList.contains('show')) {
+      window.bootstrap?.Offcanvas.getInstance(nav)?.hide();
+    }
   };
+
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const showMatches = () => {
     const term = input.value.trim();
@@ -456,6 +770,7 @@ async function initFindCouncil() {
       role: 'option',
       onmousedown: () => go(a.ons_code, a.name),
     }, `${a.name} · ${a.ons_code}`)));
+    resetKeyboard();
     list.hidden = false;
     input.setAttribute('aria-expanded', 'true');
   };
@@ -463,13 +778,9 @@ async function initFindCouncil() {
   input.addEventListener('focus', showMatches);
   input.addEventListener('input', showMatches);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  // Enter picks the top match. A search box that swallows Enter invites the
-  // reader to type and wait for nothing.
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
+  // Arrow keys move the highlight; Enter picks the highlighted option, or
+  // the top match if none is highlighted yet — a search box that swallows
+  // Enter invites the reader to type and wait for nothing.
 }
 
 // Bootstrap's dismissal data API deliberately prevents an anchor's normal
@@ -484,6 +795,30 @@ function initMobileNavigation() {
   });
 }
 
+// Release identity in the footer, from /api/v1/meta (BETA-039). A build and
+// schema fingerprint so a reviewer can tell which deployment they are on;
+// staying quiet on any failure, because a footer line is not worth an error.
+async function initBuildIdentity() {
+  const target = $('#build-identity');
+  if (!target) return;
+  let meta;
+  try {
+    meta = await fetchJSON('meta');
+  } catch (e) {
+    return;
+  }
+  const parts = [];
+  if (meta.environment) parts.push(meta.environment);
+  if (meta.revision) parts.push(`build ${String(meta.revision).slice(0, 10)}`);
+  if (meta.schema && meta.schema.latest_migration) {
+    parts.push(`schema ${meta.schema.latest_migration.replace(/\.sql$/, '')}`);
+  }
+  if (meta.build_time) parts.push(`deployed ${meta.build_time}`);
+  if (!parts.length) return;
+  target.textContent = parts.join(' · ');
+  target.hidden = false;
+}
+
 // --- boot --------------------------------------------------------------------
 
 function boot() {
@@ -493,8 +828,14 @@ function boot() {
   initFilterBar();
   initFindCouncil();
   initMobileNavigation();
+  initPalette();
+  initBuildIdentity();
   subscribe(() => render());
-  window.addEventListener('hashchange', render);
+  // BETA-072: a hash change is also how the back/forward buttons and an
+  // edited address bar arrive. Re-sync the shared filter state from the URL
+  // before rendering so history and shared links restore the exact query,
+  // not just the route.
+  window.addEventListener('hashchange', () => { readStateFromUrl(); render(); });
   window.addEventListener('portalthemechange', render);
   render();
 }

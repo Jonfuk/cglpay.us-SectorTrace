@@ -11,15 +11,133 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp, pct, isoDate, sourceLink } from '/app.js';
+import { el, replace, fetchJSON, setFilterResultCount, num, gbp, pct, isoDate, sourceLink } from '/app.js';
 import { section, pinnedCaveat, caveat, noData, errorCard, mountChart,
           disposeCharts, provenance, tableCard, escapeHtml, truncate,
           statCard, exportButton, registerLink, registerLinks, shareButton,
-          findingBlock, evidenceMeta } from '/js/components.js';
+          findingBlock, evidenceMeta, evidenceHealthStrip, workbenchNav } from '/js/components.js';
+import { pushRecent } from '/js/recent.js';
+import { notebookButton } from '/js/notebook.js';
+import { chartLabelColor } from '/js/theme.js';
 
 export async function render(main, { path }) {
   const key = path.startsWith('/providers/') ? path.slice('/providers/'.length) : null;
   return key ? renderOne(main, key) : renderList(main);
+}
+
+// --- provider lifecycle: renamed / merged / dissolved ----------------------
+
+const LIFECYCLE_VERB = { renamed: 'Now operates as', merged: 'Merged into', dissolved: 'Dissolved' };
+
+function lifecycleBadge(status) {
+  if (!status || status === 'active') return null;
+  return el('span', {
+    class: status === 'dissolved' ? 'badge lifecycle dissolved' : 'badge lifecycle',
+    text: status,
+  });
+}
+
+// A one-line plain-language note under the heading, with a link to the
+// successor entity where there is one. The evidence itself is never moved,
+// so the note says so.
+function lifecycleNote(provider) {
+  const status = provider.status;
+  if (!status || status === 'active') return null;
+  const verb = LIFECYCLE_VERB[status] || status;
+  const tail = ' The records below stay attached to this name for the period it was used.';
+  if (!provider.superseded_by) {
+    return el('p', { class: 'provider-lifecycle-note' }, `${verb}.`, tail);
+  }
+  return el('p', { class: 'provider-lifecycle-note' },
+    `${verb} `,
+    el('a', { href: `#/providers/${encodeURIComponent(provider.superseded_by)}`,
+      text: provider.superseded_by_name || provider.superseded_by }),
+    '.', tail);
+}
+
+// BETA-066: the verified administrative lineage — the forward chain to the
+// surviving entity, and the predecessors that point at this one. A separate
+// fetch (/lineage) so the timeline payload stays as it was.
+// Forward: "<this entity> <label> <other>".  Reverse: "<other> <label> this
+// entity" — a predecessor edge, so the same events read from the other end.
+const LINEAGE_LABEL = {
+  renamed_to: 'renamed to', merged_into: 'merged into', dissolved: 'dissolved',
+};
+const PREDECESSOR_LABEL = {
+  renamed_from: 'renamed to', merged_from: 'merged into',
+  superseded_from: 'superseded by',
+};
+
+async function renderLineage(container, key) {
+  if (!container) return;
+  let data;
+  try {
+    data = await fetchJSON(`providers/${encodeURIComponent(key)}/lineage`);
+  } catch (error) {
+    // A missing lineage route on an older cached server is not worth an error
+    // card in the middle of the page.
+    container.replaceChildren();
+    return;
+  }
+
+  const edges = data.edges || [];
+  const chain = data.chain || [];
+  const predecessors = edges.filter((e) => e.direction === 'predecessor');
+  const forward = edges.filter((e) => e.direction !== 'predecessor');
+
+  // Nothing to say when the entity is active, has no successor and nothing
+  // points at it.
+  if (!predecessors.length && !forward.length && chain.length <= 1) {
+    container.replaceChildren();
+    return;
+  }
+
+  const chainRow = chain.length > 1
+    ? el('p', { class: 'lineage-chain' }, ...chain.flatMap((node, i) => {
+        const name = node.provider_key === key
+          ? el('strong', { text: node.canonical_name || node.provider_key })
+          : el('a', {
+              href: `#/providers/${encodeURIComponent(node.provider_key)}`,
+              text: node.canonical_name || node.provider_key });
+        return i === 0 ? [name] : [el('span', { class: 'muted', text: ' → ' }), name];
+      }))
+    : null;
+
+  const forwardRows = forward.map((e) => el('li', {},
+    `${LINEAGE_LABEL[e.relationship] || e.relationship}`,
+    e.provider_key ? ' ' : null,
+    e.provider_key
+      ? el('a', { href: `#/providers/${encodeURIComponent(e.provider_key)}`,
+          text: e.canonical_name || e.provider_key })
+      : null,
+    el('span', { class: 'muted small', text: ` — ${e.basis}` })));
+
+  const predecessorRows = predecessors.map((e) => el('li', {},
+    el('a', { href: `#/providers/${encodeURIComponent(e.provider_key)}`,
+      text: e.canonical_name || e.provider_key }),
+    ` ${PREDECESSOR_LABEL[e.relationship] || e.relationship} this entity`,
+    el('span', { class: 'muted small', text: ` — ${e.basis}` })));
+
+  const identifiers = (data.identifiers || []).length
+    ? el('p', { class: 'muted small' },
+        'Verified identifiers: '
+        + data.identifiers.map((id) =>
+            `${id.scheme} ${id.identifier}${id.role ? ` (${id.role})` : ''}`).join('; '))
+    : null;
+
+  container.replaceChildren(section('Entity lineage',
+    'The verified administrative record of this organisation’s identity. It '
+    + 'does not describe what happened to the services, staff or contracts.',
+    el('div', { class: 'panel' },
+      pinnedCaveat(data.caveat, 'Read before reading the lineage'),
+      chainRow,
+      forwardRows.length ? el('ul', { class: 'lineage-edges' }, ...forwardRows) : null,
+      predecessorRows.length
+        ? el('div', {},
+            el('h3', { class: 'small muted', text: 'Predecessors' }),
+            el('ul', { class: 'lineage-edges' }, ...predecessorRows))
+        : null,
+      identifiers)));
 }
 
 // --- the list ----------------------------------------------------------------
@@ -30,9 +148,11 @@ async function renderList(main) {
   try {
     providers = (await fetchJSON('providers')).providers || [];
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderList(main)));
+    replace(main, errorCard(error, () => renderList(main)));
     return () => {};
   }
+
+  setFilterResultCount(providers.length, 'tracked organisation');
 
   const page = el('div', {},
     el('div', { class: 'hero' },
@@ -108,6 +228,21 @@ async function renderList(main) {
     }) },
     { title: 'Campaign subject', field: 'is_target', width: 140,
       formatter: (c) => (c.getValue() ? '★ yes' : '') },
+    // Renamed / merged / dissolved, with a link to the surviving entity.
+    // A DOM node, built by el() like the register links below.
+    { title: 'Status', field: 'status', width: 200,
+      formatter: (c) => {
+        const d = c.getRow().getData();
+        if (!d.status || d.status === 'active') return '';
+        const parts = [lifecycleBadge(d.status)];
+        if (d.superseded_by) {
+          parts.push(' → ', el('a', {
+            href: `#/providers/${encodeURIComponent(d.superseded_by)}`,
+            text: d.superseded_by_name || d.superseded_by,
+          }));
+        }
+        return el('span', {}, ...parts);
+      } },
     { title: 'Contracts', field: 'contract_count', width: 100 },
     { title: 'Contract value', field: 'contract_value_gbp', width: 130,
       formatter: (c) => gbp(c.getValue()) },
@@ -136,19 +271,26 @@ async function renderOne(main, key) {
   try {
     data = await fetchJSON(`providers/${encodeURIComponent(key)}/timeline`);
   } catch (error) {
-    replace(main, errorCard(error.message, () => renderOne(main, key)));
+    replace(main, errorCard(error, () => renderOne(main, key)));
     return () => {};
   }
 
   const provider = data.provider || {};
+  // BETA-077: leave a trail back to this entity.
+  pushRecent({ type: 'provider', id: key, name: provider.canonical_name || key });
   const page = el('div', {},
     el('div', { class: 'hero' },
       el('p', {}, el('a', { href: '#/providers' }, '← All providers'),
         ' · ', el('a', { href: `#/compare?provider_key=${key}` },
-          'Compare with other providers →')),
+          'Compare with other providers →'),
+        ' · ', el('a', { href: `#/relationships?provider_key=${key}` },
+          'Who commissions it →')),
       el('h1', {}, provider.canonical_name || key,
         provider.is_target ? ' ' : null,
-        provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null),
+        provider.is_target ? el('span', { class: 'badge target', text: '★ CAMPAIGN SUBJECT' }) : null,
+        provider.status && provider.status !== 'active' ? ' ' : null,
+        lifecycleBadge(provider.status)),
+      lifecycleNote(provider),
       provider.notes ? el('p', { class: 'lede', text: provider.notes }) : null,
       // Built from the entity edges the timeline already carries rather than
       // from a new query: an `identified_by` edge is a scheme and an
@@ -161,7 +303,9 @@ async function renderOne(main, key) {
           title: `SectorTrace — ${provider.canonical_name || key}`,
           text: 'Explore the published provider evidence in SectorTrace.',
           label: 'Share this provider',
-        }))),
+        }),
+        notebookButton({ kind: 'provider', ref: key,
+          label: provider.canonical_name || key }))),
     (() => {
       const meta = evidenceMeta(data);
       return findingBlock({
@@ -173,6 +317,7 @@ async function renderOne(main, key) {
       });
     })(),
     el('div', { id: 'inventory' }),
+    el('div', { id: 'lineage' }),
     el('div', { id: 'timeline' }),
     el('div', { id: 'graph' }),
     el('div', { id: 'cqc' }),
@@ -185,6 +330,7 @@ async function renderOne(main, key) {
   replace(main, page);
 
   renderInventory(page.querySelector('#inventory'), data);
+  renderLineage(page.querySelector('#lineage'), key);
   renderTimeline(page.querySelector('#timeline'), data);
   renderGraph(page.querySelector('#graph'), data, charts, key);
   renderCqc(page.querySelector('#cqc'), data);
@@ -195,7 +341,30 @@ async function renderOne(main, key) {
   renderPfd(page.querySelector('#pfd'), data);
   renderTribunals(page.querySelector('#tribunals'), data);
 
-  return () => disposeCharts(charts);
+  // BETA-076: sticky section index with counts, scroll-spy, back-to-top and
+  // ?section= deep links. Counts are of the records the warehouse holds;
+  // `available: false` keeps an empty section listed rather than hidden.
+  const n = (v) => (Array.isArray(v) ? v.length : 0);
+  const withCount = (id, label, list) => ({
+    id, label, count: n(list), available: n(list) > 0,
+  });
+  const sections = [
+    { id: 'inventory', label: 'Identifiers' },
+    { id: 'lineage', label: 'Lineage' },
+    withCount('timeline', 'Timeline', data.events),
+    { id: 'graph', label: 'Relationships', count: n(data.entity_edges) },
+    withCount('cqc', 'CQC locations', data.cqc_locations),
+    withCount('cqc-reports', 'CQC reports', data.cqc_inspections),
+    withCount('finance', 'Charity finance', data.charity_finance),
+    { id: 'disclosure', label: 'Disclosure log' },
+    withCount('filings', 'Company filings', data.filings),
+    withCount('pfd', 'PFD mentions', data.pfd_mentions),
+    withCount('tribunals', 'Tribunal cases', data.tribunal_cases),
+  ];
+  const wb = workbenchNav(page, sections, { routePath: `/providers/${key}` });
+  page.insertBefore(wb.nav, page.querySelector('#inventory'));
+
+  return () => { wb.cleanup(); disposeCharts(charts); };
 }
 
 function providerStatus(provider) {
@@ -339,7 +508,7 @@ function renderGraph(container, data, charts, key) {
       draggable: true,
       categories,
       force: { repulsion: 260, edgeLength: 130 },
-      label: { show: true, color: '#e6edf3', position: 'right', fontSize: 11 },
+      label: { show: true, color: chartLabelColor(), position: 'right', fontSize: 11 },
       edgeLabel: { show: false },
       data: [...nodes.values()].map((n) => ({
         ...n, category: categories.findIndex((c) => c.name === n.category),

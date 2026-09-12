@@ -2925,7 +2925,7 @@ def website_for(ons_code: str, conn=None) -> AuthorityWebsite | None:
     try:
         row = conn.execute(
             "SELECT authority_name, home_page_url FROM authority_foi_profiles "
-            "WHERE ons_code = ? AND home_page_url IS NOT NULL", (ons_code,)).fetchone()
+            "WHERE ons_code = %s AND home_page_url IS NOT NULL", (ons_code,)).fetchone()
     except Exception:
         return None
     if not row or not row["home_page_url"]:
@@ -2960,7 +2960,7 @@ def _override_for(ons_code: str, conn) -> AuthorityWebsite | None:
         return None
     try:
         row = conn.execute(
-            "SELECT * FROM authority_url_overrides WHERE ons_code = ?", (ons_code,)
+            "SELECT * FROM authority_url_overrides WHERE ons_code = %s", (ons_code,)
         ).fetchone()
     except Exception:
         return None

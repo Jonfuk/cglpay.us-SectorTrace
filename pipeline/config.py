@@ -6,6 +6,7 @@ them at scaffold time.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,6 +28,120 @@ class Settings(BaseSettings):
     # invocations continue to work; hosted deployments can set
     # ADMIN_UI_ENABLED=false to remove both the UI and its admin API routes.
     admin_ui_enabled: bool = True
+
+    # A deployment-topology fact, not a feature flag: whether a separate
+    # `pipeline worker` process is actually running against this warehouse.
+    # The web process only ever enqueues a module run since the Phase 5
+    # worker cutover (CLAUDE.md settled decision 10) -- it cannot execute one
+    # itself any more -- so an enqueue with nobody consuming the queue would
+    # otherwise sit as "running" forever with no indication anything is
+    # wrong. Sites that run `pipeline worker` (or the `worker` compose
+    # service) alongside `pipeline web` leave this true; a checkout that only
+    # ever runs `pipeline web` sets PIPELINE_WORKER_ENABLED=false so
+    # `POST /api/admin/run` refuses with a message naming the missing worker
+    # instead of queuing into silence.
+    pipeline_worker_enabled: bool = True
+
+    # Phase 6 frontend cutover seam. When true (SERVE_NUXT=true) AND the built
+    # Nuxt static output is present, the server serves the two Nuxt applications
+    # — public at `/`, admin at `/admin` — from `nuxt_dist_dir` instead of the
+    # legacy hand-written portals. Off by default: the legacy portals under
+    # `pipeline/web/static/**` remain the served frontends and the parity oracles
+    # until a coordinated cutover flips this. Node never runs in the serving
+    # process; the assets are built in a separate Docker stage and copied in.
+    # `/api/**` is never intercepted by the Nuxt seam, so the API is unaffected
+    # by this flag.
+    serve_nuxt: bool = False
+    # Explicit admin choice is independent of the public cutover. None retains
+    # SERVE_NUXT behaviour; legacy assets stay available for instant rollback.
+    admin_ui_variant: Literal["legacy", "nuxt"] | None = None
+    # Where the built Nuxt output lives in the image: a directory holding two
+    # subdirectories, `public/` and `admin/`, each a Nuxt `generate` output.
+    # Unset defaults (in pipeline/web/nuxt_assets.py) to the location the Docker
+    # build stage copies them to.
+    nuxt_dist_dir: Path | None = None
+
+    # Release identity, surfaced read-only at GET /api/v1/meta and in the
+    # portal footer (BETA-039). A beta is not auditable if a reviewer cannot
+    # tell which build, schema and optional capabilities they are exercising.
+    # All three are injected by the deployment: `deploy/railway-start.sh` sets
+    # GIT_REVISION (from Railway's RAILWAY_GIT_COMMIT_SHA), BUILD_TIME and
+    # ENVIRONMENT before the web process starts. Left unset on a local
+    # checkout, `meta` falls back to reading .git/HEAD and reports the
+    # environment as "development".
+    environment: str = "development"
+    git_revision: str | None = None
+    build_time: str | None = None
+
+    # A per-IP token bucket on the public /api/v1/* routes, answering
+    # sustained abuse with 429 + Retry-After. Generous by design: it exists
+    # to deter a scraper hammering the API, not to meter ordinary interactive
+    # use, and several readers behind one shared NAT address (a union office,
+    # a campaign meeting) must never see it. Set API_RATE_LIMIT_ENABLED=false
+    # to disable entirely — the LAN-only, --host 127.0.0.1 case does not need
+    # it, and it costs nothing to leave off there.
+    api_rate_limit_enabled: bool = True
+    api_rate_limit_per_minute: float = 120.0
+    api_rate_limit_burst: float = 40.0
+
+    # Keep request concurrency aligned with the database read pool.  The
+    # queue absorbs a normal page-load burst; it is not an unbounded backlog.
+    web_workers: int = 8
+    web_queue_size: int = 32
+
+    # A short-lived, in-process cache over the public API's derived responses
+    # (/api/v1/*). Optional and in-memory by deliberate choice (settled
+    # decision 6): no external store, nothing to run, nothing to unplug. Off by
+    # default so a checkout and the offline suite behave byte-identically until
+    # it is turned on. A completed pipeline run invalidates it (the job
+    # registry calls bump_version); the TTL is only a backstop for a write that
+    # does not go through a job. See pipeline/web/cache.py — the seam is the one
+    # an optional shared store (Valkey) would slot into unchanged.
+    cache_enabled: bool = False
+    cache_ttl_seconds: float = 300.0
+    cache_max_entries: int = 512
+    # A longer backstop for near-static public routes (currently /api/v1/
+    # boundaries -- authority geometry, rewritten only by an m00 run that
+    # happens about never). A completed run still invalidates it the instant
+    # the geometry changes, so this only governs how long a *non-job* write
+    # (a hand-edit) can go unnoticed; a day is short enough to catch that and
+    # long enough that the large GeoJSON is parsed once daily rather than every
+    # few minutes. See pipeline/web/server.py `_cache_ttl`.
+    cache_static_ttl_seconds: float = 86400.0
+
+    # OpenTelemetry traces and metrics for pipeline runs, jobs, stages,
+    # database batches, model calls, archive operations and graph projection
+    # (performance.md:632). Off by default for the same reason `cache_enabled`
+    # above is (settled decision 6, "the network cable unplugged"): a checkout
+    # and the offline test suite must behave byte-identically whether or not
+    # the `otel` extra is even installed, and turning export on is a
+    # reviewable choice about what leaves the process, not an accident of
+    # what happened to be on disk. `pipeline/telemetry.py` is the seam --
+    # every span/metric call there degrades to a no-op when this is False or
+    # the SDK is absent, so nothing that calls it needs its own guard.
+    otel_enabled: bool = False
+    # An OTLP/HTTP collector endpoint, e.g. http://localhost:4318. Left unset,
+    # `configure_telemetry` still builds real spans and metrics when enabled
+    # -- it just prints them to the console instead of exporting anywhere,
+    # so `OTEL_ENABLED=true` alone never assumes a collector is listening.
+    otel_exporter_endpoint: str | None = None
+    # The `service.name` resource attribute, so traces from the web process,
+    # the pipeline worker and the analysis worker are distinguishable in a
+    # shared backend without three different endpoints.
+    otel_service_name: str = "sectortrace-pipeline"
+
+    # Shared write-path controls. Individual modules may choose a smaller
+    # batch for a measured reason, but should not invent process-wide defaults.
+    batch_write_rows: int = 1000
+    batch_write_seconds: float = 5.0
+    http_cache_write_batch_size: int = 500
+    csv_parse_workers: int = 1
+    prediction_write_batch_size: int = 2000
+    nlp_accelerator: str = "auto"
+    failed_analysis_detail_retention_days: int = 7
+    operational_snapshot_max_age_seconds: int = 900
+    job_workers: int = 1
+    job_event_retention_lines: int = 4000
 
     default_rate_limit_seconds: float = 2.0
     # Per-host overrides. Kept in code (not .env) since it's structural
@@ -97,6 +212,40 @@ class Settings(BaseSettings):
     # already sitting in review_queue as council_spend_file_robots_disallowed)
     # and is scoped to the domain root only because no narrower transparency
     # path is on file — tighten this prefix if the actual sub-path turns up.
+    #
+    # Third batch, 2026-08-27, clearing the standing *_robots_disallowed
+    # review backlog. Each host below is one those modules recorded a
+    # robots.txt *disallow* against (not a 403 — those raise *_blocked and
+    # stay blocked), and each serves public, OGL-reusable content: m10
+    # ModernGov committee search (cheshireeast), m24 transparency spend files
+    # (wealden), an m09 JSNA page (coventry), and three council FOI
+    # disclosure logs on hosted "/w/webpage/" platforms (adur & worthing,
+    # hertsmere, westmorland & furness). Same footing as the batches above —
+    # an access request pending a reply, prefix-scoped to what the review
+    # items actually show, fetched at 2s/host with the identifying
+    # User-Agent, every use logged and raising a `robots_override_in_use`
+    # item. coventry is scoped to /jsna only; m09 may surface sibling paths
+    # (/public-health, /drug-and-alcohol) that need the same treatment.
+    #
+    # Fourth batch, 2026-08-27, from m32's first crawl of England Safeguarding
+    # Adults Board sites. Seven hosts, 125 review items between them, all
+    # Safeguarding Adults Board / Safeguarding Partnership sites whose
+    # robots.txt disallows either the review-listing paths (cindex.camden,
+    # safeguardingdurhamadults) or the asset directory the published SAR
+    # documents sit in (bromley /assets/, southwark /assets/, east sussex
+    # /media/, kent & medway /assets/, wiltshire /assets/). A SAR is a public
+    # document a board publishes for reuse; same footing as the batches
+    # above — prefix-scoped to what the review items show, fetched at the
+    # standard per-host interval with the identifying User-Agent, every use
+    # logged and raising a `robots_override_in_use` item, and removed if a
+    # board asks.
+    #
+    # Fifth batch, 2026-08-27, from m32's second crawl (wider path set). Same
+    # footing again: lancashiresafeguardingpartnership.org.uk publishes 31
+    # SAR documents under /assets/ behind a robots.txt disallow, and
+    # kmsab.org.uk answers on its bare host as well as www (the fourth batch
+    # scoped only the www form) — the prefix match is a literal startswith,
+    # so both forms are listed.
     robots_exceptions: tuple[str, ...] = (
         # data.gov.uk's real API host. Its robots.txt disallows /api/
         # wholesale, which reads as aimed at crawlers hitting the CKAN search
@@ -133,6 +282,24 @@ class Settings(BaseSettings):
         "https://moderngov.southwark.gov.uk/",
         "https://democracy.walthamforest.gov.uk/",
         "https://democracy.wandsworth.gov.uk/",
+        # Third batch (2026-08-27) — see the note above the tuple.
+        "https://moderngov.cheshireeast.gov.uk/",
+        "https://www.wealden.gov.uk/UploadedFiles/",
+        "https://www.coventry.gov.uk/jsna",
+        "https://adur-worthing-hr.onmats.com/w/webpage/",
+        "https://hertsmere-foi.oncreate.app/w/webpage/",
+        "https://contactus.digital.westmorlandandfurness.gov.uk/w/webpage/",
+        # Fourth batch (2026-08-27) — m32 SAB sites; see the note above.
+        "http://cindex.camden.gov.uk/",
+        "http://www.safeguardingdurhamadults.info/",
+        "https://bromleysafeguardingadults.org/assets/",
+        "https://safeguarding.southwark.gov.uk/assets/",
+        "https://www.eastsussexsab.org.uk/media/",
+        "https://www.kmsab.org.uk/assets/",
+        "https://www.wiltshiresvpp.org.uk/assets/",
+        # Fifth batch (2026-08-27) — m32 second crawl; see the note above.
+        "https://lancashiresafeguardingpartnership.org.uk/assets/",
+        "https://kmsab.org.uk/assets/",
         # A handful of the earliest (Dec 2014) files in the m01 CSV archive
         # backfill are hosted on www.dropbox.com rather than CCS's own
         # domain. Dropbox's robots.txt disallows /s/ (shared-link paths) for
@@ -174,26 +341,142 @@ class Settings(BaseSettings):
     document_max_zero_text_page_ratio: float = 0.60
     document_parse_timeout_seconds: int = 900
 
-    database_path: Path = REPO_ROOT / "data" / "warehouse.db"
+    # The semantic-analysis layer (pipeline/nlp): a downstream stage over the
+    # document-analysis output, the same "never consulted by collectors" rule
+    # as the block above. 034A ships chunking, embeddings and hybrid search.
+    # `nlp_embedding_model` selects the embedder: "stub" is the deterministic,
+    # no-download default that CI, the retrieval-eval harness and offline
+    # development use; a real sentence-transformers id (e.g.
+    # "sentence-transformers/all-MiniLM-L6-v2", behind the `nlp` extra) is the
+    # opt-in that turns on `--mode semantic` / `hybrid`. The model name is not
+    # an identity — the resolved revision SHA is recorded on every nlp_run and
+    # the nlp_model_registry row.
+    nlp_enabled: bool = True
+    nlp_embedding_model: str = "stub"
+    nlp_chunk_batch_size: int = 200
+    nlp_embed_batch_size: int = 256
 
-    # The PostgreSQL warehouse, when there is one. Absent by default: SQLite is
-    # still the backend of record, and a checkout with no `.env` entry here
-    # behaves exactly as it did before PostgreSQL existed.
+    # BETA-107, retargeted to OpenRouter by BETA-114: the optional
+    # natural-language operator layer. Off by default and never on Railway —
+    # the Docker image installs neither the `[assistant]` extra nor a key, and
+    # `railway-start.sh` runs the base install. `pipeline/assistant/` imports
+    # with none of it present; `runtime_status()` reports what is installed
+    # and configured without connecting.
     #
-    # Presence of the URL is what selects the backend — there is deliberately
-    # no separate DATABASE_BACKEND switch. Two settings that can disagree have
-    # a third state where they do, and the failure ("why is it writing to the
-    # file when the URL is set?") is silent and reads like a bug in the driver.
-    # To force SQLite for one command, unset the variable: `DATABASE_URL= …`.
+    # Two OpenAI-chat-compatible HTTP endpoints, configured independently: the
+    # answerer leg (`assistant_ollama_url` — the name is historical) and the
+    # router leg (`assistant_needle_url`). Both default to OpenRouter. BETA-107
+    # served both from a local Ollama/Needle runtime; a CPU-only VPS could not
+    # meet the routing bars (see `docs/assistant.md`), so BETA-114 lifted the
+    # "processing remains local; no cloud fallback" clause of the BETA-107–113
+    # contract for this feature. Point these back at a self-hosted endpoint to
+    # return to local inference.
+    assistant_enabled: bool = False
+    assistant_ollama_url: str = "https://openrouter.ai/api/v1"
+    assistant_needle_url: str = "https://openrouter.ai/api/v1"
+
+    # The OpenRouter bearer token. `resolved_api_key` falls back to the
+    # `OPENROUTER_API_KEY` env var (the same one `nlp suggest-decisions`
+    # reads), so a host that already set that needs no second entry. Never
+    # logged; not redacted anywhere because it is never put in a log line.
+    # Empty is allowed for a self-hosted endpoint that ignores it.
+    assistant_api_key: str | None = None
+
+    # The model slug each leg sends, and what `assistant_runs` records as the
+    # model that answered. There is no pinned default (BETA-114): OpenRouter
+    # has no single right choice and a stale default would 404 on the wire, so
+    # an unset slug fails closed in the adapter. A deployment names both — a
+    # cheap/fast model for `assistant_needle_model` (routing), a stronger one
+    # for `assistant_lfm_model` (grounding). `assistant_lfm_quant` is only a
+    # ledger annotation now (OpenRouter serves its own quantisation).
+    assistant_lfm_model: str = ""
+    # Comma- or newline-separated OpenRouter fallback slugs, tried in order
+    # after ASSISTANT_LFM_MODEL. The primary remains the value recorded by the
+    # existing assistant ledger fields.
+    assistant_lfm_fallback_models: str = ""
+    assistant_lfm_quant: str = ""
+    assistant_needle_model: str = ""
+    # Comma- or newline-separated OpenRouter fallback slugs, tried in order
+    # after ASSISTANT_NEEDLE_MODEL.
+    assistant_needle_fallback_models: str = ""
+
+    # OpenRouter request resilience. These apply per process; multiple worker
+    # processes should each be configured conservatively for the provider.
+    assistant_max_concurrency: int = 8
+    assistant_max_retries: int = 2
+    assistant_retry_base_seconds: float = 0.5
+    assistant_retry_max_seconds: float = 8.0
+    assistant_circuit_breaker_failures: int = 3
+    assistant_circuit_breaker_cooldown_seconds: float = 60.0
+    assistant_request_timeout_seconds: float = 60.0
+
+    # Optional OpenRouter provider routing. Blank sort/order/ignore preserves
+    # OpenRouter's normal load balancing. `latency` and `throughput` are useful
+    # for high-volume runs; provider slugs are comma-separated.
+    assistant_provider_sort: str = ""
+    assistant_provider_order: str = ""
+    assistant_provider_ignore: str = ""
+    assistant_provider_allow_fallbacks: bool = True
+    assistant_provider_require_parameters: bool = True
+
+    # Send `response_format={"type":"json_object"}` on the router call. The
+    # router prompt already demands a bare JSON object, but a small model
+    # (observed: gpt-4o-mini) still drops the `confidence` field often enough
+    # to fail the gate; JSON mode fixes that. Only the router leg — the
+    # answerer writes prose. On by default because most chat models on
+    # OpenRouter honour it; set false if the chosen router model 400s on an
+    # unsupported `response_format`.
+    assistant_router_json_mode: bool = True
+
+    # The routing leg and the whole-turn ceilings, in seconds. 0 means the
+    # code defaults (`ROUTER_TIMEOUT_SECONDS` = 8, `OVERALL_TIMEOUT_SECONDS`
+    # = 30). OpenRouter's first-token latency on a cold or busy model can
+    # exceed 8 s; a deployment that sees router timeouts relaxes these. The
+    # frozen confidence threshold is NOT here — that stays a deliberate edit
+    # in `pipeline/assistant/routing.py`.
+    assistant_router_timeout_seconds: float = 0.0
+    assistant_overall_timeout_seconds: float = 0.0
+
+    # Analysis releases resolve these once into an immutable manifest. They
+    # intentionally inherit the assistant choices when unset, while retaining
+    # the analysis-specific names needed for release provenance.
+    claim_signal_scout_model: str = ""
+    claim_signal_scout_fallback_models: str = ""
+    claim_signal_extractor_model: str = ""
+    claim_signal_extractor_fallback_models: str = ""
+    claim_signal_reflection_model: str = ""
+    claim_signal_reflection_fallback_models: str = ""
+    claim_signal_skip_extractor_on_null: bool = True
+    analysis_cost_ceiling_micros: int = 0
+    # Overnight analysis recovery. A model/provider outage pauses the current
+    # domain and retries it after the cooldown; a worker heartbeat going stale
+    # is treated the same way. The retry cap prevents an unattended batch from
+    # looping forever when every configured provider is unavailable.
+    analysis_retry_cooldown_seconds: float = 300.0
+    analysis_stale_worker_seconds: float = 900.0
+    analysis_model_concurrency: int = 4
+    # Suppression is a separate owner action. Even when true, the worker keeps
+    # shadow behaviour unless the exact persisted prefilter rules have passed
+    # the 99% overall / 100% critical recall gate.
+    analysis_prefilter_suppression_enabled: bool = False
+    # 96 five-minute cooldowns cover a normal overnight window while keeping
+    # a finite bound. Permanent configuration errors fail immediately.
+    analysis_max_automatic_retries: int = 96
+
+    # The PostgreSQL warehouse. `get_settings()` enforces this at the process
+    # boundary; the field remains optional so small settings-only unit tests
+    # can construct a value without opening a warehouse connection.
+    #
+    # There is deliberately no separate DATABASE_BACKEND switch; `DATABASE_URL`
+    # is the one place the warehouse is named.
     #
     # No default points at a real server, and nothing in the repository holds a
     # hostname or a password. `redacted_database_url` is what goes in a log.
     database_url: str | None = None
 
-    # A second PostgreSQL URL used only by the explicit mirror commands. It
-    # never selects the application's backend: DATABASE_URL remains the
-    # database normal commands write to. Keeping the source opt-in prevents a
-    # stale local URL from changing ordinary Railway or local runs.
+    # Optional second PostgreSQL warehouse used only by the explicit backup /
+    # sync cockpit. It is always opened read-only when it is the source; the
+    # direction selector decides which of these two URLs is the target.
     database_source_url: str | None = None
 
     # The same warehouse, as a role that holds SELECT and nothing else.
@@ -246,6 +529,16 @@ class Settings(BaseSettings):
     archive_s3_url_style: str | None = None
     archive_s3_access_key: str | None = None
     archive_s3_secret: str | None = None
+    # Optional offsite destination for verified warehouse snapshots. Kept
+    # separate from ARCHIVE_S3_* because raw evidence objects and restorable
+    # database backups need different retention and credentials.
+    backup_s3_bucket: str | None = None
+    backup_s3_endpoint: str | None = None
+    backup_s3_region: str | None = None
+    backup_s3_url_style: str | None = None
+    backup_s3_access_key: str | None = None
+    backup_s3_secret: str | None = None
+    backup_s3_prefix: str = "warehouse-backups"
     # --- Mirroring an existing deployment -------------------------------------
     # A mirror is a second deployment that collects nothing: its warehouse is
     # replaced wholesale from the deployment it copies, and its raw archive is
@@ -360,6 +653,96 @@ class Settings(BaseSettings):
     zenrows_premium_proxy: bool = False
     zenrows_proxy_country: str = "gb"
 
+    # scrapy.md's optional collection transport (Phase 0/1 proof of concept).
+    # Off by default, and off is load-bearing: nothing in `pipeline/registry.py`
+    # or any module selects a transport by this flag — it exists solely to gate
+    # `pipeline/transports/scrapy_transport.fetch_via_scrapy()`, which refuses
+    # to run at all while this is False. So `uv sync --extra scrapy` alone
+    # never fetches anything; a second, explicit decision is required, and a
+    # module still has to be migrated (a later phase) before this flag has any
+    # effect on real collection.
+    scrapy_enabled: bool = False
+    # Scrapy manages the per-slot delay from observed response latency. The
+    # fixed HTTPX interval is not inherited here: a zero floor lets
+    # AutoThrottle choose the delay, while the hard per-domain concurrency
+    # cap and maximum delay remain explicit safeguards.
+    scrapy_autothrottle_enabled: bool = True
+    scrapy_autothrottle_start_delay_seconds: float = 1.0
+    scrapy_autothrottle_max_delay_seconds: float = 60.0
+    scrapy_autothrottle_target_concurrency: float = 0.5
+    scrapy_download_delay_seconds: float = 0.0
+    scrapy_concurrent_requests_per_domain: int = 1
+    # Scrapy's own per-request timeout (DOWNLOAD_TIMEOUT). Distinct from
+    # `scrapy_runner_timeout_seconds` below, which bounds the whole bounded
+    # crawl: this bounds one request within it, so a single slow host cannot
+    # eat the entire budget before the runner even gets to classify it as a
+    # timeout.
+    scrapy_download_timeout_seconds: float = 20.0
+    # The runner executes a crawl in its own subprocess (see
+    # scrapy_transport.py for why) and kills it if it outlives this, so a
+    # fixture that never answers — or a real source that hangs — cannot block
+    # the calling process indefinitely.
+    scrapy_runner_timeout_seconds: float = 60.0
+    # RetryWithBackoffMiddleware's policy — chosen to match pipeline.http's
+    # tenacity policy (`stop_after_attempt(6)`, `wait_exponential(multiplier=1,
+    # min=1, max=30)`) attempt-for-attempt and second-for-second, since Scrapy's
+    # own built-in RetryMiddleware retries immediately with no per-attempt
+    # delay and no Retry-After support — neither of which meets CLAUDE.md's
+    # "Retry-After honoured" politeness requirement. 6 total attempts (this
+    # many minus 1 retries); backoff doubles from the minimum up to the
+    # maximum, or follows a numeric Retry-After header when the response
+    # carries one.
+    scrapy_retry_max_attempts: int = 6
+    scrapy_retry_backoff_min_seconds: float = 1.0
+    scrapy_retry_backoff_max_seconds: float = 30.0
+
+    # scrapy.md Phase 3: an experimental browser leg on top of the Scrapy
+    # transport, off by default independently of SCRAPY_ENABLED (both must be
+    # true — a browser pilot is a second, deliberate decision on top of
+    # "use Scrapy at all"). See pipeline/transports/browser_pilot.py.
+    scrapy_playwright_enabled: bool = False
+    # None lets Playwright's own lookup apply (PLAYWRIGHT_BROWSERS_PATH, or
+    # its packaged default) — set only to pin a specific browser binary, the
+    # way this checkout's own sandbox pins the pre-installed Chromium.
+    scrapy_playwright_executable_path: str | None = None
+    # Bounds so a browser pilot cannot open more than this many browser
+    # contexts/pages at once — "Scrapy runs should have bounded page/context
+    # counts and memory monitoring" is a hard requirement, not a suggestion,
+    # for anything that launches a real browser process.
+    scrapy_playwright_max_contexts: int = 1
+    scrapy_playwright_max_pages_per_context: int = 1
+    scrapy_playwright_navigation_timeout_seconds: float = 30.0
+    # Power BI dashboards often finish their querydata burst after the
+    # navigation response. Keep this short and bounded; a capture is never an
+    # invitation to leave a page running indefinitely.
+    scrapy_playwright_capture_wait_seconds: float = 20.0
+    scrapy_playwright_runner_timeout_seconds: float = 240.0
+    scrapy_playwright_download_region_limit: int = 9
+    # Scrapy's own MEMUSAGE extension, turned on for this transport leg
+    # specifically: a browser process is the one part of this pipeline whose
+    # memory a single stuck page can genuinely blow up.
+    scrapy_playwright_memory_limit_mb: int = 512
+
+    # Open Jobs is an operator-only shadow collector.  Keeping the gate in
+    # Settings makes an installed optional reader harmless until a deliberate
+    # deployment change enables it; the module refuses to run while false.
+    open_jobs_enabled: bool = False
+    open_jobs_base_url: str = "https://backend.dehnbostele.workers.dev"
+    open_jobs_max_artifact_bytes: int = 128 * 1024 * 1024
+    open_jobs_max_release_bytes: int = 512 * 1024 * 1024
+    open_jobs_max_run_bytes: int = 1024 * 1024 * 1024
+    open_jobs_max_temp_bytes: int = 1024 * 1024 * 1024
+    # Open Jobs rows may carry a bounded, source-shaped location/enrichment
+    # payload. Keep a hard ceiling while allowing the observed release rows;
+    # operators can lower it for a stricter shadow run.
+    open_jobs_max_record_bytes: int = 16 * 1024 * 1024
+    open_jobs_decode_batch_rows: int = 256
+    open_jobs_run_timeout_seconds: int = 1800
+    open_jobs_max_releases_per_run: int = 2
+    open_jobs_status_batch_size: int = 100
+    open_jobs_status_max_requests: int = 10
+    open_jobs_archive_budget_bytes: int = 5 * 1024 * 1024 * 1024
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes
@@ -377,7 +760,7 @@ class Settings(BaseSettings):
             )
         return v
 
-    @field_validator("database_url", "database_ro_url", "database_source_url")
+    @field_validator("database_url", "database_source_url", "database_ro_url")
     @classmethod
     def _usable_database_url(cls, v: str | None) -> str | None:
         """An unusable URL is refused here, not at the first connection.
@@ -385,8 +768,8 @@ class Settings(BaseSettings):
         The alternative is a run that applies migrations, fetches for an hour
         and then fails on a write, which is the shape of failure this project
         spends most of its design avoiding. An empty string is treated as
-        unset so `DATABASE_URL=` on a command line forces SQLite back on
-        without editing `.env`.
+        unset so validation can produce the same clear startup error as a
+        missing variable.
         """
         if v is None or not v.strip():
             return None
@@ -396,9 +779,7 @@ class Settings(BaseSettings):
         # generated rather than one anybody typed.
         if not v.startswith(("postgresql://", "postgres://", "postgresql+psycopg://")):
             raise ValueError(
-                f"DATABASE_URL must be a PostgreSQL URL, got {v.split(':', 1)[0]!r}. "
-                "PostgreSQL is the only alternative backend; leave it unset to "
-                "use the SQLite warehouse at DATABASE_PATH."
+                f"DATABASE_URL must be a PostgreSQL URL, got {v.split(':', 1)[0]!r}."
             )
         return v
 
@@ -437,6 +818,29 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def _performance_configuration(self) -> Settings:
+        positive = {
+            "WEB_WORKERS": self.web_workers,
+            "BATCH_WRITE_ROWS": self.batch_write_rows,
+            "HTTP_CACHE_WRITE_BATCH_SIZE": self.http_cache_write_batch_size,
+            "PREDICTION_WRITE_BATCH_SIZE": self.prediction_write_batch_size,
+            "FAILED_ANALYSIS_DETAIL_RETENTION_DAYS": self.failed_analysis_detail_retention_days,
+            "OPERATIONAL_SNAPSHOT_MAX_AGE_SECONDS": self.operational_snapshot_max_age_seconds,
+            "JOB_WORKERS": self.job_workers,
+            "JOB_EVENT_RETENTION_LINES": self.job_event_retention_lines,
+        }
+        if any(value < 1 for value in positive.values()):
+            bad = next(name for name, value in positive.items() if value < 1)
+            raise ValueError(f"{bad} must be a positive integer")
+        if self.web_queue_size < 0 or self.batch_write_seconds <= 0:
+            raise ValueError("WEB_QUEUE_SIZE must be non-negative and BATCH_WRITE_SECONDS must be positive")
+        if self.csv_parse_workers < 1:
+            raise ValueError("CSV_PARSE_WORKERS must be a positive integer")
+        if self.nlp_accelerator not in {"auto", "python", "mojo"}:
+            raise ValueError("NLP_ACCELERATOR must be auto, python or mojo")
+        return self
+
+    @model_validator(mode="after")
     def _archive_configuration(self) -> Settings:
         values = (self.archive_s3_bucket, self.archive_s3_endpoint,
                   self.archive_s3_region, self.archive_s3_url_style,
@@ -454,6 +858,18 @@ class Settings(BaseSettings):
                              "and SECRET must be set together")
         if self.derived_archive_s3_url_style and self.derived_archive_s3_url_style not in {"virtual", "path"}:
             raise ValueError("DERIVED_ARCHIVE_S3_URL_STYLE must be 'virtual' or 'path'")
+        return self
+
+    @model_validator(mode="after")
+    def _backup_configuration(self) -> Settings:
+        values = (self.backup_s3_bucket, self.backup_s3_endpoint,
+                  self.backup_s3_region, self.backup_s3_url_style,
+                  self.backup_s3_access_key, self.backup_s3_secret)
+        if any(values) and not all(values):
+            raise ValueError("BACKUP_S3_BUCKET, ENDPOINT, REGION, URL_STYLE, ACCESS_KEY, "
+                             "and SECRET must be set together")
+        if self.backup_s3_url_style and self.backup_s3_url_style not in {"virtual", "path"}:
+            raise ValueError("BACKUP_S3_URL_STYLE must be 'virtual' or 'path'")
         return self
 
     @model_validator(mode="after")
@@ -490,15 +906,6 @@ class Settings(BaseSettings):
     @property
     def archive_backend(self) -> str:
         return "s3" if self.archive_s3_bucket else "filesystem"
-
-    @property
-    def database_backend(self) -> str:
-        """`"postgres"` or `"sqlite"`. The single answer to "which backend?".
-
-        Derived, never set: see the note on `database_url` for why there is no
-        second switch that could disagree with this one.
-        """
-        return "postgres" if self.database_url else "sqlite"
 
     @staticmethod
     def _redact(url: str | None) -> str | None:
@@ -542,6 +949,11 @@ class Settings(BaseSettings):
         userinfo = f"{parts.username}:***@" if parts.username else "***@"
         return urlunsplit((parts.scheme, f"{userinfo}{host}", parts.path,
                             parts.query, parts.fragment))
+
+    @property
+    def redacted_database_source_url(self) -> str | None:
+        """The optional second warehouse URL with its password replaced."""
+        return self._redact(self.database_source_url)
 
     @property
     def user_agent(self) -> str:
@@ -640,4 +1052,10 @@ class Settings(BaseSettings):
 
 
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    if not settings.database_url:
+        raise RuntimeError(
+            "DATABASE_URL is required. PostgreSQL 18 is the only application "
+            "database; set it in .env before starting the process."
+        )
+    return settings

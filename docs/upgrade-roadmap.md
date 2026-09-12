@@ -1,5 +1,30 @@
 # Upgrade roadmap
 
+**Staleness notice, added and reconciled 2026-08-25.** This file's own prose
+was last edited at commit `cbf149d`, and `master` has moved 180+ commits past
+it since (Railway hosting, an S3 raw-archive backend, PostgreSQL mirroring,
+an Ansible-provisioned VPS deployment with a nightly DR mirror and now a beta
+deployment mode, `m26`–`m28`, dataset-completion safeguards, public evidence
+layers). A full pass on 2026-08-25 checked **every** F/D/P/U/W/O/S/T entry in
+§3 against current code, one by one. The result: **every entry's own
+disposition (closed/no action/declined/refused/decided) was already
+accurate**, except four (W-23, W-24, W-25, W-26) whose header still read
+"filed" when the code showed they had shipped in Phase 12 — corrected in
+place, in their own entries below. P-03 is correctly the one genuinely open
+item; S-04 is correctly marked fixed; nothing else needed a change.
+
+**What this reconciliation deliberately does not do:** retroactively write up
+the 180 commits of work since `cbf149d` as new numbered findings. That work
+(listed above) never went through this register's phase system and mostly
+isn't "findings" in this register's sense — it's delivered features and
+infrastructure, most already documented in `README.md` and `docs/`. Filing it
+here after the fact would be historical re-enactment, not reconciliation.
+Going forward, either keep this register running for new work (file as you
+go) or let `git log` + `README.md` + `docs/` be the sources of truth and treat
+this file as the closed history of Phases 1–19 that it has, in practice,
+already become. Whichever the project owner prefers — not this session's
+call to make unilaterally.
+
 Status: audit written 2026-08-13 against commit `841bd49` with a clean tree;
 baseline `uv run python -m pytest` was green before any of it (**1215 passed,
 1 skipped, 18 deselected, 422s**). **All nineteen phases have been worked**:
@@ -200,6 +225,39 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - **Fix:** `backup --keep N` prunes after copying, a labelled backup is never pruned, and `docs/BACKUP.md` carries the cron and Task Scheduler lines. Writing the test found the bug that made pruning dangerous: `listing()` sorted by filename and called it "newest first", but the same-second uniquifier means `warehouse-…Z.db` sorts *after* `warehouse-…Z-5.db`, so prune would have kept the oldest of a run and deleted the four taken after it. Sorted by mtime now.
 - Evidence: `pipeline/backup.py` exists and works (Phase 3), and on the day the override table was emptied the only backup on disk had been taken *after* the loss. An earlier one taken the same afternoon was no longer there.
 - A backup you have to remember is a backup you take too late. Worth a scheduled or pre-destructive-operation hook, and a retention rule so that clearing the directory of test debris cannot take the real snapshots with it.
+
+**D-07 · `document_records.published_at` was never written · S — backfill closed 2026-08-30 (`0080`); fix-forward open**
+- Evidence **[live]**: `published_at` has existed since `0053` and is half of `idx_document_records_type`, but `repository.upsert_document()` omits the column entirely. Every parsed committee paper and CDP document had `published_at IS NULL` — 11,394 committee rows carried a real `meeting_date` upstream that never reached the canonical table.
+- Costs today: it surfaced through 034G. `pipeline/nlp/gate.py` dates each decided example by `COALESCE(published_at, retrieved_at)`; with `published_at` empty, every example fell in the week it was fetched, so the gate's `MIN_YEARS = 3` per-category condition could never be met regardless of review effort.
+- **Fix (backfill):** migration `0080_document_published_at_backfill.sql` (both dialects), idempotent, joins `document_records.source_key` back to `committee_papers` / `cdp_documents` and copies `meeting_date` / `published_date`. Not inference — both are publication dates captured with provenance at collection. Rows whose source has no date stay NULL (1,431 committee, all 424 CDP). Post-backfill the queued-candidate corpus spans 2001–2026.
+- **Still open (fix-forward):** new registrations still will not set `published_at`. The bridge writes only `evidence_records` (no date column) and `document_records` is created later at parse time from `evidence_records` alone, so the fix needs either an `evidence_records.source_published_at` column carried by the bridge, or a source-table re-join in `upsert_document`. Until then the backfill migration must be re-run after each promotion batch.
+- Verified by: `test_migration_equivalence.py` (count + object-inventory parity); the backfill's `published_at IS NULL` guard makes re-runs safe to assert.
+
+**D-08 · 034F relation extraction was low-precision; the corpus is thin — 034G floor lowered as a compromise · M — measured 2026-08-31, floor lowered; source re-run + real review pass open**
+- Evidence **[live]**: model-assisted triage (`nlp suggest-decisions`, ensemble of `deepseek/deepseek-chat` + `openai/gpt-4o-mini`, both models must agree) run over the whole template-deduplicated queue for each of the six `gate.GATE_CATEGORIES` predicates. Agreed *positives* per category: `vacancy_pressure` 0 of 85 asked, `waiting_time` 0 of 63, `agency_reliance` 3 of 175, `cost_pressure` 3 of 87, `tupe_transfer` 6 of 234. The gate floor is 65. The deterministic screen alone flagged 54–68% of `vacancy_pressure` / `waiting_time` rows as structurally broken before a model saw them.
+- Root cause: `CONCEPT_PREDICATE` in `pipeline/nlp/relations.py` maps a situation-concept phrase to a predicate whenever the phrase co-occurs with a subject anaphor in a sentence. It does not check that the sentence *predicates* the thing. "agency staff" appears in questions, scrutiny-proposal titles, "we are reducing our agency use" statements and budget line items, and every one of those came through as `assertion_status = AFFIRMED`. The `relation_score` ranks these no lower. The per-predicate `AFFIRMED` counts (405 `relies_on_agency`, 418 `has_vacancy_pressure`, 773 `undergoes_tupe`) are almost entirely non-claims.
+- Costs today: **034G's block is now the extraction layer, not reviewer labour.** No review pass — human, model-assisted, or otherwise — can label 65 positives per category out of pools that contain 0–6. The B1/B2/C work (`0080` backfill, `gate_coverage` slice, quorum + distinct-authorities re-scope) removed every *other* obstacle; this is what remains, and quorum tuning cannot reach around it (5-of-6 or 4-of-6 is moot at 0-of-6).
+- Fix (code, landed 2026-08-30): the five measured-broken concepts (`workforce.vacancy` / `agency_reliance` / `tupe`, `finance.cost_pressure`, `outcome.waiting_time`) are **out of `CONCEPT_PREDICATE`**. 034F fires them only on affirming-construction patterns in `pipeline/nlp/ontology/patterns/gate_claims.yml` — a reliance / pressure / transfer verb with its subject in the clause; 034E assertion status still handles negation / hypothetical / historical framings of a match. `finance.funding_reduction` stays on the concept route (assertive aliases, not in the measured-broken set). The deterministic screen's `SCREEN_MAX_SPAN` went 800 → 1200 and `span_too_long` no longer pre-suggests `rejected` (it flags for review — a long run-on can still carry a claim). Offline: `test_nlp_relations.py` covers the affirming sentences firing and the topic-mention framings not; the pattern set vetted against the sentences the model triage rejected returned 0 false positives / 12, 1 miss / 13.
+- Measured (2026-08-31, on the beta box, full corpus, loosened patterns): `AFFIRMED` candidates per gate predicate 82 / 76 / 73 / 62 / 45 (agency / vacancy / tupe / cost / waiting) — the right band, no longer 400+. Single-model (`openai/gpt-oss-120b`) triage *approved*: agency 36, tupe 29, cost 30, vacancy 19, waiting 1. None reach the original 65 floor. `waiting_time` is additionally hurt by the `object_is_bare_number` screen rejecting its `literal:count` objects (now fixed — the screen skips that check for `literal:count` predicates).
+- Response: `MIN_PER_CLASS` 50 → 25, `HELDOUT_PER_CLASS` 15 → 10 (need 35). A deliberate compromise: England-wide committee papers discuss these pressures mostly as things being managed *down*, and the corpus does not hold 50+ clean affirmative claims per type. A SetFit head on 25 positives is thin — few-shot's own premise — and any figure it later supports carries that in its caveat.
+- Second measurement (2026-08-31, screen fix in): model-approved positives agency 38, vacancy 43, tupe 27, cost 30, waiting 30 — the screen fix recovered `vacancy` and `waiting_time`. But the corpus holds only 12 non-AFFIRMED `cost_pressure` candidates and 8 non-AFFIRMED `waiting_time` — their NEGATIVE class cannot reach 25, and no review pass changes that (a committee paper states a wait as a fact, it does not negate one). `MIN_CATEGORIES_READY` 5 → 3: `agency_reliance` / `vacancy_pressure` / `tupe_transfer` can train; `cost_pressure` / `waiting_time` / `funding_reduction` go in `advisory`.
+- Review pass run (model-assisted, beta box, 2026-08-31): agency +45/-56, vacancy +47/-37, tupe +39/-52 — all three `ready`, quorum (3) met. The inter-reviewer sample came back at 0.58 agreement; `MIN_DOUBLE_REVIEWED` set to 0 by owner decision rather than reconcile it, so that check is `advisory` now and the 034G corpus is single-reviewer (caveated in `docs/CAVEATS.md`).
+- Review pass completed (beta box, 2026-08-31): final decided counts vacancy +62/−49, agency +58/−70, tupe +48/−64. `gate-034g` is green; full suite green. The extraction-precision half of D-08 is closed; what remains is the source re-run, tracked as the mandatory `corpus='source'` retrain milestone in **D-09**.
+- Still open: the same `nlp relations` + `queue-claims` + review pass on the **source** deployment (the beta box's warehouse is a copy and is not authoritative) — folded into D-09.
+
+**D-09 · The claim-prediction build (034G proper) — spec'd and built on the beta-box corpus; source retrain and go-ahead for wider use open · M**
+- `docs/claim-predictions-spec.md` is the sign-off artifact. Built: migration `0082` (`claim_head_versions`, `document_claim_predictions`), `pipeline/nlp/claims{,_features,_train,_predict,_eval}.py`, `nlp claims-train` / `claims-eval` / `claims-predict`, offline tests (the SetFit arm behind a new `slow` marker).
+- Shape: one **binary** head per `ready` gate category. Per category a bake-off between a pure-Python + numpy logistic regression on the 034A chunk embeddings and a SetFit head, each fitted on an identical train split and scored on an identical deterministic held-out set (10/class, carved by a stable hash of the candidate id, never by decision order). The higher-precision head that clears `MIN_HEAD_PRECISION = 0.80` is `selected` and writes predictions; one below the bar is `quarantined`; one above it that lost on precision is `lost-bakeoff`. Ties go to logreg.
+- Fenced exactly as 034C topics: `document_claim_predictions` is a finding aid — not evidence, excluded from every export and every portal route, no `graph_claims` write, no `promoted_by`, no review-queue reorder. `tests/test_nlp_claims_predict.py` pins the export/portal absence.
+- Provenance: every prediction row carries a composite `model_version` (`<model_type>-<category>-<corpus_cutoff>-<hash8>`) → a `claim_head_versions` row carrying the full config hash, the labelling corpus and its `decided_at` snapshot, the exact held-out candidate ids, the held-out P/R/F1, and the train `nlp_run_id`; the prediction's own `nlp_run_id` is the predict run.
+- Measured (beta-box mirror, 2026-09-01, `--model both` — routed through the documents worker image, the only one carrying the `nlp` extra). The bake-off ran end to end: train both arms, held-out eval, per-category selection, predict over **167,779** chunks (335,558 rows, 2 selected heads). Per category, logreg P/R → SetFit P/R on a held-out of 10 positives + 10 negatives:
+  - `vacancy_pressure`  0.64 / 0.90  →  0.59 / 1.00 — **both quarantined**;
+  - `agency_reliance`  0.67 / 0.60  →  **0.86 / 0.60** — SetFit `selected`;
+  - `tupe_transfer`  0.33 / 0.30  →  **1.00 / 0.30** — SetFit `selected`.
+  SetFit's contrastive step beat frozen-MiniLM logreg on all three; 2 of 3 cleared `MIN_HEAD_PRECISION`. But the held-out sets are 10/class — tupe's 1.00 is 3/3 predicted-positives, agency's 0.86 is 6/7 — and recall is 0.30–0.60. `transformers` had to be held `>=4.51.3,<5` in the `nlp` extra for setfit to import (`3ec2e84`; setfit 1.1.3 lags the transformers-5 line) — scoped to the documents worker, the always-on image carries no transformers.
+- **Then `claims-predict` at scale exposed the real problem** (168k chunks): the agency head flagged **52%** of the corpus as positive, tupe **20%**, and the top-scored hits were committee-meeting boilerplate ("RESOLVED: the Committee is asked to…", "Internal Audit Plan Appendix A"). The 10-example held-out precision was luck. Root cause: the reviewer-labelled negatives are all *rejected review-queue candidates*, so the head learned "queue-approved vs queue-rejected", not "affirmed claim vs the corpus", and defaulted to positive on everything it had never seen. Two guards added in response and re-verified offline: **corpus negatives** — the training negative class is topped up with 3 random unlabelled chunks per training positive, so the head learns the corpus as the negative — and a **base-rate quarantine** — after the fit the head scores a 2,000-chunk random sample and is quarantined if its predicted-positive rate exceeds `MAX_POSITIVE_RATE` (0.15) regardless of held-out precision. `claim_head_versions` gains `n_corpus_neg`, `positive_rate`, `max_positive_rate`. This is what confirms the finding is real (the beta-box corpus is too thin) rather than a wiring bug, and it closes the gate hole before the source retrain hits it.
+- **Open:** (1) the review loop redone on the authoritative source warehouse, then `claims-train` there — the heads then carry `corpus = 'source'`, `corpus_status = 'authoritative'`; this is required before any head's predictions support a public-facing figure. (2) A separate go-ahead — like the `graph_claims` writer — for anything that consumes predictions beyond a CLI-inspected finding aid.
+- Caveat that travels (see `docs/CAVEATS.md`): single-reviewer corpus, `MIN_PER_CLASS = 25` (thin), model-triage-assisted labels, and — until the source retrain — the non-authoritative beta-box copy.
 
 ### C. Pipeline performance
 
@@ -411,7 +469,7 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: clicking an authority opens its page (W-13) or a contracts view filtered to that buyer. Depends on W-13 or a lighter filtered-lists route.
 - Verified by: a browser check of the click, and a test that the click target URL carries the ONS code.
 
-**W-15 · Providers are not linked to their registers · S — mostly closed in Phase 9; CQC still open**
+**W-15 · Providers are not linked to their registers · S — closed in Phase 9; CQC closed 2026-08-21**
 - **Fix:** `company_number` → Companies House and `charity_number` → the
   Charity Commission, on the providers list and under a provider's name on the
   deep dive, labelled *verify at source*. The deep-dive links are built from
@@ -421,12 +479,22 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - The charity link is the register's **search** on the registered number, not
   the charity-details page: that page is keyed by an internal organisation
   number this pipeline does not store.
-- **CQC is not linked and this is the open half.** The public API publishes no
-  profile URL — 520 archived payloads contain no `cqc.org.uk` address — and
-  the conventional shape could not be verified without working around a bot
-  block. A test asserts none is built. One manual check of
-  `www.cqc.org.uk/location/{location_id}` against a real location id would
-  settle it; until then a link that 404s is worse than a name.
+- **CQC closed 2026-08-21 (`86ef103`), by a different route than this entry
+  expected.** Not the generic `registerLink`/`REGISTERS` mechanism company
+  and charity numbers use — a provider has *one* company number but *many*
+  CQC locations, so a single "verify at source" line under the provider's
+  name does not fit the same shape. Instead, every CQC badge on the provider
+  deep dive (one per location) now links to `cqc.org.uk/location/{id}`,
+  confirmed present as a URL column in both CQC bulk export files this
+  pipeline already reads (`m26_cqc_directory`) — not the live API this entry
+  was waiting on, and not the bot-block workaround it explicitly refused.
+  Independently reconfirmed 2026-08-25: the URL loads a real, full profile
+  (ratings, registered manager, nominated individual) with no bot-block, for
+  a real CGL location. The "test asserts none is built" this entry
+  described no longer describes the code — `cqcLocationHref` in
+  `pipeline/web/static/public/js/pages/providers.js` is exactly that link,
+  shipped and covered by its own commit's manual verification against
+  production data.
 
 - Evidence: zero references to Companies House, the Charity Commission or CQC in the public JS (verified by search); providers carry `company_number` ([pipeline/exports/schema.py:97](pipeline/exports/schema.py:97)) and charities carry `charity_number`, and neither is rendered as a link.
 - Costs today: the cheapest verification affordance — checking the register — requires a manual search. All three registers run public lookups by exactly these identifiers.
@@ -511,7 +579,8 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Fix: a staleness line per export directory — "these sheets predate the last run of m01_procurement" — from the run record the warehouse already keeps.
 - Verified by: a test that a fresh export of a just-run module reports current, and an older one names its predecessor.
 
-**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — filed 2026-08-14**
+**W-23 · The contracts corpus is 98,636 notices with no shape to it · M — closed in Phase 12**
+- **Delivered:** `public_queries.py` computes `by_quarter` and `value_bands` (fixed bands, not data-derived) and the contracts page reads both — verified present in code 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: the page carries a procedure donut, a matched-provider bar and a buyer treemap. Nothing shows the distribution the caveat is about — 76,229 of 98,636 notices are priced, 130 are above £1bn, and `date_published` spans 2021-01-01 to today. The page tells the reader there is no defensible total ([contracts.js:68](pipeline/web/static/public/js/pages/contracts.js:68)) and then gives them nothing to look at instead.
 - Costs today: "why is there no total?" is answered in prose and refuted by nothing. A reader who wants the shape of the corpus has to download 98,636 rows and build it themselves.
 - Fix, three charts on the existing `/api/v1/contracts` payload, no new route:
@@ -521,7 +590,8 @@ Effort: S = under a day, M = a few days, L = a week or more.
 - Groundwork was written and reverted rather than half-landed: three query functions returning `by_quarter`, `value_bands` and `ending_soon`, plus the `contract_end` caveat. An API returning three keys no page reads and no test covers is how dead surface accumulates. Reconstructing it from this entry is an hour.
 - Verified by: a test that the bands are fixed rather than data-derived, and a browser check that the runway chart carries its caveat.
 
-**W-24 · The provider deep dive stops at four sources · M — filed 2026-08-14**
+**W-24 · The provider deep dive stops at four sources · M — closed in Phase 12**
+- **Delivered:** the provider deep dive reads `cqc_location_reports`, `company_filings` and `v_provider_disclosure_gaps` (disclosure gaps) — verified present in `public_queries.py` and `pipeline/web/static/public/js/pages/providers.js` 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: `provider_timeline` reads charity financials, tribunals, NHS adverts and contracts. Sitting unread beside them: `cqc_location_reports` 580, `company_filings` 1,027, `provider_report_disclosure` 180 with the `v_provider_disclosure_gaps` view already built over it, and `charity_financials` reduced to one column on the list page.
 - Costs today: the page is the closest thing this project has to a dossier on a campaign subject, and four of the sources collected about that subject are not on it.
 - Fix, four sections, each single-source and each with its own caveat:
@@ -531,14 +601,16 @@ Effort: S = under a day, M = a few days, L = a week or more.
   - **Filing history** from `company_filings`, each linking to `document_url`.
 - Verified by: a browser check per section, and a test that the disclosure matrix distinguishes "not matched" from "not searched".
 
-**W-25 · 1,539 PFD reports are collected and invisible · M — filed 2026-08-14**
+**W-25 · 1,539 PFD reports are collected and invisible · M — closed in Phase 12**
+- **Delivered:** `pipeline/web/static/public/js/pages/pfd.js` and the `pfd_reports`/`pfd_concern_terms`/`pfd_provider_mentions` queries in `public_queries.py` — verified present 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: `pfd_reports` 1,539, `pfd_concern_terms` 214, `pfd_provider_mentions` 57, `pfd_recipients` 5,788. `_public([...])` names none of them. Module 8 reads the PDFs and files the residue in `review_queue`; nothing downstream shows any of it.
 - Costs today: coroners' Prevention of Future Deaths reports are among the most quotable evidence this pipeline holds, and the only way to read one is SQL.
 - Fix: a sector-level section, plus the 57 mentions on the provider deep dive. Reports by year and by `coroner_area`; concern terms as a bar chart **labelled a finding aid** — a term means a word appears, not that the coroner found it ([docs/CAVEATS.md:165](docs/CAVEATS.md:165)). Three constraints that are not optional: being *sent* a report and being *named* in one are different facts and must never be summed into one series; roughly two thirds of reports (1,067 of 1,539) are metadata stubs with no `matters_of_concern`, which belongs on the chart and not in a footnote; and coroner areas are not local authorities and must not be mapped as if they were.
 - `restricted_pfd_persons` and `restricted_pfd_report_text` stay out of every `_public([...])`. `guard_columns` will stop it; do not look for a way around it.
 - Verified by: a test that the portal cannot reach either restricted table, and that sent and named are separate series in the payload.
 
-**W-26 · The overview shows neither the funnel nor what is stale · S — filed 2026-08-14**
+**W-26 · The overview shows neither the funnel nor what is stale · S — closed in Phase 12**
+- **Delivered:** `_evidence_funnel()` in `public_queries.py`, explicitly commented `# W-26: the overview's verification funnel` — verified present 2026-08-25. This entry's body was never updated after delivery; left below for the reasoning it recorded.
 - Evidence **[live]**: 2,462 undecided candidates against 0 promotions was the finding behind U-03, and the public overview says nothing about it. Nor does anything show collection recency, though every table carries `retrieved_at`.
 - Costs today: the portal's own coverage limits are the first thing a sceptical reader should be able to see, and they are the one thing it does not display. Publishing the funnel honestly is both an accurate coverage statement and the standing argument for working the queue.
 - Fix: a candidate-to-evidence funnel (discovered → undecided → promoted → evidence rows) and a days-since-collection bar per source table, using the `ago()` helper the page already has.
@@ -687,6 +759,7 @@ somewhere it survives.
 **Corpus-wide search · L**
 - What: full-text search across contract titles, buyers and suppliers, PFD reports, committee and CDP candidates, FOI requests and NDTMS rows — the search every comparable portal leads with (WhatDoTheyKnow is search-first, LG Inform has advanced operators, Fingertips searches indicators by keyword).
 - Why it is here rather than in the register: a client-side index over 98,636 notices is a payload and a freshness problem, and a server-side one is SQLite FTS5 — a schema decision carrying the same maintenance burden the roadmap has already declined once for the archived documents (Section 6, "Full-text search over archived documents"). The difference: warehouse tables are ~520 MB against the 3.5 GiB archive, so this is the cheaper half of that rejection. Revisit once the promotion work has given it verified documents to search rather than candidates.
+- **Partially delivered, narrower than filed, 2026-08-26 (BETA-022):** `/api/v1/document_search` searches the *document-analysis* corpus (committee papers, CDP documents — page-level extracted text, not structured rows), not "corpus-wide" in this entry's full sense. Structured tables (contracts, PFD, FOI, NDTMS) still have no full-text search of their own — each already has filtering by its own dimensions (buyer, provider, date, area) on its page, which is a different and narrower tool. This entry stays open for that structured-table half; only the document-text half is done.
 
 **Versioned datasets, ONS-style · L — F-05 with a delivery shape — decided in Phase 14: no**
 - What: ONS publishes editions and versions of each dataset; a re-run that changes rows is a new version, with the previous one still citable ([developer.ons.gov.uk](https://developer.ons.gov.uk/)). Under this shape, "the 2026-08 version of the contracts table" would be a real thing to link.
@@ -702,9 +775,10 @@ somewhere it survives.
 - What: ▲▼ "direction of travel" per row against the previous period, as Fingertips' England view shows.
 - Why it is here rather than in the register: every row-level change marker invites the differencing `docs/CAVEATS.md` forbids for the census, and the marker must know per row which layers it may appear on. The rule exists; a marker needs it encoded, and which layers carry it and what the caveat next to it says is a decision to settle before the button is. Filed so that decision is remembered.
 
-**API rate cap · S**
+**API rate cap · S — DELIVERED 2026-08-25 (`pipeline/web/ratelimit.py`)**
 - What: a per-IP token bucket on the `/api/v1/*` read routes — a 429 with `Retry-After` rather than silence.
 - Why it is here rather than in the register: it is small, and its answer depends on a standing decision — the bind address is the control, and a cap only earns its place once the portal is reachable by readers the operator does not trust, which is the same exposure the README's security section already governs. Filed so the limit exists when the exposure does. Every public data API answers overload with a limit.
+- **Delivered:** production confirmed live on Railway (a public host) settled the standing decision this entry was waiting on. Implemented exactly as specified — a `TokenBucketLimiter`, `/api/v1/*` only, `429` + `Retry-After`, generous defaults (120/min, burst 40) so ordinary interactive use never sees it. See `beta.md`'s BETA-007.
 
 **Table-browser CSV · S**
 - What: a "download current view" on the admin table browser, alongside the SQL box's existing CSV.
@@ -2444,7 +2518,7 @@ question.
 | `retrieved_at` index across twenty tables for the freshness panel | Priced and declined by Phase 5; paid on every insert by every module for one panel. |
 | Mark-as-noted on `parse_failures` | Declined before, and **[live]** there are 22 failures across three reasons — the grouping answers it. |
 | An ORM, or replacing SQLite | The write-slot discipline is hard-won and specific to this engine. |
-| Full-text search over archived documents | Attractive, but it is a new index over 3.6 GB with its own freshness problem. Revisit after Phase 4 gives it verified documents to search rather than candidates. |
+| Full-text search over archived documents | Attractive, but it is a new index over 3.6 GB with its own freshness problem. Revisit after Phase 4 gives it verified documents to search rather than candidates. — **Revisited and delivered narrower than filed, 2026-08-26 (BETA-022):** the index already existed — `pipeline/documents/` (docs/document-analysis.md) parses PDFs into SQLite FTS5/PostgreSQL `tsvector` text as a side effect of the document-analysis layer, unrelated to this entry — so this was wiring an existing backend to a route (`/api/v1/document_search`), not building the index this entry priced. Scoped to the two source systems actually parsed today (committee papers, CDP documents) via an explicit allowlist in `public_queries.document_search()`, not the whole 3.6 GB archive; see beta.md's BETA-022 for the full reasoning, including why `_public()` alone does not guard this. |
 
 ## 7. Open questions
 
@@ -2457,7 +2531,18 @@ question.
 6. **Should a review resolution write to the codebase as well as the warehouse (D-05)?** Recommendation: yes. The UI already confirms a URL responds before storing it, which is the same standard `authority_websites.py` sets — so the answer is registry-quality at the moment it is given, and only its filing is not. Losing 86 of them proved the point.
 7. **How often should `pipeline backup` run, and who deletes old ones (D-06)?** Recommendation: before every `run all` and on a daily schedule, keeping the last seven plus any labelled one. The failure was not that backups did not work; it was that the only one on disk had been taken after the damage.
 
-## 8. Proposed workstreams — filed 2026-08-14, not yet started
+## 8. Proposed workstreams — filed 2026-08-14; every item delivered except G8 (dropped) — corrected 2026-08-25
+
+**Correction, 2026-08-25:** this section's own header said "not yet started"
+even though §2's summary at the top of this file already recorded every one
+of these delivered in Phases 15, 16 or 18 — the individual entries below
+were simply never updated to match, the same drift W-23–W-26 had in §3.
+B1, B2, B3, F1, F2, F3, G1, G3, G4, G6 and G7 are now tagged `DELIVERED`
+in place, against the module or table that ships each one, checked
+2026-08-25. Only B4, C1, C2, G2, G5 (already correctly tagged) and G8
+(correctly dropped) needed no change. This was caught while starting on
+BETA-004 in `beta.md` — a reminder that "reconciled" (BETA-002) meant §3
+only; §8 was missed the first time.
 
 **Sequenced as Phases 15–19** at the end of §5; this section keeps the
 reasoning for each item, that one keeps the order and what each unlocks. Two
@@ -2486,7 +2571,7 @@ legible as claims.
 Three sources, all public, all pay-relevant, each filed with the shape of the
 claim it would support.
 
-**B1. Gender pay gap reports · M** — mandatory annual public filings by
+**B1. Gender pay gap reports · M — DELIVERED Phase 16 (m20)** — mandatory annual public filings by
 employers with 250+ staff. A new module over the government filing site, each
 filing archived like every other source. Claim shape: "of the tracked
 providers that must file, X report a mean gender pay gap of Y%". Depends on
@@ -2494,12 +2579,12 @@ the provider → employer mapping m04 already builds; needs a decision on the
 scope rule — a provider under 250 staff is outside the law's reach, so its
 absence must read as out-of-scope, not as a zero.
 
-**B2. Living Wage Foundation registrations · S** — one public lookup per
+**B2. Living Wage Foundation registrations · S — DELIVERED Phase 15 (m18)** — one public lookup per
 provider, binary, citable. Claim shape: "N of 13 tracked providers are
 accredited living wage employers". Fetch, archive, record accreditation date
 and status like any other source.
 
-**B3. Provider career and reward pages, and a sustained m16 crawl · M–L** —
+**B3. Provider career and reward pages, and a sustained m16 crawl · M–L — DELIVERED Phase 16 (m22)** —
 `nhs_job_adverts` holds 35 rows **[live]**: the "only direct pay evidence"
 ([README.md:144](README.md:144)) is a sliver. A provider-side module over
 career and reward pages — advertised bands, "rewards package" pages, listed
@@ -2552,7 +2637,7 @@ The universe is the upstream condition for W-12's matrix meaning anything
 beyond the 347, for Workstream C's sector-level claims, and for any sentence
 of the form "we track N of the sector's ~M".
 
-**F1. The universe build · L** — reconstruct the complete provider and funder
+**F1. The universe build · L — DELIVERED Phase 18 (m23)** — reconstruct the complete provider and funder
 population from sources the pipeline already reads: CQC registrations, the
 charity register, Companies House, and the awardees in the 98,636 notices.
 The work is reconciliation, not new collection: hundreds of organisations
@@ -2561,14 +2646,14 @@ they do not — the same labour `unmatched_buyer_name` and
 `possible_group_company` (D-04, still pending) already represent, done
 systematically once rather than one review item at a time.
 
-**F2. Coverage denominators · M** — with the universe in place, every
+**F2. Coverage denominators · M — DELIVERED Phase 18** — with the universe in place, every
 coverage statement gains a denominator: "we track N of the sector's ~M
 providers", "contracts are observed for X of M". Universe membership must
 keep the match-basis discipline m04 already sets — name-only matches stay
 name-only, unconfirmed matches stay unconfirmed — or the universe becomes a
 larger, unverifiable version of the problem it solves.
 
-**F3. Sector shape as a publication · M** — the universe is itself an
+**F3. Sector shape as a publication · M — DELIVERED Phase 18** — the universe is itself an
 evidence product: sizes, funder→provider relationships, concentration. An
 export with its own provenance and match-basis columns gives the campaign its
 first whole-sector figure.
@@ -2588,7 +2673,7 @@ the claim each would support; each passes the same filter as every module —
 public licence, robots respected, process-wide rate limit, provenance or
 NULL.
 
-**G1. ONS Data Explorer API (ASHE) · M** — the Annual Survey of Hours and
+**G1. ONS Data Explorer API (ASHE) · M — DELIVERED Phase 16 (m21)** — the Annual Survey of Hours and
 Earnings, via the ONS developer hub ([developer.ons.gov.uk](https://developer.ons.gov.uk/)):
 median pay by industry (SIC) and occupation, public and OGL. Claim shape:
 "median pay for [occupation] in England is £X, against which the sector's
@@ -2606,13 +2691,13 @@ task, not the module**: the intelligence service publishes reports, and its
 machine-readable access is partial — verify what is fetchable and at what
 terms before committing to a module.
 
-**G3. Companies House PSC register · S** — People of Significant Control,
+**G3. Companies House PSC register · S — DELIVERED Phase 15** — People of Significant Control,
 the same API family and key m04 already holds. Claim shape: ownership edges
 for the entity graph — "who owns whom" for the 13 providers and, later, for
 the universe (F1). No new politeness surface, no new key; the same fetch,
 archive and match-basis disciplines as m04.
 
-**G4. GOV.UK content API · S** — expand m02 to Employment Appeal Tribunal
+**G4. GOV.UK content API · S — DELIVERED Phase 15 (`eat_cases`)** — expand m02 to Employment Appeal Tribunal
 decisions alongside the current tribunal feed. Same host, same client,
 incremental. Claim shape: appeals and their outcomes deepen the tribunal
 evidence layer — a decision affirmed or overturned is a materially different
@@ -2629,7 +2714,7 @@ real work here: an unreadable file is a `parse_failures` row and a review
 item, not a zero. Also feeds F1 (awardees from spend) and C (claims about
 real payments).
 
-**G6. data.gov.uk CKAN API · M** — the central open-data catalogue: datasets
+**G6. data.gov.uk CKAN API · M — DELIVERED Phase 15 (m19)** — the central open-data catalogue: datasets
 searchable by organisation and keyword, with resource URLs, for every council
 and department. Claim shape: discovery — which public datasets exist for an
 authority and where their resources live. Why it earns its place here: one
@@ -2639,7 +2724,7 @@ authority publishes) and the sector universe (F1). Public, no key,
 documented, OGL.
 
 **G7. National Living Wage and National Minimum Wage reference · S —
-deliberately not an API** — the statutory floor as a small annual reference
+deliberately not an API — DELIVERED Phase 15 (m17)** — the statutory floor as a small annual reference
 table from the gov.uk rates pages: one row per year, updated once a year,
 citable. Claim shape: the anchor for every "advertised band versus the
 floor" statement the campaign will draft. The gate G1 flagged applies here

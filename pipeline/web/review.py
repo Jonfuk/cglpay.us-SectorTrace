@@ -112,7 +112,7 @@ def _apply(conn: sqlite3.Connection, ids: list[int], decision: str,
     """Set the status and write the audit row for each id. Assumes a
     transaction is already open — both callers need the read of the current
     status and the write of the new one to be atomic together."""
-    placeholders = ", ".join("?" for _ in ids)
+    placeholders = ", ".join("%s" for _ in ids)
     existing = {
         row["id"]: row
         for row in conn.execute(
@@ -134,7 +134,7 @@ def _apply(conn: sqlite3.Connection, ids: list[int], decision: str,
             continue
 
         conn.execute(
-            "UPDATE review_queue SET status = ?, resolved_at = ? WHERE id = ?",
+            "UPDATE review_queue SET status = %s, resolved_at = %s WHERE id = %s",
             # Back to pending clears resolved_at, so the column keeps
             # meaning "when this stopped needing a decision" rather than
             # "when it was last touched".
@@ -143,7 +143,7 @@ def _apply(conn: sqlite3.Connection, ids: list[int], decision: str,
         conn.execute(
             "INSERT INTO review_decisions "
             "(review_item_id, decision, status_before, note, decided_by, decided_at, context_json) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
             (item_id, decision, row["status"], note, decided_by, now, row["context_json"]),
         )
         updated.append(item_id)
@@ -216,7 +216,7 @@ def decide_matching(
 
     now = _utcnow()
     with conn:
-        ids = [row[0] for row in conn.execute(
+        ids = [row["id"] for row in conn.execute(
             f"SELECT q.id FROM review_queue q{clause} ORDER BY q.id", params)]
 
         # Inside the transaction, so the set counted is the set decided.

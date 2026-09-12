@@ -174,7 +174,7 @@ function replace(container, ...children) {
  * module's business, and it finds out through the event at the end of
  * showTab rather than by being called. */
 const TABS = ['overview', 'review', 'pipeline', 'health', 'candidates', 'census',
-               'claims', 'exports', 'database', 'sql'];
+               'claims', 'search', 'claimreview', 'exports', 'database', 'sql'];
 let currentTab = 'overview';
 
 function showTab(name) {
@@ -313,7 +313,34 @@ function requireReviewer() {
 
 // --- overview ---------------------------------------------------------------
 
+// BETA-086: the operator action cockpit. Prioritised cards over operational
+// state; each card links to a pre-filtered existing workflow.
+async function loadCockpit() {
+  const holder = $('#cockpit');
+  if (!holder) return;
+  let data;
+  try { data = await api('/api/admin/cockpit'); }
+  catch (e) { holder.replaceChildren(el('p', { class: 'muted small', text: 'Cockpit unavailable.' })); return; }
+
+  const labels = data.priority_labels || {};
+  const cards = (data.cards || []).map((c) => el('button', {
+    class: `cockpit-card p${c.priority}`,
+    type: 'button',
+    onclick: () => { location.hash = c.link; },
+    title: `Go to ${c.link}`,
+  },
+    el('span', { class: 'cockpit-badge', text: labels[c.priority] || String(c.priority) }),
+    el('span', { class: 'cockpit-title', text: c.title }),
+    el('span', { class: 'cockpit-metric', text: num(c.metric) }),
+    el('span', { class: 'cockpit-reason small', text: c.reason })));
+
+  holder.replaceChildren(
+    el('p', { class: 'muted small', text: data.note }),
+    el('div', { class: 'cockpit-grid' }, ...cards));
+}
+
 async function loadOverview() {
+  loadCockpit();
   let data;
   try { data = await api('/api/overview'); }
   catch (e) { return toast(e.message, true); }
@@ -441,6 +468,14 @@ async function loadFacets() {
 async function loadReview(keepFocus) {
   if (!reviewState.facets) await loadFacets();
 
+  if ($('#f-clusters') && $('#f-clusters').checked) {
+    return loadReviewClusters();
+  }
+  const clustersHolder = $('#review-clusters');
+  if (clustersHolder) clustersHolder.hidden = true;
+  $('#review-list').hidden = false;
+  $('#review-pager').hidden = false;
+
   const previousFocus = keepFocus ? reviewState.focus : 0;
   // Skeletons sized to the page being requested, so the list does not
   // collapse to nothing and jump back when the rows arrive.
@@ -473,6 +508,65 @@ async function loadReview(keepFocus) {
   renderFocus();
 }
 
+/* BETA-053: the cluster view. Pending items grouped by (module, item_type,
+ * a shared organisation/source token) so a reviewer sees "40 unknown
+ * committee URLs for Kent" as one row. Grouping is display only — the
+ * per-cluster Approve/Reject drives the existing decide-matching endpoint,
+ * which recounts its exact id set inside the transaction and refuses on a
+ * mismatch (confirm_count). */
+async function loadReviewClusters() {
+  const holder = $('#review-clusters');
+  $('#review-list').hidden = true;
+  $('#review-pager').hidden = true;
+  holder.hidden = false;
+  replace(holder, el('div', { class: 'muted small', text: 'Grouping…' }));
+
+  let data;
+  try { data = await api(`/api/review/clusters?status=${$('#f-status').value || 'pending'}`); }
+  catch (e) { return replace(holder, el('div', { class: 'empty', text: e.message })); }
+
+  const decideCluster = async (cluster, decision) => {
+    const by = requireReviewer();
+    if (!by) return;
+    try {
+      const result = await post('/api/review/decide-matching', {
+        decision, decided_by: by,
+        confirm_count: cluster.count,
+        status: $('#f-status').value || 'pending',
+        module: cluster.module, item_type: cluster.item_type,
+        search: cluster.token === '(none)' ? null : cluster.token,
+      });
+      toast(`${decision}: ${result.updated.length} item(s) in this cluster.`);
+      loadReviewClusters();
+      loadFacets();
+    } catch (e) {
+      toast(e.message, true);
+    }
+  };
+
+  const rows = (data.clusters || []).map((cluster) => el('details', { class: 'cluster' },
+    el('summary', {},
+      el('span', { class: 'badge module', text: cluster.module }), ' ',
+      el('span', { class: 'badge type', text: cluster.item_type }), ' ',
+      el('strong', { text: cluster.token }), ' ',
+      el('span', { class: 'muted', text: `· ${cluster.count} item${cluster.count === 1 ? '' : 's'}` })),
+    el('div', { class: 'cluster-body' },
+      el('p', { class: 'muted small', text: cluster.sample_raw || '' }),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn approve',
+          onclick: () => decideCluster(cluster, 'approved') }, `Approve ${cluster.count}`),
+        el('button', { class: 'btn reject',
+          onclick: () => decideCluster(cluster, 'rejected') }, `Reject ${cluster.count}`)))));
+
+  replace(holder,
+    el('p', { class: 'muted small', text: data.caveat }),
+    el('p', { class: 'muted small',
+      text: `${data.cluster_count} cluster(s) over ${data.scanned} pending item(s)`
+        + (data.truncated ? ' (scan capped at 5000)' : '') }),
+    rows.length ? el('div', {}, ...rows)
+      : el('div', { class: 'empty', text: 'No pending items to group.' }));
+}
+
 function renderList() {
   const items = reviewState.items;
   if (!items.length) {
@@ -482,8 +576,26 @@ function renderList() {
   replace($('#review-list'), dense() ? renderDense(items) : items.map(renderItem));
 }
 
+// BETA-087: on wide screens the queue is always the compact list — the full
+// item lives in the right-hand detail pane instead of in every row.
+function splitActive() {
+  return window.matchMedia('(min-width: 1000px)').matches;
+}
+
 function dense() {
-  return $('#f-dense').checked;
+  return $('#f-dense').checked || splitActive();
+}
+
+/* BETA-087: render the focused item's full context + decision controls into
+ * the right pane. `renderItem` is unchanged; it just renders here now on a
+ * wide screen. The pane's checkbox/buttons act by item id like the row's. */
+function renderReviewDetail() {
+  const pane = $('#review-detail');
+  if (!pane) return;
+  const item = focusedItem();
+  if (!splitActive() || !item) { pane.replaceChildren(); pane.hidden = true; return; }
+  pane.hidden = false;
+  replace(pane, renderItem(item));
 }
 
 function renderCounts() {
@@ -563,8 +675,6 @@ function renderItem(item) {
 
   const act = (decision) => decideItems([item.id], decision, note.value);
 
-  const context = formatContext(item.context_json);
-
   const body = el('div', {},
     el('div', { class: 'meta' },
       el('span', { class: 'badge module', text: item.module }),
@@ -572,12 +682,13 @@ function renderItem(item) {
       el('span', { class: `badge ${item.status}`, text: item.status }),
       el('span', { class: 'muted' }, `#${item.id} · seen `, timeNode(item.created_at))),
     el('div', { class: 'raw' }, maybeLink(item.raw_value)),
-    context ? el('pre', { class: 'context', text: context }) : null,
+    typedContext(item.context_json),
     item.last_decision ? el('div', { class: 'muted small' },
       `${item.last_decision} by ${item.last_decided_by} `,
       timeNode(item.last_decided_at),
       item.last_note ? ` — “${item.last_note}”` : '') : null,
     item.decision_count > 1 ? historyBlock(item.id, item.decision_count) : null,
+    sidecarBlock(item),
     resolveForm(item),
     el('div', { class: 'actions' },
       note,
@@ -649,6 +760,117 @@ function resolveForm(item) {
     status);
 }
 
+/* A ranked shortlist for the two item types that name something unresolved —
+ * an `unmatched_buyer_name` against `authorities`, a `possible_group_company`
+ * against known companies and providers. Lazy-loaded on open, like the
+ * history block. It is a suggestion to confirm: nothing here writes, and the
+ * override still goes in by hand (pipeline/buyer_name_overrides.py). Absent
+ * for every other type, and — being under /api/admin — absent entirely on a
+ * hosted deployment with the operator UI off. */
+const FUZZY_MATCH_TYPES = {
+  unmatched_buyer_name: 'authority',
+  possible_group_company: 'company / provider',
+};
+
+function nameMatchBlock(item) {
+  if (!(item.item_type in FUZZY_MATCH_TYPES)) return null;
+  const out = el('div', { class: 'muted small', text: 'loading…' });
+  const details = el('details', { class: 'history' },
+    el('summary', { text: `Similar ${FUZZY_MATCH_TYPES[item.item_type]} names` }), out);
+
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = '1';
+    try {
+      const res = await api(`/api/admin/review/${item.id}/name-matches`);
+      if (!res.matches || !res.matches.length) {
+        return replace(out, el('div', { class: 'muted small',
+          text: res.note || 'No close matches — resolve by hand.' }));
+      }
+      replace(out, el('div', {},
+        el('div', { class: 'muted small', text:
+          `ranked by ${res.method === 'pg_trgm' ? 'trigram similarity'
+            : 'difflib (pg_trgm not installed)'} — a suggestion to confirm, `
+          + 'not a resolution' }),
+        el('table', {},
+          el('thead', {}, el('tr', {},
+            el('th', { text: 'Score' }), el('th', { text: 'Match' }),
+            el('th', { text: 'Id' }), el('th', { text: 'In' }))),
+          el('tbody', {}, res.matches.map((m) => el('tr', {},
+            el('td', { class: 'num', text: m.score.toFixed(2) }),
+            el('td', { text: m.name }),
+            el('td', { class: 'mono', text: String(m.id) }),
+            el('td', { class: 'muted small', text: m.target })))))));
+    } catch (e) {
+      replace(out, el('div', { class: 'bad small', text: e.message }));
+    }
+  });
+
+  return details;
+}
+
+/* BETA-054: the evidence sidecar — the item's own source excerpt, and (for
+ * the name-match types) the ranked candidates relabelled as a similarity
+ * percentage. Loaded lazily on expand. Nothing here is preselected and
+ * approving the item still writes nothing to a canonical table. */
+function sidecarBlock(item) {
+  const body = el('div', { class: 'muted small', text: 'loading…' });
+  const details = el('details', { class: 'history sidecar' },
+    el('summary', { text: 'Evidence & candidates' }), body);
+
+  details.addEventListener('toggle', async () => {
+    if (!details.open || details.dataset.loaded) return;
+    details.dataset.loaded = '1';
+    let data;
+    try { data = await api(`/api/review/${item.id}/sidecar`); }
+    catch (e) { return replace(body, el('div', { class: 'bad small', text: e.message })); }
+
+    const parts = [];
+    const src = data.source || {};
+    if (src.excerpt) {
+      parts.push(el('blockquote', { class: 'ctx-evidence', text: src.excerpt }));
+    }
+    if (src.url) {
+      parts.push(el('div', { class: 'small' }, maybeLink(src.url)));
+    }
+    if (src.retrieved_at || src.payload_sha256) {
+      parts.push(el('div', { class: 'muted small mono',
+        text: [src.retrieved_at ? `retrieved ${src.retrieved_at}` : null,
+               src.payload_sha256 ? `sha ${String(src.payload_sha256).slice(0, 12)}` : null]
+          .filter(Boolean).join(' · ') }));
+    }
+    if (!src.excerpt && !src.url && src.note) {
+      parts.push(el('div', { class: 'muted small', text: src.note }));
+    }
+
+    const cand = data.candidates || {};
+    if (cand.supported) {
+      const rows = (cand.ranking || []).map((m) => el('tr', {},
+        el('td', { class: 'num', text: `${m.similarity_percent}%` }),
+        el('td', { text: m.name }),
+        el('td', { class: 'mono', text: String(m.id) }),
+        el('td', { class: 'muted small', text: m.target })));
+      parts.push(el('div', { class: 'muted small', text:
+        `Candidates ranked by ${cand.method === 'pg_trgm' ? 'trigram similarity'
+          : 'difflib'} — nothing is selected; pick one by hand.` }));
+      parts.push(rows.length
+        ? el('table', {}, el('thead', {}, el('tr', {},
+            el('th', { text: 'Similarity' }), el('th', { text: 'Name' }),
+            el('th', { text: 'Id' }), el('th', { text: 'In' }))),
+            el('tbody', {}, rows))
+        : el('div', { class: 'muted small', text: 'No candidate above the similarity floor.' }));
+      if ((cand.suppressed || []).length) {
+        parts.push(el('div', { class: 'muted small',
+          text: `${cand.suppressed.length} generic name(s) suppressed as known false matches.` }));
+      }
+    }
+    parts.push(el('div', { class: 'muted small', text: data.caveat }));
+    replace(body, el('div', {}, ...parts));
+  });
+
+  return details;
+}
+
 /** Context comes out of the database as a JSON string. Pretty-print it when it
  *  parses, and show it as it stands when it does not — a module that wrote
  *  something unexpected there is worth seeing, not hiding behind a parse
@@ -657,6 +879,100 @@ function formatContext(raw) {
   if (!raw) return '';
   try { return JSON.stringify(JSON.parse(raw), null, 2); }
   catch (e) { return String(raw); }
+}
+
+/* BETA-052: the review item's context_json rendered as typed sections rather
+ * than a wall of pretty-printed JSON. Keys are classified by name into the
+ * five things a reviewer actually needs — source, entity, reason, evidence,
+ * navigation — and the complete raw object is kept under a <details> so
+ * nothing is lost for audit. A generic classifier, not a per-item_type map:
+ * the review types share these key shapes and a map would rot the first time
+ * a module added a context key. */
+const _CTX_URL_KEYS = /url$|_url$|^url$|link$|href$/i;
+const _CTX_EVIDENCE_KEYS = /^(sentence|evidence_span|snippet|excerpt|text|match_text|mention_text|contravention_text|description)$/i;
+const _CTX_ENTITY_KEYS = /(provider_key|provider_name|subject_entity_id|entity_id|ons_code|authority|buyer|supplier|charity_number|company_number|board|register_name|recipient_name|employer_name)/i;
+const _CTX_REASON_KEYS = /(reason|selection_reason|basis|match_basis|selection|rule|score|relation_score|confidence|assertion_status|status_reason)/i;
+
+function _ctxRows(entries, valueNode) {
+  return el('dl', { class: 'ctx-kv' }, entries.flatMap(([key, value]) => [
+    el('dt', { text: key }),
+    el('dd', {}, valueNode(key, value)),
+  ]));
+}
+
+function _ctxScalar(key, value) {
+  if (value === null || value === undefined) return el('span', { class: 'muted', text: '—' });
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  if (_CTX_URL_KEYS.test(key) && /^https?:\/\//i.test(text)) {
+    return el('a', { href: text, target: '_blank', rel: 'noopener noreferrer', text });
+  }
+  return document.createTextNode(text);
+}
+
+/* A provider_key / ons_code in the context is a jump to that entity's portal
+ * page — opened in a new tab, since the operator UI is a separate app. */
+function _ctxNav(context) {
+  const links = [];
+  if (context.provider_key) {
+    links.push(el('a', { href: `/#/providers/${encodeURIComponent(context.provider_key)}`,
+      target: '_blank', rel: 'noopener', text: `provider: ${context.provider_key}` }));
+  }
+  const ons = context.ons_code || context.authority_ons_code || context.buyer_ons_code;
+  if (ons && /^[A-Z][0-9]{8}$/.test(String(ons))) {
+    links.push(el('a', { href: `/#/authorities/${ons}`,
+      target: '_blank', rel: 'noopener', text: `authority: ${ons}` }));
+  }
+  if (context.document_id) {
+    links.push(el('a', { href: `/#/documents?q=`, target: '_blank', rel: 'noopener',
+      text: `document: ${context.document_id}` }));
+  }
+  return links.length ? el('div', { class: 'ctx-nav' }, ...links) : null;
+}
+
+function typedContext(raw) {
+  if (!raw) return null;
+  let context;
+  try { context = JSON.parse(raw); }
+  catch (e) { return el('pre', { class: 'context', text: String(raw) }); }
+  if (context === null || typeof context !== 'object' || Array.isArray(context)) {
+    return el('pre', { class: 'context', text: formatContext(raw) });
+  }
+
+  const buckets = { source: [], entity: [], reason: [], evidence: [], other: [] };
+  for (const [key, value] of Object.entries(context)) {
+    if (_CTX_EVIDENCE_KEYS.test(key)) buckets.evidence.push([key, value]);
+    else if (_CTX_URL_KEYS.test(key)) buckets.source.push([key, value]);
+    else if (_CTX_ENTITY_KEYS.test(key)) buckets.entity.push([key, value]);
+    else if (_CTX_REASON_KEYS.test(key)) buckets.reason.push([key, value]);
+    else buckets.other.push([key, value]);
+  }
+
+  const sections = [];
+  const add = (title, entries) => {
+    if (entries.length) {
+      sections.push(el('div', { class: 'ctx-section' },
+        el('h4', { text: title }), _ctxRows(entries, _ctxScalar)));
+    }
+  };
+  for (const [key, value] of buckets.evidence) {
+    sections.push(el('div', { class: 'ctx-section' },
+      el('h4', { text: key }),
+      el('blockquote', { class: 'ctx-evidence', text: String(value ?? '') })));
+  }
+  add('Source', buckets.source);
+  add('Entity', buckets.entity);
+  add('Reason', buckets.reason);
+  add('Other', buckets.other);
+
+  const nav = _ctxNav(context);
+  if (nav) sections.push(el('div', { class: 'ctx-section' },
+    el('h4', { text: 'Open' }), nav));
+
+  return el('div', { class: 'ctx-typed' },
+    ...sections,
+    el('details', { class: 'ctx-raw' },
+      el('summary', { text: 'Raw context (lossless)' }),
+      el('pre', { class: 'context', text: formatContext(raw) })));
 }
 
 function historyBlock(itemId, count) {
@@ -743,6 +1059,7 @@ async function decideItems(ids, decision, note, isUndo) {
     renderCounts();
     renderFocus();
     bumpPendingPill(decision, result.updated.length);
+    if (!isUndo) bumpReviewSession(result.updated.length);
   }
 
   const noun = result.updated.length === 1 ? 'item' : 'items';
@@ -899,6 +1216,7 @@ function renderFocus() {
   rowNodes().forEach((node, index) => {
     node.classList.toggle('focused', index === reviewState.focus);
   });
+  renderReviewDetail();
 }
 
 function focusedItem() {
@@ -919,6 +1237,35 @@ async function decideFocused(decision) {
   await decideItems([item.id], decision);
 }
 
+/* BETA-055: the URL a reviewer would open to see the item's primary source —
+ * a context URL key, else the raw value if it is itself a URL. */
+function itemSourceUrl(item) {
+  if (!item) return null;
+  let context = {};
+  try { context = JSON.parse(item.context_json || '{}') || {}; } catch (e) { /* */ }
+  for (const key of ['source_url', 'url', 'page_url', 'source_page', 'notice_web_url',
+                     'document_url', 'report_url', 'written_statement_url']) {
+    if (context[key] && /^https?:\/\//i.test(String(context[key]))) return String(context[key]);
+  }
+  return /^https?:\/\//i.test(String(item.raw_value || '')) ? String(item.raw_value) : null;
+}
+
+function openFocusedSource() {
+  const url = itemSourceUrl(focusedItem());
+  if (!url) return toast('This item has no primary source URL.', true);
+  window.open(url, '_blank', 'noopener');
+}
+
+/* Decisions taken in this browser session — a progress signal, not part of
+ * the audit trail (that is review_decisions). Reset on reload. */
+const reviewSession = { decided: 0 };
+function bumpReviewSession(n) {
+  reviewSession.decided += n;
+  const node = $('#review-session');
+  if (node) node.textContent = reviewSession.decided
+    ? `${reviewSession.decided} decided this session` : '';
+}
+
 document.addEventListener('keydown', (event) => {
   const tag = (event.target.tagName || '').toLowerCase();
   const typing = tag === 'input' || tag === 'textarea' || tag === 'select';
@@ -937,6 +1284,7 @@ document.addEventListener('keydown', (event) => {
     a: () => decideFocused('approved'),
     r: () => decideFocused('rejected'),
     u: () => decideFocused('pending'),
+    o: openFocusedSource,
     x: () => {
       const item = focusedItem();
       if (!item) return;
@@ -949,6 +1297,161 @@ document.addEventListener('keydown', (event) => {
   };
   if (keys[event.key]) { event.preventDefault(); keys[event.key](); }
 });
+
+/* BETA-055: saved filter + note presets. localStorage only — a reviewer's
+ * own convenience, never sent to the server and never part of a decision. */
+const PRESET_KEY = 'cglpay.review.presets';
+
+function loadPresets() {
+  try { return JSON.parse(localStorage.getItem(PRESET_KEY) || '{}') || {}; }
+  catch (e) { return {}; }
+}
+function savePresets(presets) {
+  try { localStorage.setItem(PRESET_KEY, JSON.stringify(presets)); } catch (e) { /* */ }
+}
+
+function refreshPresetOptions() {
+  const select = $('#review-preset');
+  if (!select) return;
+  const current = select.value;
+  const presets = loadPresets();
+  select.replaceChildren(el('option', { value: '', text: '—' }),
+    ...Object.keys(presets).sort().map((name) => el('option', { value: name, text: name })));
+  select.value = presets[current] ? current : '';
+  $('#review-preset-delete').hidden = !select.value;
+}
+
+function applyPreset(preset) {
+  if (!preset) return;
+  $('#f-status').value = preset.status || 'pending';
+  $('#f-module').value = preset.module || '';
+  populateItemTypes($('#f-module').value);
+  $('#f-type').value = preset.item_type || '';
+  $('#f-search').value = preset.search || '';
+  if ('note' in preset) {
+    const box = $('#bulk-note');
+    if (box) box.value = preset.note || '';
+    const mnote = $('#match-note');
+    if (mnote) mnote.value = preset.note || '';
+  }
+  reviewState.offset = 0;
+  selected.clear();
+  loadReview();
+}
+
+function initReviewPresets() {
+  if (!$('#review-preset')) return;
+  refreshPresetOptions();
+
+  $('#review-preset').addEventListener('change', (e) => {
+    $('#review-preset-delete').hidden = !e.target.value;
+    if (e.target.value) applyPreset(loadPresets()[e.target.value]);
+  });
+
+  $('#review-preset-save').addEventListener('click', () => {
+    const name = (window.prompt('Name this preset') || '').trim();
+    if (!name) return;
+    const presets = loadPresets();
+    presets[name] = {
+      status: $('#f-status').value,
+      module: $('#f-module').value,
+      item_type: $('#f-type').value,
+      search: $('#f-search').value.trim(),
+      note: ($('#bulk-note') && $('#bulk-note').value) || '',
+    };
+    savePresets(presets);
+    refreshPresetOptions();
+    $('#review-preset').value = name;
+    $('#review-preset-delete').hidden = false;
+    toast(`Preset "${name}" saved.`);
+  });
+
+  $('#review-preset-delete').addEventListener('click', () => {
+    const name = $('#review-preset').value;
+    if (!name) return;
+    const presets = loadPresets();
+    delete presets[name];
+    savePresets(presets);
+    refreshPresetOptions();
+    toast(`Preset "${name}" deleted.`);
+  });
+}
+
+/* BETA-056: the alias-resolution panel. Resolving an unmatched name is a
+ * named, append-only decision through /api/admin/aliases/decide — the only
+ * path that resolves a name. Nothing here applies a fuzzy match. */
+async function loadAliasList() {
+  const holder = $('#alias-list');
+  if (!holder) return;
+  const scheme = $('#alias-scheme').value;
+  $('#alias-status').textContent = 'Loading…';
+  let data;
+  try { data = await api(`/api/admin/aliases?scheme=${scheme}`); }
+  catch (e) { $('#alias-status').textContent = e.message; return; }
+
+  $('#alias-status').textContent =
+    `${data.items.filter((i) => i.resolved).length} of ${data.count} resolved`;
+
+  const targetLabel = scheme === 'buyer' ? 'ons_code (E########)' : 'provider_key';
+  const rows = data.items.map((item) => {
+    const cid = el('input', { type: 'text', placeholder: targetLabel, 'aria-label': targetLabel });
+    const reason = el('input', { type: 'text', placeholder: 'reason (optional)', 'aria-label': 'reason' });
+    const status = el('span', { class: 'small muted' });
+
+    const decide = async (verdict) => {
+      const by = requireReviewer();
+      if (!by) return;
+      const body = {
+        unmatched_name: item.unmatched_name, target_scheme: scheme,
+        status: verdict, decided_by: by, reason: reason.value.trim() || null,
+      };
+      if (verdict === 'accepted') body.canonical_id = cid.value.trim();
+      const last = (item.decisions || []).filter((d) => d.status === 'accepted').pop();
+      if (last) body.supersedes_id = last.decision_id;
+      try {
+        await post('/api/admin/aliases/decide', body);
+        status.textContent = `recorded: ${verdict}`;
+        loadAliasList();
+      } catch (e) { status.textContent = `refused: ${e.message}`; }
+    };
+
+    return el('div', { class: 'panel' },
+      el('div', { class: 'row', style: 'justify-content:space-between;gap:8px' },
+        el('strong', { text: item.unmatched_name }),
+        el('span', { class: `badge ${item.resolved ? 'approved' : 'pending'}`,
+          text: item.resolved
+            ? `→ ${item.verified.canonical_name} (${item.verified.canonical_id})`
+            : 'unresolved' })),
+      (item.decisions || []).length
+        ? el('div', { class: 'muted small' },
+            `${item.decisions.length} decision(s); latest by `
+            + `${item.decisions[item.decisions.length - 1].decided_by}`)
+        : null,
+      el('div', { class: 'runbar' }, cid, reason,
+        el('button', { class: 'btn approve', onclick: () => decide('accepted') }, 'Accept'),
+        el('button', { class: 'btn reject', onclick: () => decide('rejected') }, 'Reject'),
+        status));
+  });
+
+  holder.replaceChildren(rows.length ? el('div', {}, ...rows)
+    : el('div', { class: 'empty', text: 'No unmatched names of this kind.' }));
+}
+
+function initAliasResolution() {
+  if (!$('#alias-scheme')) return;
+  $('#alias-scheme').addEventListener('change', loadAliasList);
+  $('#alias-reload').addEventListener('click', loadAliasList);
+  // Load lazily on first expand of the <details>.
+  const details = $('#alias-scheme').closest('details');
+  if (details) {
+    details.addEventListener('toggle', () => {
+      if (details.open && !details.dataset.loaded) {
+        details.dataset.loaded = '1';
+        loadAliasList();
+      }
+    });
+  }
+}
 
 // --- database browser -------------------------------------------------------
 
@@ -1076,6 +1579,43 @@ async function loadTable(search) {
     return toast(e.message, true);
   }
   renderTable(data, term);
+  renderSchemaPanel(name);
+}
+
+// BETA-083: the read-only schema graph, fetched once and reused. Tables,
+// columns, foreign keys and short descriptions from /api/admin/schema-graph.
+let schemaGraph = null;
+async function renderSchemaPanel(name) {
+  const holder = $('#table-schema');
+  if (!holder) return;
+  if (!schemaGraph) {
+    try { schemaGraph = await api('/api/admin/schema-graph'); }
+    catch (e) { holder.hidden = true; return; }
+  }
+  const table = (schemaGraph.tables || []).find((t) => t.name === name);
+  if (!table) { holder.hidden = true; return; }
+  holder.hidden = false;
+
+  const rows = table.columns.map((column) => el('tr', {},
+    el('td', { class: 'mono small', text: column.name }),
+    el('td', { class: 'small', text: column.type || '' }),
+    el('td', { class: 'small', text: [column.pk ? 'pk' : null, column.notnull ? 'not null' : null].filter(Boolean).join(' ') }),
+    el('td', { class: 'small' }, column.fk
+      ? el('a', {
+          href: `#database?table=${encodeURIComponent(column.fk.table)}`,
+          onclick: () => openObject(column.fk.table),
+          title: `references ${column.fk.table}.${column.fk.column}`,
+        }, `→ ${column.fk.table}`)
+      : null)));
+
+  replace(holder,
+    el('summary', { text: `Columns & keys — ${table.columns.length} columns` }),
+    table.description ? el('p', { class: 'muted small', text: table.description }) : null,
+    el('table', { class: 'schema-cols' },
+      el('thead', {}, el('tr', {},
+        el('th', { text: 'column' }), el('th', { text: 'type' }),
+        el('th', { text: 'key' }), el('th', { text: 'references' }))),
+      el('tbody', {}, ...rows)));
 }
 
 function renderRestrictedGate(name, message) {
@@ -1183,6 +1723,36 @@ function renderSqlHistory() {
   select.value = '';
 }
 
+// BETA-083: named, saved read-only queries — distinct from `sql-history`
+// (which is the last N run, unnamed). Local to this browser.
+const SQL_SAVED_KEY = 'cglpay.sql.saved';
+function savedSql() {
+  try { return JSON.parse(localStorage.getItem(SQL_SAVED_KEY) || '{}'); }
+  catch (e) { return {}; }
+}
+function saveSql(name, sql) {
+  const all = { ...savedSql(), [name]: sql };
+  try { localStorage.setItem(SQL_SAVED_KEY, JSON.stringify(all)); }
+  catch (e) { /* private mode */ }
+  renderSavedSql();
+}
+function deleteSavedSql(name) {
+  const all = savedSql(); delete all[name];
+  try { localStorage.setItem(SQL_SAVED_KEY, JSON.stringify(all)); }
+  catch (e) { /* private mode */ }
+  renderSavedSql();
+}
+function renderSavedSql() {
+  const select = $('#sql-saved');
+  if (!select) return;
+  const names = Object.keys(savedSql()).sort();
+  replace(select, [
+    el('option', { value: '', text: names.length ? `${names.length} saved` : '—' }),
+    ...names.map((name) => el('option', { value: name, text: name })),
+  ]);
+  select.value = '';
+}
+
 /** The last result, kept for the CSV button. */
 let lastSqlResult = null;
 
@@ -1250,10 +1820,23 @@ function init() {
   $('#reviewer').addEventListener('change', () => localStorage.setItem('cglpay.reviewer', reviewer()));
 
   document.querySelectorAll('.tab').forEach((button) =>
-    button.addEventListener('click', () => showTab(button.dataset.tab)));
+    button.addEventListener('click', () => {
+      showTab(button.dataset.tab);
+      // BETA-085: a selection closes the narrow-screen nav drawer.
+      $('#admin-nav')?.classList.remove('open');
+      $('#nav-toggle')?.setAttribute('aria-expanded', 'false');
+    }));
 
-  for (const id of ['#f-status', '#f-module', '#f-type', '#f-limit', '#f-oldest']) {
-    $(id).addEventListener('change', () => {
+  $('#nav-toggle')?.addEventListener('click', () => {
+    const nav = $('#admin-nav');
+    const open = nav.classList.toggle('open');
+    $('#nav-toggle').setAttribute('aria-expanded', String(open));
+  });
+
+  for (const id of ['#f-status', '#f-module', '#f-type', '#f-limit', '#f-oldest', '#f-clusters']) {
+    const node = $(id);
+    if (!node) continue;
+    node.addEventListener('change', () => {
       if (id === '#f-module') populateItemTypes($('#f-module').value);
       reviewState.offset = 0;
       selected.clear();
@@ -1271,6 +1854,9 @@ function init() {
     renderList();
     renderFocus();
   });
+
+  initReviewPresets();
+  initAliasResolution();
 
   $('#select-page').addEventListener('change', (e) => {
     for (const item of reviewState.items) {
@@ -1307,9 +1893,32 @@ function init() {
     $('#sql-input').focus();
     event.target.value = '';
   });
+  $('#sql-save').addEventListener('click', () => {
+    const sql = $('#sql-input').value.trim();
+    if (!sql) return;
+    const name = prompt('Save this query as:');
+    if (name && name.trim()) saveSql(name.trim(), sql);
+  });
+  $('#sql-saved').addEventListener('change', (event) => {
+    const name = event.target.value;
+    if (!name) return;
+    if (event.shiftKey) { deleteSavedSql(name); return; }
+    $('#sql-input').value = savedSql()[name] || '';
+    $('#sql-input').focus();
+    event.target.value = '';
+  });
   renderSqlHistory();
+  renderSavedSql();
 
   setInterval(retickTimes, 60_000);
+
+  // BETA-087: crossing the 1000px breakpoint flips the review layout between
+  // split-pane and the stacked card list. Re-render so the switch is clean.
+  window.matchMedia('(min-width: 1000px)').addEventListener('change', () => {
+    if (currentTab === 'review' && reviewState.items.length) {
+      renderList(); renderFocus();
+    }
+  });
 
   // Back/forward, pasted worklist links and the command palette all arrive
   // here: everything that navigates does it by setting the hash.

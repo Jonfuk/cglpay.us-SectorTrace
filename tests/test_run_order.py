@@ -81,7 +81,10 @@ def test_alphabetical_order_would_break_these():
 
 def test_every_module_appears_exactly_once():
     order = resolve_run_order()
-    assert len(order) == len(MODULE_REGISTRY)
+    runnable = [name for name in MODULE_REGISTRY if not module_meta(name).operator_only]
+    assert len(order) == len(runnable)
+    assert not set(order) & {name for name in MODULE_REGISTRY
+                              if module_meta(name).operator_only}
     assert len(set(order)) == len(order)
 
 

@@ -38,6 +38,7 @@
  * triage aid into a recommendation.
  */
 import { el } from './dom.js';
+import { typedContext } from './context.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -57,8 +58,28 @@ const state = {
   // url -> { fields: {name: input}, note: input }, so a batch can read what
   // each row's own form says rather than sending one set of values for all.
   forms: new Map(),
+  // url -> the detail payload, so re-opening a preview does not re-fetch. Not
+  // cleared with the list: a promoted candidate's detail does not change.
+  previews: new Map(),
   busy: false,
 };
+
+// What this session has decided, for the progress line. A candidate promotion
+// is an audited human act (CLAUDE.md 4); the count is a nudge that work is
+// moving, the way the review queue's own session line is, and nothing more —
+// it is not persisted and does not gate anything.
+const session = { promoted: 0, rejected: 0, reset: 0 };
+
+function bumpSession(kind, n = 1) {
+  session[kind] += n;
+  const node = $('candidate-session');
+  if (!node) return;
+  const parts = [];
+  if (session.promoted) parts.push(`${session.promoted} promoted`);
+  if (session.rejected) parts.push(`${session.rejected} rejected`);
+  if (session.reset) parts.push(`${session.reset} reset`);
+  node.textContent = parts.length ? `This session: ${parts.join(', ')}.` : '';
+}
 
 // A browser will not open an unbounded number of tabs from one click, and a
 // person will not read them either.
@@ -264,6 +285,8 @@ function renderItem(item, requires) {
     onauxclick: (event) => { if (event.button === 1) markOpened(item.url); },
   });
 
+  const preview = previewBlock(item);
+
   const row = el('div', { class: 'candidate' },
     el('div', { class: 'row' },
       check,
@@ -277,11 +300,13 @@ function renderItem(item, requires) {
     el('div', { class: 'row' },
       link,
       el('span', { class: 'spacer' }),
+      preview.toggle,
       el('button', {
         class: 'btn ghost', title: 'Copy a link that reopens this list on this candidate',
         text: 'Link', onclick: () => copyText(candidateLink(item)),
       }),
     ),
+    preview.body,
     el('div', { class: 'row' },
       el('span', { class: 'muted small',
                     text: `found on ${item.discovered.source_url || 'unknown'}` }),
@@ -296,6 +321,47 @@ function renderItem(item, requires) {
   // What the batch reports against, and what it marks while it runs.
   row.dataset.url = item.url;
   return row;
+}
+
+/** An in-place preview of the whole candidate row, rendered through the shared
+ *  typed-context presenter (BETA-052). Lazily fetched on first expand and
+ *  cached.
+ *
+ *  Opening this is explicitly NOT `markOpened`: the batch-promote gate is that
+ *  a person looked at the document itself, on somebody else's server, and a
+ *  summary of the warehouse row we already hold is not that. The preview is
+ *  triage — deciding whether the document is worth opening — and nothing here
+ *  makes a candidate promotable. */
+function previewBlock(item) {
+  const body = el('div', { class: 'candidate-preview', hidden: true });
+  let open = false;
+
+  const toggle = el('button', {
+    class: 'btn ghost', text: 'Preview',
+    onclick: async () => {
+      open = !open;
+      body.hidden = !open;
+      toggle.textContent = open ? 'Hide preview' : 'Preview';
+      if (!open || body.dataset.loaded) return;
+      body.replaceChildren(el('span', { class: 'muted small', text: 'loading…' }));
+      let data = state.previews.get(item.url);
+      if (!data) {
+        try {
+          data = await api(`/api/admin/candidates/detail?kind=${encodeURIComponent(state.kind)}`
+                             + `&url=${encodeURIComponent(item.url)}`);
+        } catch (e) {
+          body.replaceChildren(el('span', { class: 'small bad', text: e.message }));
+          return;
+        }
+        state.previews.set(item.url, data);
+      }
+      const typed = typedContext(data.candidate);
+      body.replaceChildren(typed || el('span', { class: 'muted small', text: 'Nothing to show.' }));
+      body.dataset.loaded = '1';
+    },
+  });
+
+  return { toggle, body };
 }
 
 function promoteControls(item, requires) {
@@ -426,6 +492,7 @@ async function promoteOne(item, inputs, note, button) {
                               fields, note: note || null }),
     });
     status(`promoted — ${result.payload_sha256.slice(0, 12)}… archived`, 'good');
+    bumpSession('promoted');
   } catch (e) {
     button.disabled = false;
     return status(e.message, 'bad');
@@ -493,6 +560,7 @@ async function promoteOpened() {
   }
 
   state.busy = false;
+  if (done.length) bumpSession('promoted', done.length);
   status(`promoted ${done.length} of ${ready.length}`, failed.length ? 'bad' : 'good');
   renderBatchResult(done, failed);
   await Promise.all([loadCounts(), loadList()]);
@@ -572,6 +640,7 @@ async function rejectMany(urls) {
       body: JSON.stringify({ kind: state.kind, urls, rejected_by: who }),
     });
     status(`rejected ${result.rejected}`, 'good');
+    if (result.rejected) bumpSession('rejected', result.rejected);
   } catch (e) { return status(e.message, 'bad'); }
   await Promise.all([loadCounts(), loadList()]);
 }
@@ -584,6 +653,8 @@ async function resetOne(url) {
       body: JSON.stringify({ kind: state.kind, url }),
     });
   } catch (e) { return status(e.message, 'bad'); }
+  bumpSession('reset');
+  state.previews.delete(url);
   await Promise.all([loadCounts(), loadList()]);
 }
 

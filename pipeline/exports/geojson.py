@@ -198,10 +198,10 @@ def export_pfd_reports(conn: sqlite3.Connection, output_dir: Path) -> Path:
     cursor = conn.execute("""
         SELECT r.report_ref, r.report_date, r.coroner_area, r.coroner_name, r.categories,
                r.report_url,
-               (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM pfd_provider_mentions m
+               (SELECT string_agg(m.provider_key, ', ') FROM pfd_provider_mentions m
                  WHERE m.report_ref = r.report_ref AND m.mention_type = 'recipient')
                    AS provider_recipients,
-               (SELECT GROUP_CONCAT(t.term, ', ') FROM pfd_concern_terms t
+               (SELECT string_agg(t.term, ', ') FROM pfd_concern_terms t
                  WHERE t.report_ref = r.report_ref) AS concern_terms
           FROM pfd_reports r
          WHERE r.coroner_area IS NOT NULL

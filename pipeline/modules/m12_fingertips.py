@@ -220,6 +220,7 @@ def run(ctx: ModuleContext) -> None:
 
                 provenance = _provenance(result)
                 indicator_la_rows = 0
+                value_rows: list[dict] = []
                 for row in rows:
                     area_level = classify_area_level(row["area_code"])
                     ons_code = row["area_code"] if (
@@ -227,7 +228,7 @@ def run(ctx: ModuleContext) -> None:
                     if area_level == "local_authority":
                         indicator_la_rows += 1
 
-                    db.upsert(conn, "fingertips_la_values", {
+                    value_rows.append({
                         "indicator_id": row["indicator_id"],
                         "area_code": row["area_code"],
                         "area_type_id": area_type_id,
@@ -247,10 +248,14 @@ def run(ctx: ModuleContext) -> None:
                         "value_note": row["value_note"],
                         "time_period_sortable": row["time_period_sortable"],
                         **provenance,
-                    }, natural_key=["indicator_id", "area_code", "area_type_id", "sex",
-                                     "age", "category_type", "category", "time_period"])
+                    })
                     values_written += 1
 
+                db.upsert_many(
+                    conn, "fingertips_la_values", value_rows,
+                    natural_key=["indicator_id", "area_code", "area_type_id", "sex",
+                                 "age", "category_type", "category", "time_period"],
+                )
                 la_rows += indicator_la_rows
                 log.info("fingertips.indicator_processed", indicator_id=indicator_id,
                           area_type_id=area_type_id, rows=len(rows),

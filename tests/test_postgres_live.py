@@ -17,8 +17,8 @@ Either as environment variables or as lines in `.env` — both are read, so
 the credentials can live in the same file as everything else rather than
 having to be re-exported into each shell:
 
-    POSTGRES_TEST_URL=postgresql://sectortrace_app:pw@host:5432/sectortrace
-    POSTGRES_TEST_RO_URL=postgresql://sectortrace_reader:pw@host:5432/sectortrace
+    POSTGRES_TEST_URL=postgresql://sectortrace_app%(pw)s@host:5432/sectortrace
+    POSTGRES_TEST_RO_URL=postgresql://sectortrace_reader%(pw)s@host:5432/sectortrace
 
     uv run python -m pytest tests/test_postgres_live.py -q
 
@@ -31,7 +31,6 @@ migration that produces the schema it was supposed to.
 from __future__ import annotations
 
 import os
-import sqlite3
 from importlib.util import find_spec
 from pathlib import Path
 
@@ -72,14 +71,14 @@ def _configured_url(name: str) -> str | None:
 POSTGRES_TEST_URL = _configured_url("POSTGRES_TEST_URL")
 POSTGRES_TEST_RO_URL = _configured_url("POSTGRES_TEST_RO_URL")
 
-# A URL is not enough: psycopg is an extra, and a checkout that has the
-# credentials configured but has not run `uv sync --extra postgres` would
-# otherwise error in every fixture rather than skipping. Both conditions are
-# named here so `tests/test_pg_migration_live.py` shares one answer.
+# A URL is not enough: a checkout that has the credentials configured but has
+# not installed the core PostgreSQL dependency would otherwise error in every
+# fixture rather than skipping. Both conditions are named here so the live
+# suite shares one answer.
 LIVE_POSTGRES = bool(POSTGRES_TEST_URL) and find_spec("psycopg") is not None
 NO_LIVE_POSTGRES = (
     "POSTGRES_TEST_URL is not set" if not POSTGRES_TEST_URL
-    else "the postgres extra is not installed (uv sync --extra postgres)"
+    else "the core PostgreSQL dependency is not installed"
 ) + "; the offline suite needs neither"
 
 pytestmark = pytest.mark.skipif(not LIVE_POSTGRES, reason=NO_LIVE_POSTGRES)
@@ -111,122 +110,7 @@ def pg(scratch):
     return scratch.conn
 
 
-@pytest.fixture(scope="module")
-def lite(tmp_path_factory):
-    """The same schema on SQLite, built fresh, for comparison."""
-    path = tmp_path_factory.mktemp("sqlite") / "warehouse.db"
-    conn = sqlite3.connect(path)
-    conn.row_factory = sqlite3.Row
-    try:
-        db.apply_migrations(conn, MIGRATIONS)
-        conn.commit()
-        yield conn
-    finally:
-        conn.close()
-
-
-class TestTheSchemaTheyActuallyBuilt:
-    def test_the_same_tables_exist(self, pg, lite):
-        pg_tables = {o["name"] for o in catalog.list_objects(pg) if o["type"] == "table"}
-        lite_tables = {o["name"] for o in catalog.list_objects(lite) if o["type"] == "table"}
-        # SQLite records applied migrations in a table it also creates.
-        assert pg_tables == lite_tables, (
-            f"only PostgreSQL: {sorted(pg_tables - lite_tables)}; "
-            f"only SQLite: {sorted(lite_tables - pg_tables)}")
-
-    def test_the_same_views_exist(self, pg, lite):
-        pg_views = {o["name"] for o in catalog.list_objects(pg) if o["type"] == "view"}
-        lite_views = {o["name"] for o in catalog.list_objects(lite) if o["type"] == "view"}
-        assert pg_views == lite_views
-
-    def test_the_same_columns_in_the_same_order(self, pg, lite):
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)}):
-            pg_columns = [c["name"] for c in catalog.columns_of(pg, name)]
-            lite_columns = [c["name"] for c in catalog.columns_of(lite, name)]
-            if pg_columns != lite_columns:
-                differences[name] = (lite_columns, pg_columns)
-        assert not differences, f"column mismatch: {differences}"
-
-    def test_nullability_agrees_away_from_primary_keys(self, pg, lite):
-        """A column NOT NULL on one side and nullable on the other is a
-        constraint that exists on one backend only.
-
-        Primary key columns are excluded and checked separately below,
-        because there the two engines disagree by design — see
-        `test_postgres_makes_primary_keys_not_null`.
-        """
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = set(catalog.primary_key(lite, name)) | set(catalog.primary_key(pg, name))
-            pg_nn = {c["name"] for c in catalog.columns_of(pg, name)
-                      if c["notnull"]} - key
-            lite_nn = {c["name"] for c in catalog.columns_of(lite, name)
-                        if c["notnull"]} - key
-            if pg_nn != lite_nn:
-                differences[name] = sorted(lite_nn ^ pg_nn)
-        assert not differences, f"nullability differs: {differences}"
-
-    def test_postgres_makes_primary_keys_not_null(self, pg, lite):
-        """The one nullability difference, asserted rather than tolerated.
-
-        SQLite does not enforce NOT NULL on a PRIMARY KEY column unless it is
-        declared so — a documented legacy quirk kept for backwards
-        compatibility, and it is not cosmetic: SQLite will accept an actual
-        NULL into a TEXT PRIMARY KEY. Only `INTEGER PRIMARY KEY`, the rowid
-        alias, is exempt. PostgreSQL makes every key column NOT NULL.
-
-        PostgreSQL is stricter, so nothing legal there is illegal here. It
-        runs the other way that matters: a row already in the SQLite
-        warehouse with a NULL in its key cannot be loaded into PostgreSQL at
-        all. Measured on the live warehouse the day this was written, no such
-        row exists — but that is a property of the data, not of the schema,
-        so the Phase 2 loader has to check rather than assume. This test
-        pins the reason that check needs to exist.
-        """
-        checked = 0
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = catalog.primary_key(pg, name)
-            if not key:
-                continue
-            nullable = {c["name"] for c in catalog.columns_of(pg, name)
-                         if not c["notnull"]}
-            assert not (set(key) & nullable), (
-                f"{name}: PostgreSQL left a key column nullable: "
-                f"{sorted(set(key) & nullable)}")
-            checked += 1
-        assert checked > 50, "the primary key inventory looks wrong"
-
-    def test_no_row_in_the_source_warehouse_has_a_null_key(self, lite):
-        """The Phase 2 pre-flight the test above argues for.
-
-        Runs against the freshly built empty schema here, so it passes
-        trivially; it exists so the loader has a written contract to
-        implement against the real warehouse.
-        """
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            key = catalog.primary_key(lite, name)
-            if not key:
-                continue
-            predicate = " OR ".join(f'"{column}" IS NULL' for column in key)
-            from pipeline.web import queries
-            count = lite.execute(
-                f'SELECT COUNT(*) FROM {queries._quote(name)} WHERE {predicate}'
-            ).fetchone()[0]
-            assert count == 0, f"{name}: {count} rows have a NULL in {key}"
-
-    def test_primary_keys_agree(self, pg, lite):
-        differences = {}
-        for name in sorted({o["name"] for o in catalog.list_objects(lite)
-                             if o["type"] == "table"}):
-            if catalog.primary_key(pg, name) != catalog.primary_key(lite, name):
-                differences[name] = (catalog.primary_key(lite, name),
-                                      catalog.primary_key(pg, name))
-        assert not differences, f"primary keys differ: {differences}"
-
+class TestMigrationIdempotence:
     def test_reapplying_is_a_no_op(self, pg):
         """The contract every run depends on: migrations are applied on
         startup and must be free when the schema is current."""
@@ -246,7 +130,7 @@ class TestRefusalsStillRefuse:
             pg.execute(
                 "INSERT INTO cdp_documents (authority_ons_code, document_url, "
                 "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 ("E06000001", "https://example.org/never", "https://example.org",
                  "2026-08-14T00:00:00+00:00", 200, "test", "0" * 64))
         pg.rollback()
@@ -257,7 +141,7 @@ class TestRefusalsStillRefuse:
             pg.execute(
                 "INSERT INTO foi_requests (ons_code, request_url, "
                 "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
                 ("E06000001", "https://example.org/foi", "https://example.org",
                  "2026-08-14T00:00:00+00:00", 200, "test", "0" * 64))
         pg.rollback()
@@ -279,11 +163,11 @@ class TestTheUpsertsInferTheirIndexes:
                                          "a reason", "https://example.org/x")
             pg.commit()
             count = pg.execute(
-                "SELECT COUNT(*) FROM parse_failures WHERE module = ?",
-                ("test_module",)).fetchone()[0]
+                "SELECT COUNT(*) FROM parse_failures WHERE module = %s",
+                ("test_module",)).fetchone().values().__iter__().__next__()
             assert count == 1
         finally:
-            pg.execute("DELETE FROM parse_failures WHERE module = ?", ("test_module",))
+            pg.execute("DELETE FROM parse_failures WHERE module = %s", ("test_module",))
             pg.commit()
 
     def test_it_folds_null_and_empty_the_same_way(self, pg):
@@ -294,40 +178,39 @@ class TestTheUpsertsInferTheirIndexes:
             db.record_parse_failure(pg, "test_module", "f", "frag", "why again", None)
             pg.commit()
             rows = pg.execute(
-                "SELECT reason FROM parse_failures WHERE module = ?",
+                "SELECT reason FROM parse_failures WHERE module = %s",
                 ("test_module",)).fetchall()
             assert len(rows) == 1
             assert rows[0]["reason"] == "why again"
         finally:
-            pg.execute("DELETE FROM parse_failures WHERE module = ?", ("test_module",))
+            pg.execute("DELETE FROM parse_failures WHERE module = %s", ("test_module",))
             pg.commit()
 
     def test_record_review_item_leaves_a_decided_row_alone(self, pg):
         try:
             db.record_review_item(pg, "test_module", "a_type", "a value", '{"n": 1}')
-            pg.execute("UPDATE review_queue SET status = 'approved' WHERE module = ?",
+            pg.execute("UPDATE review_queue SET status = 'approved' WHERE module = %s",
                         ("test_module",))
             pg.commit()
             db.record_review_item(pg, "test_module", "a_type", "a value", '{"n": 2}')
             pg.commit()
             row = pg.execute(
-                "SELECT status, context_json FROM review_queue WHERE module = ?",
+                "SELECT status, context_json FROM review_queue WHERE module = %s",
                 ("test_module",)).fetchone()
             assert row["status"] == "approved"
             assert row["context_json"] == '{"n": 1}', "a decided row was overwritten"
         finally:
-            pg.execute("DELETE FROM review_queue WHERE module = ?", ("test_module",))
+            pg.execute("DELETE FROM review_queue WHERE module = %s", ("test_module",))
             pg.commit()
 
 
 class TestRowsAndCountersBehave:
-    def test_rows_answer_to_name_and_position(self, pg):
+    def test_rows_are_named_psycopg_rows(self, pg):
         row = pg.execute("SELECT 1 AS a, 'x' AS b, NULL AS c").fetchone()
-        assert row["a"] == 1 and row[0] == 1
-        assert row["b"] == "x" and row[1] == "x"
+        assert row["a"] == 1
+        assert row["b"] == "x"
         assert row["c"] is None
         assert dict(row) == {"a": 1, "b": "x", "c": None}
-        assert tuple(row) == (1, "x", None)
 
     def test_total_changes_counts_writes_and_not_reads(self, pg):
         before = pg.total_changes
@@ -338,7 +221,7 @@ class TestRowsAndCountersBehave:
             pg.commit()
             assert pg.total_changes == before + 1
         finally:
-            pg.execute("DELETE FROM parse_failures WHERE module = ?", ("test_counter",))
+            pg.execute("DELETE FROM parse_failures WHERE module = %s", ("test_counter",))
             pg.commit()
 
     def test_a_literal_percent_survives_a_parameterised_query(self, pg):
@@ -346,8 +229,8 @@ class TestRowsAndCountersBehave:
         comparison."""
         row = pg.execute(
             "SELECT COUNT(*) AS n FROM information_schema.tables "
-            "WHERE table_schema = current_schema() AND table_name NOT LIKE 'sqlite_%' "
-            "AND table_type = ?", ("BASE TABLE",)).fetchone()
+            "WHERE table_schema = current_schema() AND table_name NOT LIKE 'sqlite_%%' "
+            "AND table_type = %s", ("BASE TABLE",)).fetchone()
         assert row["n"] > 50
 
 
@@ -403,11 +286,15 @@ class TestTheReadPath:
         assert queries.object_type(readonly, "v_wage_per_employee") == "view"
         assert queries.object_type(readonly, "no_such_thing") is None
 
-    def test_columns_come_back_in_declaration_order(self, readonly, lite):
+    def test_columns_come_back_in_declaration_order(self, readonly):
         from pipeline.web import queries
 
-        assert ([c["name"] for c in queries.columns_of(readonly, "contracts")]
-                == [c["name"] for c in queries.columns_of(lite, "contracts")])
+        columns = queries.columns_of(readonly, "contracts")
+        expected = [row["column_name"] for row in readonly.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = current_schema() AND table_name = %s "
+            "ORDER BY ordinal_position", ("contracts",)).fetchall()]
+        assert [c["name"] for c in columns] == expected
 
     def test_a_table_pages_in_primary_key_order(self, readonly):
         """What replaces ORDER BY rowid. `ordered` must be True or the UI
@@ -471,7 +358,7 @@ class TestTheReadPath:
 
         conn = pg_module.connect(scratch.ro_url, readonly=True)
         try:
-            assert conn.execute("SELECT COUNT(*) FROM authorities").fetchone()[0] >= 0
+            assert conn.execute("SELECT COUNT(*) FROM authorities").fetchone().values().__iter__().__next__() >= 0
             assert catalog.list_objects(conn)
         finally:
             conn.close()
@@ -556,7 +443,7 @@ class TestMigrationsKeepTheReaderCurrent:
                     "a table added by a migration is invisible to the reader "
                     "role — the grant did not travel with the migration")
                 assert reader.execute(
-                    "SELECT COUNT(*) FROM added_afterwards").fetchone()[0] == 0
+                    "SELECT COUNT(*) FROM added_afterwards").fetchone().values().__iter__().__next__() == 0
             finally:
                 reader.close()
 
@@ -618,12 +505,11 @@ class TestFetchPoolCacheWrites:
         """The other half: `fetch_in_parallel` still flushes on SQLite, and
         must find nothing to flush here rather than writing the same rows a
         second time on the module's connection."""
-        from pipeline import db as db_module
         from pipeline.parallel import _ClientPool
 
         pool = _ClientPool("test_source", settings)
         client = pool.get()
-        assert db_module.backend_of(client.conn) == "postgres"
+        assert client.conn.raw.info.server_version is not None
         assert pool.close() == []
 
 
@@ -660,8 +546,8 @@ class TestTheReadPoolHandsBackWhatItPromised:
             conn = queries.readonly_connection(settings)
             try:
                 assert conn.execute(
-                    "SHOW default_transaction_read_only").fetchone()[0] == "on"
-                assert conn.execute("SHOW statement_timeout").fetchone()[0] == "20s"
+                    "SHOW default_transaction_read_only").fetchone().values().__iter__().__next__() == "on"
+                assert conn.execute("SHOW statement_timeout").fetchone().values().__iter__().__next__() == "20s"
                 with pytest.raises(db.Error):
                     conn.execute("CREATE TABLE pooled_write_probe (x int)")
             finally:
@@ -681,8 +567,8 @@ class TestTheReadPoolHandsBackWhatItPromised:
         third = queries.readonly_connection(settings)
         try:
             assert second._conn is not third._conn
-            assert second.execute("SELECT 1").fetchone()[0] == 1
-            assert third.execute("SELECT 2").fetchone()[0] == 2
+            assert second.execute("SELECT 1").fetchone().values().__iter__().__next__() == 1
+            assert third.execute("SELECT 2").fetchone().values().__iter__().__next__() == 2
         finally:
             second.close()
             third.close()
@@ -710,7 +596,7 @@ class TestTheReadPoolHandsBackWhatItPromised:
 
         after = queries.readonly_connection(settings)
         try:
-            assert after.execute("SELECT 1").fetchone()[0] == 1
+            assert after.execute("SELECT 1").fetchone().values().__iter__().__next__() == 1
         finally:
             after.close()
 
@@ -730,7 +616,7 @@ class TestTheReadPoolHandsBackWhatItPromised:
                 for _ in range(4):
                     conn = queries.readonly_connection(settings)
                     try:
-                        assert conn.execute("SELECT ?", (n,)).fetchone()[0] == n
+                        assert conn.execute("SELECT %s", (n,)).fetchone().values().__iter__().__next__() == n
                     finally:
                         conn.close()
             except BaseException as exc:   # noqa: BLE001 - reported below
@@ -766,7 +652,7 @@ class TestTheReadPoolHandsBackWhatItPromised:
 
         conn = queries.readonly_connection(settings)
         try:
-            assert conn.execute("SELECT 1").fetchone()[0] == 1
+            assert conn.execute("SELECT 1").fetchone().values().__iter__().__next__() == 1
         finally:
             conn.close()
             pg_module.close_pools()
@@ -839,91 +725,63 @@ class TestThePortalRunsOnPostgres:
                         f"{type(exc).__name__}: {exc}")
 
 
-class TestGroupConcatMatchesSqlite:
-    """The compatibility aggregate from 0034.
-
-    Nine export queries call `GROUP_CONCAT` from application SQL and stay one
-    query each because PostgreSQL is taught the name. Every assertion here
-    runs against both engines, so SQLite is the specification rather than my
-    recollection of it.
-    """
+class TestStringAgg:
+    """The native PostgreSQL aggregate used by export queries."""
 
     ROWS = ("SELECT 'b' AS x UNION ALL SELECT 'a' UNION ALL SELECT 'b'")
 
-    def test_two_argument_form(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, ', ') FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(", ")) == ["a", "b", "b"], db.backend_of(conn)
+    def test_two_argument_form(self, pg):
+        got = pg.execute(
+            f"SELECT string_agg(x, ', ') AS value FROM ({self.ROWS}) t").fetchone()["value"]
+        assert sorted(got.split(", ")) == ["a", "b", "b"]
 
-    def test_one_argument_form_separates_with_a_comma(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x) FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(",")) == ["a", "b", "b"], db.backend_of(conn)
+    def test_one_argument_form_separates_with_a_comma(self, pg):
+        got = pg.execute(
+            f"SELECT string_agg(x, ',') AS value FROM ({self.ROWS}) t").fetchone()["value"]
+        assert sorted(got.split(",")) == ["a", "b", "b"]
 
-    def test_distinct(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(DISTINCT x) FROM ({self.ROWS}) t").fetchone()[0]
-            assert sorted(got.split(",")) == ["a", "b"], db.backend_of(conn)
+    def test_distinct(self, pg):
+        got = pg.execute(
+            f"SELECT string_agg(DISTINCT x, ',') AS value FROM ({self.ROWS}) t").fetchone()["value"]
+        assert sorted(got.split(",")) == ["a", "b"]
 
-    def test_nulls_are_skipped_not_stringified(self, pg, lite):
+    def test_nulls_are_skipped_not_stringified(self, pg):
         """A NULL must not end the string or arrive as the text 'NULL'."""
         rows = "SELECT 'a' AS x UNION ALL SELECT NULL UNION ALL SELECT 'b'"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
-            assert sorted(got.split("|")) == ["a", "b"], db.backend_of(conn)
+        got = pg.execute(
+            f"SELECT string_agg(x, '|') AS value FROM ({rows}) t").fetchone()["value"]
+        assert sorted(got.split("|")) == ["a", "b"]
 
-    def test_all_nulls_gives_null_not_empty_string(self, pg, lite):
+    def test_all_nulls_gives_null_not_empty_string(self, pg):
         rows = "SELECT NULL AS x UNION ALL SELECT NULL"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(x, '|') FROM ({rows}) t").fetchone()[0]
-            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+        got = pg.execute(
+            f"SELECT string_agg(x, '|') AS value FROM ({rows}) t").fetchone()["value"]
+        assert got is None
 
-    def test_no_rows_gives_null(self, pg, lite):
-        for conn in (pg, lite):
-            got = conn.execute(
-                "SELECT GROUP_CONCAT(x, '|') FROM "
-                "(SELECT 'a' AS x WHERE 1 = 0) t").fetchone()[0]
-            assert got is None, f"{db.backend_of(conn)}: {got!r}"
+    def test_no_rows_gives_null(self, pg):
+        got = pg.execute(
+            "SELECT string_agg(x, '|') AS value FROM "
+            "(SELECT 'a' AS x WHERE 1 = 0) t").fetchone()["value"]
+        assert got is None
 
-    def test_a_concatenated_expression_as_the_value(self, pg, lite):
+    def test_a_concatenated_expression_as_the_value(self, pg):
         """`exports/schema.py:223` builds its value with `||` over a text and
         an integer column, which is the one call site that is not a plain
         column reference."""
         rows = "SELECT 'term' AS t, 3 AS n"
-        for conn in (pg, lite):
-            got = conn.execute(
-                f"SELECT GROUP_CONCAT(t || ' (' || n || ')', ', ') "
-                f"FROM ({rows}) x").fetchone()[0]
-            assert got == "term (3)", db.backend_of(conn)
+        got = pg.execute(
+            f"SELECT string_agg(t || ' (' || n || ')', ', ') AS value "
+            f"FROM ({rows}) x").fetchone()["value"]
+        assert got == "term (3)"
 
 
-class TestOrderingMatchesSqlite:
-    def test_nulls_sort_to_the_same_end(self, pg, lite):
-        """SQLite puts NULLs first ascending, PostgreSQL last. The export
-        queries now say which they want; this proves the clause does what the
-        comment claims on both engines."""
-        for conn in (pg, lite):
-            ascending = [r[0] for r in conn.execute(
-                "SELECT x FROM (SELECT 'b' AS x UNION ALL SELECT NULL "
-                "UNION ALL SELECT 'a') t ORDER BY x NULLS FIRST")]
-            assert ascending == [None, "a", "b"], f"{db.backend_of(conn)}: {ascending}"
-
-            descending = [r[0] for r in conn.execute(
-                "SELECT x FROM (SELECT 'b' AS x UNION ALL SELECT NULL "
-                "UNION ALL SELECT 'a') t ORDER BY x DESC NULLS LAST")]
-            assert descending == ["b", "a", None], f"{db.backend_of(conn)}: {descending}"
-
+class TestOrdering:
     def test_text_ordering_is_bytewise(self, pg):
         """The database must be created with a bytewise collation, or
         `ORDER BY name` differs from SQLite's on case and punctuation. See
         the CREATE DATABASE recipe in pipeline/migrations/postgres/README.md.
         """
-        ordered = [r[0] for r in pg.execute(
+        ordered = [r["x"] for r in pg.execute(
             "SELECT x FROM (SELECT 'a' AS x UNION ALL SELECT 'B' "
             "UNION ALL SELECT 'a b' UNION ALL SELECT 'ab') t ORDER BY x")]
         assert ordered == ["B", "a", "a b", "ab"], (

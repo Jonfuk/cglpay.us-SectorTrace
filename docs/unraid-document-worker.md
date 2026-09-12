@@ -1,6 +1,6 @@
 # Unraid document-analysis worker
 
-Run document analysis in this dedicated Docker image on Unraid. It contains
+Run document and admin analysis in this dedicated Docker image on Unraid. It contains
 the Python document dependencies plus the operating-system OCR binaries
 Tesseract and Ghostscript. The ordinary `Dockerfile` remains the lightweight
 Railway/web image and should not be used for OCR batches.
@@ -22,7 +22,7 @@ From the repository checkout on Unraid:
 
 ```bash
 cd /mnt/user/Data/cglpay.us-SectorTrace
-git pull origin master
+git pull origin beta
 docker build -f deploy/Dockerfile.documents -t sectortrace-document-worker:latest .
 ```
 
@@ -79,6 +79,48 @@ Or use:
 ./deploy/unraid-document-worker.sh status
 ```
 
+## Run the admin analysis worker
+
+The admin analysis page writes queued runs to the shared PostgreSQL warehouse.
+Run the same image as a persistent queue consumer so those runs are claimed and
+processed:
+
+```bash
+docker compose -f docker-compose.documents.yml up -d analysis-worker
+docker compose -f docker-compose.documents.yml logs -f analysis-worker
+```
+
+The worker updates `analysis_worker_heartbeats`, claims one run at a time,
+processes document windows and structured comparisons in resumable batches,
+records emerging themes, signals, prevalence diagnostics, health snapshots and
+cross-source links, and honours Stop/Resume from `/admin/analysis`. The `.env`
+used by the service must point at the same `DATABASE_URL` as the web application.
+Structured comparisons automatically use up to four available CPU processes;
+the main worker remains the sole database writer. For a one-off override, pass
+`--comparison-workers N` to `pipeline analysis worker`.
+
+With the optional assistant configuration enabled, the same image performs the
+dual-model narrative extraction and records model prompts, responses, cache
+hits, latency and provider-reported cost. Without it, deterministic structured
+analysis and dependency-free narrative discovery still run; model extraction
+is recorded as unavailable rather than silently treated as a verified signal.
+The narrative model stage uses up to four concurrent passages by default;
+`ANALYSIS_MODEL_CONCURRENCY` can lower that for a provider with tighter limits.
+Run `pipeline analysis health --max-age-seconds 120` inside the worker image to
+check the heartbeat used by the deployment watchdog.
+
+For a host using the standalone helper rather than the Ansible-generated
+Compose file:
+
+```bash
+./deploy/unraid-document-worker.sh build
+./deploy/unraid-document-worker.sh analysis-start
+./deploy/unraid-document-worker.sh analysis-logs
+```
+
+`analysis-stop` stops the named worker container, and `analysis-once` is useful
+for a smoke test or a manually bounded queue drain.
+
 For a filesystem-backed archive, add this volume to every worker command:
 
 ```bash
@@ -131,6 +173,11 @@ This projects the document evidence records (source URL, retrieval metadata,
 hash, and archive path) into Neo4j. Parsed document text and elements remain
 canonical PostgreSQL records; they are not automatically promoted to claims or
 duplicated as graph nodes.
+
+The `/admin/analysis` release table also has **Queue graph**. That action queues
+only the isolated `AutomatedSignal`, `StructuredSignal`, `EmergingTheme` and
+`AnalysisRelease` projection. The persistent analysis worker consumes it when
+`NEO4J_ENABLED=true`; it never writes `graph_claims` or public graph routes.
 
 ## Run a batch
 

@@ -5,6 +5,15 @@
 # place. This is the part that differs.
 
 # --- What this box is being told to be, checked before it is built ------------
+- name: Persist an explicit frontend choice for subsequent redeploys
+  ansible.builtin.lineinfile:
+    path: "{{ playbook_dir }}/group_vars/all/zz-local.yml"
+    regexp: '^serve_nuxt:'
+    line: "serve_nuxt: {{ mirror_frontend_override | bool | lower }}"
+    create: true
+    mode: "0600"
+  when: mirror_frontend_override is defined
+
 - name: Check the sync mode is one this playbook knows
   ansible.builtin.assert:
     that:
@@ -136,6 +145,12 @@
     # asks the app container to render it rather than parsing it on the host.
     - data/mirror-state
     - logs
+    # Hugging Face / sentence-transformers model weights for the `nlp` layer,
+    # bind-mounted into the on-demand documents worker. Deliberately NOT under
+    # data/: it is not warehouse content, it must outlive a warehouse sync,
+    # and every `run --rm` of the worker would otherwise re-download it. Safe
+    # to `rm -rf` — the next run rebuilds it. See docker-compose.documents.yml.j2.
+    - nlp-cache
 
 # 0755, unlike everything else here. The postgres entrypoint re-execs itself
 # as the `postgres` user before running these scripts, and that user has to
@@ -147,6 +162,31 @@
     path: "{{ state_dir }}/postgres-init"
     state: directory
     mode: "0755"
+
+# --- Operator-managed .env.merge, read before .env is rendered --------------
+# The one supported way to add environment this role does not generate:
+# module API keys for a `beta` box that has to exercise real collection, or
+# an override for a value env.j2 hard-codes. It lives in state_dir, not the
+# checkout — the beta pre-task resets this box's tree to origin/<branch>
+# every run, and the template below overwrites .env every run, so neither is
+# a place a persistent local secret survives. env.j2 appends its contents to
+# the end of .env, where a later definition of a key wins over env.j2's.
+- name: Check for an operator-managed .env.merge
+  ansible.builtin.stat:
+    path: "{{ mirror_env_merge_file }}"
+  register: mirror_env_merge
+
+- name: Read .env.merge if it is there
+  ansible.builtin.slurp:
+    src: "{{ mirror_env_merge_file }}"
+  register: mirror_env_merge_raw
+  when: mirror_env_merge.stat.exists
+
+- name: Hand its contents to env.j2 (empty string when absent)
+  ansible.builtin.set_fact:
+    mirror_env_merge_text: >-
+      {{ (mirror_env_merge_raw.content | b64decode | trim)
+         if mirror_env_merge.stat.exists else '' }}
 
 - name: Render .env (the always-on containers; no source credentials in it)
   ansible.builtin.template:
@@ -190,6 +230,15 @@
     dest: "{{ state_dir }}/docker-compose.documents.yml"
     mode: "0644"
 
+# Rendered whether or not the assistant is provisioned, so the file is there
+# the day someone sets assistant_runtime_enabled. Nothing starts from it
+# unless that is true — see the bring-up block after the health gate.
+- name: Render the assistant model-runtime compose file
+  ansible.builtin.template:
+    src: docker-compose.assistant.yml.j2
+    dest: "{{ state_dir }}/docker-compose.assistant.yml"
+    mode: "0644"
+
 - name: Render the Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
@@ -206,6 +255,12 @@
     dest: /usr/local/bin/sectortrace-mirror
     mode: "0755"
 
+- name: Build the warehouse PostgreSQL image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml build postgres
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
 - name: Build the app image
   ansible.builtin.command:
     cmd: docker compose -f docker-compose.yml build app
@@ -214,9 +269,33 @@
 
 - name: Build the documents-worker image
   ansible.builtin.command:
-    cmd: docker compose -f docker-compose.documents.yml build documents
+    cmd: >-
+      docker compose -f docker-compose.documents.yml build documents
+      {% if mirror_role == 'beta' %}analysis-worker{% endif %}
     chdir: "{{ state_dir }}"
   changed_when: true
+
+# A healthy Python server can still be serving the legacy portal if the flag
+# was overridden in .env.merge or the static output is absent. Check the built
+# image and effective environment before replacing the running app.
+- name: Verify the selected frontend and its built entry assets
+  ansible.builtin.command:
+    argv:
+      - docker
+      - compose
+      - -f
+      - docker-compose.yml
+      - run
+      - --rm
+      - --no-deps
+      - --entrypoint
+      - python
+      - app
+      - deploy/ansible-mirror/check_frontend.py
+      - "{{ serve_nuxt | bool | lower }}"
+      - "{{ admin_ui_variant }}"
+    chdir: "{{ state_dir }}"
+  changed_when: false
 
 # Not in the self-host build, and worth the extra half-minute here: a
 # mirror is a box nobody looks at between syncs. A Caddyfile that does not
@@ -278,6 +357,174 @@
   until: sectortrace_mirror_health.status is defined and sectortrace_mirror_health.status == 200
   failed_when: sectortrace_mirror_health.status is not defined or sectortrace_mirror_health.status != 200
 
+# The analysis control plane lives in the always-on app, while the executor
+# uses the heavy document-worker image. A beta mirror is writable and is the
+# supported mirror mode for running admin analysis against seeded data. A
+# disaster-recovery mirror deliberately has no queue consumer because its
+# warehouse is replaced by sync and is not a working copy.
+- name: Bring up the analysis worker on beta mirrors
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml up -d analysis-worker
+    chdir: "{{ state_dir }}"
+  when: mirror_role == 'beta'
+  changed_when: true
+
+# The one-time catch-up of document_embeddings.embedding_vec for rows that
+# predate migration 0071. Deliberately *after* the health gate, never inside
+# `pipeline migrate`: on a populated warehouse this fills six figures of rows
+# and builds the pgvector HNSW index, and that must not sit between the app
+# starting and it serving — that coupling failed this very health gate once
+# (see pipeline/db.py:apply_migrations). Idempotent and resume-safe: a no-op
+# once every row has its vector, and `nlp embed` writes embedding_vec inline
+# for rows built after 0071, so this only ever clears the pre-0071 backlog.
+# Runs in the already-healthy app container; a failure here degrades semantic
+# search to keyword-only (the portal stays up) but is surfaced, not swallowed.
+- name: Backfill pgvector embedding_vec (one-time; a no-op once filled)
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml exec -T app python -m pipeline nlp backfill-vectors
+    chdir: "{{ state_dir }}"
+  register: sectortrace_mirror_backfill
+  changed_when: false
+
+# --- Local analyst assistant model runtime (BETA-107) ----------------------
+# Only when this box provisions it. Ollama serves the LFM synthesis model
+# and the same weights aliased to the router's tag; the app reaches both at
+# http://ollama:11434 on the mirror network. Enabling the feature itself
+# (ASSISTANT_ENABLED) is still a separate, gated step — see docs/assistant.md.
+# On a beta box the weights volume outlives a reseed, so this is a one-off
+# after the first provisioning run.
+- name: Bring up the assistant model runtime
+  when: assistant_runtime_enabled
+  block:
+    - name: Start Ollama
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml up -d
+        chdir: "{{ state_dir }}"
+      changed_when: true
+
+    - name: Wait for Ollama to answer
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama list
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_ready
+      retries: 20
+      delay: 3
+      until: sectortrace_mirror_ollama_ready.rc == 0
+      changed_when: false
+
+    # `ollama pull` of a missing manifest can exit 0 with the error only in
+    # the streamed body (a wrong assistant_lfm_ollama_ref does exactly this),
+    # so check the output too, not just rc. The reference must exist on
+    # ollama.com — `ollama.com/library/lfm2` is a 24B model, not this one.
+    - name: Pull the LFM model (a no-op once current)
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama pull {{ assistant_lfm_ollama_ref }}
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_pull
+      changed_when: "'success' in sectortrace_mirror_ollama_pull.stdout or 'pulling' in sectortrace_mirror_ollama_pull.stdout"
+      failed_when: >-
+        sectortrace_mirror_ollama_pull.rc != 0
+        or 'Error:' in (sectortrace_mirror_ollama_pull.stdout + sectortrace_mirror_ollama_pull.stderr)
+        or 'file does not exist' in (sectortrace_mirror_ollama_pull.stdout + sectortrace_mirror_ollama_pull.stderr)
+
+    # No `ollama cp` alias: env.j2 sets ASSISTANT_LFM_MODEL /
+    # ASSISTANT_NEEDLE_MODEL to assistant_lfm_ollama_ref, so the string the
+    # app sends is the exact name Ollama pulled — nothing to rename, and the
+    # ledger records the model that actually answered.
+    #
+    # `run` it, not `show`: pull and show both succeed on a GGUF this Ollama
+    # cannot actually load (an old build panics parsing an LFM2.5 hybrid
+    # metadata array only when a request forces a load), and the failure
+    # would otherwise surface for the first time at `nlp assistant-eval`.
+    - name: Smoke-test that the model loads and generates
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama run {{ assistant_lfm_ollama_ref }} "reply with the single word ok"
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_smoke
+      changed_when: false
+      timeout: 300
+      failed_when: >-
+        sectortrace_mirror_ollama_smoke.rc != 0
+        or 'Error:' in (sectortrace_mirror_ollama_smoke.stdout + sectortrace_mirror_ollama_smoke.stderr)
+        or (sectortrace_mirror_ollama_smoke.stdout | trim | length) == 0
+  rescue:
+    - name: Collect Ollama logs
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml logs --tail=60 --no-color
+        chdir: "{{ state_dir }}"
+      register: sectortrace_mirror_ollama_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report what Ollama said
+      ansible.builtin.fail:
+        msg: >-
+          {{ ['The assistant model runtime failed to start or provision.', '',
+              'Pull (' ~ assistant_lfm_ollama_ref ~ '):']
+             + (sectortrace_mirror_ollama_pull.stdout_lines | default(['(pull task did not run)']))
+             + (sectortrace_mirror_ollama_pull.stderr_lines | default([]))
+             + ['', 'Load smoke-test:']
+             + (sectortrace_mirror_ollama_smoke.stdout_lines | default(['(smoke-test did not run)']))
+             + (sectortrace_mirror_ollama_smoke.stderr_lines | default([]))
+             + ['', 'Ollama container logs:']
+             + (sectortrace_mirror_ollama_failure_logs.stdout_lines | default(['(no logs available)'])) }}
+
+# --- Direct PostgreSQL access for listed addresses --------------------------
+# postgres_external_allowed_ips is empty in the self-host build and by
+# default here. When it is set, the compose file above already published
+# 5432 on 0.0.0.0; these rules are the allowlist that makes that safe to do.
+# They go in the DOCKER-USER iptables chain because a published Docker port
+# does not pass through ufw (deploy/ansible/README.md, "What ufw doesn't
+# cover"). The script owns one dedicated sub-chain and is idempotent; the
+# unit re-applies it after a reboot or a Docker restart.
+- name: Refuse a PostgreSQL allowlist with nothing to scope the drop to
+  ansible.builtin.assert:
+    that:
+      - postgres_public_interface | length > 0
+    fail_msg: >-
+      postgres_external_allowed_ips is set but postgres_public_interface is
+      empty — ansible_default_ipv4 did not resolve on this host. Set
+      postgres_public_interface in group_vars/all/zz-local.yml to the
+      interface the listed clients reach this box on.
+  when: postgres_external_allowed_ips | length > 0
+
+- name: Install the PostgreSQL firewall script
+  ansible.builtin.template:
+    src: sectortrace-mirror-pg-firewall.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-pg-firewall
+    mode: "0700"
+
+- name: Install the PostgreSQL firewall unit
+  ansible.builtin.template:
+    src: sectortrace-mirror-pg-firewall.service.j2
+    dest: /etc/systemd/system/sectortrace-mirror-pg-firewall.service
+    mode: "0644"
+  notify: Reload systemd
+
+- name: Load the unit before it is enabled or started
+  ansible.builtin.meta: flush_handlers
+
+- name: Apply the PostgreSQL firewall rules now
+  # Runs on every playbook run: the script flushes and refills its own chain,
+  # so this reconciles the live rules with the current allowlist (added
+  # addresses appear, removed ones go, an emptied list tears the chain down).
+  ansible.builtin.command:
+    cmd: /usr/local/bin/sectortrace-mirror-pg-firewall
+  changed_when: true
+
+- name: Enable the PostgreSQL firewall unit at boot when the allowlist is in use
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-pg-firewall.service
+    enabled: true
+  when: postgres_external_allowed_ips | length > 0
+
+- name: Disable the PostgreSQL firewall unit when the allowlist is empty
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-pg-firewall.service
+    enabled: false
+  failed_when: false
+  when: postgres_external_allowed_ips | length == 0
+
 # --- The sync ------------------------------------------------------------------
 - name: Install the SSH tunnel unit
   ansible.builtin.template:
@@ -330,6 +577,18 @@
     dest: /usr/local/bin/sectortrace-mirror-verify
     mode: "0700"
 
+- name: Install the analysis-worker watchdog script
+  ansible.builtin.template:
+    src: sectortrace-mirror-analysis-watchdog.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-analysis-watchdog
+    mode: "0700"
+
+- name: Install the Open Jobs shadow collector script
+  ansible.builtin.template:
+    src: sectortrace-mirror-open-jobs.sh.j2
+    dest: /usr/local/bin/sectortrace-mirror-open-jobs
+    mode: "0700"
+
 - name: Install the sync, alert and verify units
   ansible.builtin.template:
     src: "{{ item }}.j2"
@@ -343,6 +602,10 @@
     - sectortrace-mirror-verify.timer
     - sectortrace-mirror-verify-deep.service
     - sectortrace-mirror-verify-deep.timer
+    - sectortrace-mirror-analysis-watchdog.service
+    - sectortrace-mirror-analysis-watchdog.timer
+    - sectortrace-mirror-open-jobs.service
+    - sectortrace-mirror-open-jobs.timer
   notify: Reload systemd
 
 # Created here rather than by the sync, which runs as a container and would
@@ -372,6 +635,39 @@
 - name: Flush handlers so the units are loaded before they are started
   ansible.builtin.meta: flush_handlers
 
+- name: Enable and start the analysis-worker watchdog on beta mirrors
+  ansible.builtin.service:
+    name: sectortrace-mirror-analysis-watchdog.timer
+    enabled: true
+    state: started
+  when: mirror_role == 'beta'
+
+- name: Stop the analysis-worker watchdog outside beta mirrors
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-analysis-watchdog.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: mirror_role != 'beta'
+
+- name: Enable and start the Open Jobs shadow timer on an opted-in beta
+  ansible.builtin.service:
+    name: sectortrace-mirror-open-jobs.timer
+    enabled: true
+    state: started
+  when:
+    - mirror_role == 'beta'
+    - open_jobs_enabled | bool
+    - open_jobs_schedule_enabled | bool
+
+- name: Stop the Open Jobs shadow timer when it is not explicitly enabled
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-open-jobs.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not (mirror_role == 'beta' and open_jobs_enabled | bool and open_jobs_schedule_enabled | bool)
+
 - name: Enable and start the SSH tunnel
   ansible.builtin.service:
     name: sectortrace-mirror-tunnel
@@ -384,6 +680,20 @@
     name: sectortrace-mirror-sync.timer
     enabled: true
     state: started
+  when: mirror_recurring_sync_enabled
+
+# Stopped and disabled before this box's checkout is even asked about it on
+# a --reconfigure from dr_mirror to beta — same reasoning as the tunnel
+# unit above: a timer left running under a mode that no longer wants it is
+# exactly the kind of thing that overwrites a beta box's test data at
+# 04:30 with nobody having asked it to.
+- name: Stop and disable the sync timer when recurring sync is off
+  ansible.builtin.systemd:
+    name: sectortrace-mirror-sync.timer
+    state: stopped
+    enabled: false
+  failed_when: false
+  when: not mirror_recurring_sync_enabled
 
 - name: Enable and start the verify timers
   ansible.builtin.service:
@@ -421,4 +731,9 @@
       - "    tmux new -s sync"
       - "    sectortrace-mirror sync"
       - ""
-      - "After that the timer keeps it current: {{ mirror_sync_time }} daily."
+      - "{{ 'After that the timer keeps it current: ' + mirror_sync_time + ' daily.'
+           if mirror_recurring_sync_enabled else
+           'No timer is running. That sync is the only one that happens '
+           + 'automatically — after it, this database is yours: write to it, '
+           + 'test against it, and re-run `sectortrace-mirror sync` by hand '
+           + 'whenever you want fresh data from the source instead.' }}"

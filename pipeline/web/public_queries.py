@@ -30,16 +30,19 @@ Three rules hold everywhere in this file:
 from __future__ import annotations
 
 import re
-import sqlite3
-from datetime import date
+import sqlite3  # type-only compatibility for legacy annotations
+from datetime import date, timedelta
+from pathlib import Path
 from typing import Any, Iterator
 
-from pipeline import catalog
+from pipeline import catalog, db
 from pipeline.exports import guard_columns, guard_not_restricted
 from pipeline.exports.geojson import LAYER_CAVEATS
+from pipeline.licences import for_module, statement
 from pipeline.notice_urls import notice_page_url
-from pipeline.web import health
-from pipeline.web.queries import QueryError, _run
+from pipeline.web import datasets, health
+from pipeline.web.datasets import EVIDENCE_LAYERS
+from pipeline.web.queries import QueryError, _run, escape_like
 
 # Caveats that must travel with particular figures. Kept here, in one place,
 # because the same warning has to appear identically wherever a figure does —
@@ -125,6 +128,29 @@ CAVEATS = {
         "and alcohol provision is not CQC-registered, so this is not a "
         "service map and absence does not mean absence of a service."
     ),
+    "provider_lineage": (
+        "The verified administrative record of an organisation's identity — "
+        "renamed, merged into another body, or dissolved — from the pipeline's "
+        "lifecycle config, cross-checked against the registered company and "
+        "charity record. It is not a statement about continuity of service, of "
+        "staff, of contracts or of quality: a merged charity's services and "
+        "workforce may have moved, stayed, or ended, and this does not say "
+        "which. Evidence that names an older identity stays attached to that "
+        "identity and is not rewritten. No ownership structure is inferred and "
+        "no individual officer is named."
+    ),
+    "cqc_locations_explorer": (
+        "CQC registration covers only certain regulated activities — "
+        "residential detox, inpatient care, some prescribing. Most community "
+        "drug and alcohol provision is not registered, so this is a map of "
+        "regulated locations, never a complete service map. A location count "
+        "is neither coverage nor quality: do not rank authorities or providers "
+        "by it, and do not combine it with any other layer. A rating is CQC's "
+        "own published judgement as at its last inspection; where the API gave "
+        "none, the bulk export's rating is shown and labelled as such. "
+        "Locations with no coordinate are listed in the table but cannot be "
+        "placed on the map."
+    ),
     "ndtms_estimates": (
         "These are modelled estimates published with 95% confidence "
         "intervals, not counts. The interval is part of the figure: an "
@@ -153,17 +179,64 @@ CAVEATS = {
         "end is not a call-off's end, and none of this is a forecast of what "
         "will be retendered."
     ),
+    "hse_notices": (
+        "Each row is an enforcement notice the Health and Safety Executive "
+        "served on an organisation whose name exactly matches a tracked "
+        "provider. It is a point-in-time fact, not a settled outcome: the "
+        "published `result` — which can be 'Under appeal', 'Withdrawn', or an "
+        "appeal decision — travels with every notice, and this portal never "
+        "infers compliance. Notices served on individuals are excluded, and "
+        "the register covers only HSE-enforced workplaces, so an absence of "
+        "notices is not a safety rating."
+    ),
+    "contract_process": (
+        "These are the official notices published under one OCID, grouped by "
+        "the lifecycle stage each notice's own OCDS tag names — never a stage "
+        "inferred from what is missing. A stage with no notice was not "
+        "published to this feed, or has not been collected here: it is not "
+        "evidence that the stage did not happen, that the contract completed, "
+        "was renewed, met its targets, or that the supplier performed. No "
+        "completion, performance or continuity is computed from this view."
+    ),
     "evidence_funnel": (
         "Every candidate, promotion and evidence row in this funnel records "
         "a human decision, and who made it. A zero is zero decisions "
         "recorded — it says nothing about the sector, and everything about "
         "how much verification has been done."
     ),
+    "commissioning_relationship_timeline": (
+        "Each row is one contract notice that named this authority as buyer "
+        "and this provider as supplier, dated as the notice published it. "
+        "Missing dates are left blank, not inferred. The list is the source "
+        "events behind one relationship — not a history of the working "
+        "relationship itself, a measure of its value or reliance, or "
+        "evidence of organisational continuity between differently-named "
+        "entities. Only notices with an exact supplier-name match appear, "
+        "the same floor as the contracts page."
+    ),
+    "commissioning_relationship": (
+        "A line means a contract notice named this authority as buyer and "
+        "this provider as supplier — a commissioning relationship, not a "
+        "measure of size, value, importance or reliance. Coverage is the "
+        "same floor as the contracts page: only notices with an exact "
+        "supplier-name match are here, so an authority or provider with no "
+        "lines shown may still have unmatched notices. This is not the "
+        "whole evidence graph — ownership and corporate-group relationships "
+        "are a separate, not-yet-published view."
+    ),
     "collection_freshness": (
         "The date each source table was last written by a pipeline run. A "
         "table that never shows a date has never been collected — absence of "
         "collection is not evidence of absence, and it is drawn as 'never' "
         "rather than as zero."
+    ),
+    "catalogue": (
+        "This catalogue describes what the portal collects and the single "
+        "limitation that matters most for each source — it is not the full "
+        "caveat set. Row counts and dates are measured against the warehouse "
+        "on each request; a count of zero means that dataset has not been "
+        "collected here, not that the source is empty. Datasets in different "
+        "evidence layers are never added together."
     ),
     "pfd_stubs": (
         "A large part of this corpus publishes only a metadata stub online, "
@@ -253,6 +326,16 @@ CAVEATS = {
         "figures and may share an axis with each other, and with nothing else "
         "on this page."
     ),
+    "provider_compare": (
+        "Each layer below is one kind of evidence about one thing — an "
+        "accreditation status, a gender pay gap filing, a figure a provider "
+        "published on its own site, an advertised salary range. They are "
+        "placed side by side, not combined: this comparison produces no "
+        "ranking, score, difference or ratio, and a provider missing from a "
+        "layer has not been shown to be worse or better on it. Read each "
+        "layer with its own caveat before drawing anything from the "
+        "arrangement."
+    ),
     "statutory_pay_rates": (
         "Statutory rates are published hourly floors. They are shown as the "
         "government published them: this portal does not annualise them or "
@@ -294,6 +377,36 @@ CAVEATS = {
         "A payment is linked to a tracked provider only when the council's payee "
         "name exactly matches a known provider name variant. Unmatched rows are "
         "not evidence that no tracked provider was paid."
+    ),
+    "rough_sleeping_comparator": (
+        "This is a comparator, shown here because rough sleeping and substance "
+        "misuse are widely documented as overlapping populations — never "
+        "combined, ratioed or correlated with this authority's own evidence "
+        "above. Methodology is not standardised between authorities: each "
+        "chooses its own counting approach and date within the autumn window, "
+        "so a difference between two authorities may reflect a difference in "
+        "method, not only on the street."
+    ),
+    "statutory_homelessness_comparator": (
+        "This is a comparator, shown for the same reason as the rough sleeping "
+        "figures above — never combined, ratioed or correlated with this "
+        "authority's own evidence. Only the flagship duty-assessment count "
+        "(Table A1) is read; a quarter can later be revised, and this figure "
+        "reflects whichever edition was most recently fetched."
+    ),
+    "temporary_accommodation_comparator": (
+        "This is a comparator, shown for the same reason as the homelessness "
+        "figures above — never combined, ratioed or correlated with this "
+        "authority's own evidence. Only the top-level totals are read, plus "
+        "the bed-and-breakfast breakdown where Table TA1 publishes it."
+    ),
+    "temporary_accommodation_breakdown": (
+        "The bed-and-breakfast 'of which' rows of Table TA1, as published. "
+        "The set of B&B columns changes across the series — older quarters "
+        "split households with children out, recent quarters give only the "
+        "households total — so a missing measure for a quarter means the "
+        "source did not publish it, not zero. Context only: not a rate, not "
+        "compared between authorities, not differenced across quarters."
     ),
 }
 
@@ -359,7 +472,8 @@ def _evidence_funnel(conn: sqlite3.Connection) -> dict:
 
 def summary(conn: sqlite3.Connection) -> dict:
     """Landing-page figures. Every one carries what it is and what it is not."""
-    _public(["providers", "authorities", "contracts", "workforce_census_metrics",
+    _public(["providers", "authorities", "contracts", "supplier_aliases",
+              "workforce_census_metrics",
               "fingertips_indicators", "schema_migrations",
               "cdp_document_candidates", "committee_paper_candidates",
               "foi_request_candidates", "cdp_documents", "committee_papers",
@@ -380,13 +494,35 @@ def summary(conn: sqlite3.Connection) -> dict:
         "           AS direct_awards, "
         "       SUM(CASE WHEN psr_basis IS NOT NULL THEN 1 ELSE 0 END) AS psr_notices "
         "FROM contracts")
+    # Same "matched to a known provider" measure as the contracts page --
+    # exact supplier-name match only, so this is a floor. Shown on the
+    # overview strip instead of the old "active evidence signals" count,
+    # which counted how many layers were non-zero rather than measuring
+    # anything about the evidence itself.
+    matched_to_provider = _one(
+        conn, "SELECT COUNT(*) AS matched FROM contracts WHERE supplier_name_raw IN "
+               "(SELECT alias_raw FROM supplier_aliases)").get("matched", 0)
+
+    # Per-region breakdown of the same "appears as a contract buyer" signal
+    # as `with_contracts` above, for the hero's England silhouette. A count
+    # and a ratio within one evidence layer, same as `matched_to_provider` —
+    # nothing here is summed or compared across layers.
+    regions = _rows(
+        conn,
+        "SELECT a.region, COUNT(DISTINCT a.ons_code) AS authorities_total, "
+        "       COUNT(DISTINCT CASE WHEN c.buyer_ons_code IS NOT NULL "
+        "                            THEN a.ons_code END) AS authorities_with_contracts "
+        "FROM authorities a "
+        "LEFT JOIN contracts c ON c.buyer_ons_code = a.ons_code "
+        "WHERE a.region IS NOT NULL "
+        "GROUP BY a.region")
 
     latest_census = _one(
         conn, "SELECT MAX(census_year) AS y FROM workforce_census_metrics").get("y")
     census_metrics = _rows(
         conn,
         "SELECT metric, workforce_segment, value, unit, verified "
-        "FROM workforce_census_metrics WHERE census_year = ? "
+        "FROM workforce_census_metrics WHERE census_year = %s "
         "  AND metric IN ('vacancy_rate', 'turnover_rate') "
         "ORDER BY metric, workforce_segment",
         (latest_census,)) if latest_census else []
@@ -413,12 +549,15 @@ def summary(conn: sqlite3.Connection) -> dict:
         "authorities": {
             "total": authorities.get("total", 0),
             "with_contracts": with_contracts.get("n", 0),
+            "regions": regions,
+            "regions_caveat": CAVEATS["contract_value"],
         },
         "contracts": {
             "total_notices": contracts.get("total_notices", 0),
             "total_value_gbp": contracts.get("total_value_gbp", 0),
             "direct_awards": contracts.get("direct_awards", 0),
             "psr_notices": contracts.get("psr_notices", 0),
+            "matched_to_provider": matched_to_provider,
             # Sent so the portal can refuse to headline a total that a few
             # framework ceilings account for. Without it the hero card would
             # read "£15tn of contracts", which is not true of anything.
@@ -488,6 +627,9 @@ FRESHNESS_TABLES: tuple[tuple[str, str], ...] = (
     # could not be read, just as the authority coverage matrix does for m24.
     ("Council spend files", "council_spend_files"),
     ("Skills for Care files", "skills_for_care_files"),
+    ("Rough sleeping snapshot", "rough_sleeping_snapshot"),
+    ("Statutory homelessness", "statutory_homelessness_snapshot"),
+    ("Temporary accommodation", "temporary_accommodation_snapshot"),
 )
 
 
@@ -509,6 +651,487 @@ def freshness(conn: sqlite3.Connection) -> dict:
     return {
         "tables": _rows(conn, union),
         "caveat": CAVEATS["collection_freshness"],
+    }
+
+
+# --- release identity -------------------------------------------------------
+
+
+def _git_revision_from_checkout() -> str | None:
+    """The current commit, read straight from `.git` — no subprocess.
+
+    Only the local-checkout fallback: a hosted deployment injects
+    `GIT_REVISION` because the Docker image carries no `.git` directory. Any
+    read problem (detached checkout, packed refs, no `.git` at all) returns
+    None rather than raising — an unknown revision is a fine answer here and a
+    500 on the footer is not.
+    """
+    git_dir = Path(__file__).resolve().parents[2] / ".git"
+    try:
+        head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+        if head.startswith("ref:"):
+            ref = head.split(":", 1)[1].strip()
+            ref_file = git_dir / ref
+            if ref_file.is_file():
+                return ref_file.read_text(encoding="utf-8").strip() or None
+            packed = git_dir / "packed-refs"
+            if packed.is_file():
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    if line.startswith(("#", "^")) or " " not in line:
+                        continue
+                    sha, name = line.split(" ", 1)
+                    if name.strip() == ref:
+                        return sha or None
+            return None
+        return head or None
+    except OSError:
+        return None
+
+
+def meta(conn: sqlite3.Connection, settings) -> dict:
+    """Release identity for the beta: which build, schema and capabilities.
+
+    Deliberately cheap — the portal footer and the beta smoke gate both read
+    it, so it touches only two tiny tables (`schema_migrations`, `http_cache`)
+    and the server's own extension catalogue. Per-source collection times are
+    `/api/v1/freshness`, which this points at rather than recomputing.
+
+    `/health` stays the plain-text `ok` liveness probe; this is the auditable
+    identity beside it.
+    """
+    _public(["schema_migrations", "http_cache", "run_ledger"])
+
+    applied = db.applied_migrations(conn)
+    schema_row = _one(
+        conn, "SELECT MAX(applied_at) AS migrated_at FROM schema_migrations")
+
+    objects = {obj["name"] for obj in catalog.list_objects(conn)}
+    last_fetch_at = None
+    if "http_cache" in objects:
+        last_fetch_at = _one(
+            conn, "SELECT MAX(updated_at) AS t FROM http_cache").get("t")
+
+    # The last durable run-ledger row (BETA-058), if the table exists — a
+    # cheap "when did collection last run, and how" signal beside the
+    # per-source retrieval times.
+    last_run = None
+    if "run_ledger" in objects:
+        row = _one(conn, "SELECT origin, status, started_at, finished_at, "
+                          "modules_ok, modules_failed FROM run_ledger "
+                          "ORDER BY started_at DESC LIMIT 1")
+        last_run = row or None
+
+    extension_state = {
+        ext["name"]: bool(ext["installed"]) for ext in health.extensions(conn)
+    }
+
+    return {
+        "service": "sectortrace",
+        "environment": settings.environment,
+        "revision": settings.git_revision or _git_revision_from_checkout(),
+        "revision_source": "deployment" if settings.git_revision else "checkout",
+        "build_time": settings.build_time,
+        "backend": "postgres",
+        "schema": {
+            "latest_migration": max(applied) if applied else None,
+            "applied_count": len(applied),
+            "migrated_at": schema_row.get("migrated_at"),
+        },
+        "data": {
+            # The freshest signal of collection activity, cheaply: when this
+            # warehouse last spoke to any source. The authoritative per-table
+            # retrieval times are their own route.
+            "last_fetch_at": last_fetch_at,
+            "per_source": "/api/v1/freshness",
+            # The last module-run recorded in the durable ledger (BETA-058):
+            # origin, status and timestamps. None if none has run.
+            "last_run": last_run,
+        },
+        "capabilities": {
+            "admin_ui": bool(settings.admin_ui_enabled),
+            "api_response_cache": bool(settings.cache_enabled),
+            "api_rate_limit": bool(settings.api_rate_limit_enabled),
+            "document_analysis": bool(settings.document_analysis_enabled),
+            "semantic_search": bool(settings.nlp_enabled),
+            # {} on SQLite; on PostgreSQL, name -> installed-in-this-database.
+            "postgres_extensions": extension_state,
+        },
+    }
+
+
+# --- dataset catalogue ----------------------------------------------------
+
+
+def _table_last_retrieved(conn: sqlite3.Connection, table: str) -> str | None:
+    """MAX(retrieved_at) for a table that has that column, else None.
+
+    The catalogue spans the whole pipeline and the reference and derived
+    tables (`authorities`, `sector_universe`) carry no `retrieved_at`. Ask
+    the schema first so this does not raise on them.
+    """
+    if not any(col["name"] == "retrieved_at"
+               for col in catalog.columns_of(conn, table)):
+        return None
+    return _one(conn, f"SELECT MAX(retrieved_at) AS t FROM {table}").get("t")
+
+
+def _dataset_figures(conn: sqlite3.Connection, ds: "datasets.Dataset") -> dict:
+    """One catalogue row: the static registry entry plus live counts/freshness.
+
+    `_public()` here is the same guard every other function in this file
+    runs — a mistyped table name in `datasets.py` that named a restricted_
+    table would fail the request rather than count its rows.
+    """
+    _public(list(ds.public_tables))
+    counts = catalog.row_counts(conn, ds.public_tables)
+    retrieved = {t: _table_last_retrieved(conn, t) for t in ds.public_tables}
+    dates = [d for d in retrieved.values() if d]
+    licence = for_module(ds.module)
+    return {
+        "dataset_id": ds.dataset_id,
+        "module": ds.module,
+        "title": ds.title,
+        "publisher": ds.publisher,
+        "official_url": ds.official_url,
+        "evidence_layer": ds.evidence_layer,
+        "evidence_layer_label": EVIDENCE_LAYERS.get(
+            ds.evidence_layer, ds.evidence_layer),
+        "geography": ds.geography,
+        "cadence": ds.cadence,
+        "licence": (
+            {"id": licence.id, "name": licence.name, "url": licence.url}
+            if licence else None),
+        "tables": [
+            {"name": t, "rows": counts.get(t, 0),
+             "last_retrieved_at": retrieved.get(t)}
+            for t in ds.public_tables
+        ],
+        "row_count": sum(counts.get(t, 0) for t in ds.public_tables),
+        "last_retrieved_at": max(dates) if dates else None,
+        "caveat": ds.caveat,
+    }
+
+
+def catalogue(conn: sqlite3.Connection) -> dict:
+    """Every dataset the portal serves, with measured counts and freshness.
+
+    The static half — title, publisher, official URL, evidence layer,
+    geography, cadence, licence key, caveat — is `pipeline/web/datasets.py`.
+    The counts and last-retrieved dates are read from the warehouse here so
+    the catalogue can never claim a figure the data does not support.
+    `tests/test_web_catalogue.py` pins that every collecting `mNN_` module
+    has exactly one entry.
+    """
+    return {
+        "datasets": [_dataset_figures(conn, ds) for ds in datasets.PUBLIC_DATASETS],
+        "evidence_layers": EVIDENCE_LAYERS,
+        "count": len(datasets.PUBLIC_DATASETS),
+        "caveat": CAVEATS["catalogue"],
+    }
+
+
+def catalogue_detail(conn: sqlite3.Connection, dataset_id: str) -> dict:
+    """One dataset, with the full licence statement and its caution."""
+    ds = datasets.PUBLIC_BY_ID.get(dataset_id)
+    if ds is None:
+        raise QueryError(f"No dataset {dataset_id!r}.")
+    figures = _dataset_figures(conn, ds)
+    licence = for_module(ds.module)
+    figures["licence_statement"] = statement(licence) if licence else None
+    figures["licence_caution"] = (licence.caution or None) if licence else None
+    figures["caveat_common"] = CAVEATS["catalogue"]
+    return figures
+
+
+# --- source publication calendar (BETA-091) ---------------------------------
+#
+# Freshness alone cannot tell a reader why a dataset looks old: a publisher
+# that has released nothing and a collection here that has not run are
+# different conditions. This view keeps them apart. For each dataset it shows,
+# side by side and never merged into one figure:
+#
+#   * the publisher's *stated* cadence — the number transcribed in
+#     `datasets._STATED_CADENCE_DAYS`, or nothing where the source names no
+#     calendar;
+#   * an *observed* interval — the median gap between the distinct calendar
+#     dates this warehouse holds retrieval timestamps for, reported only with
+#     three or more such dates and always labelled an estimate;
+#   * the last retrieval held here, and a next-expected date projected from
+#     whichever basis applies (stated preferred over observed).
+#
+# `status` is "overdue" only when that projected date is past by more than a
+# quarter of the cadence (minimum one week); "due" inside that window;
+# "current" before it; "unknown" with no basis or nothing retrieved. No
+# arithmetic crosses datasets and there is no headline total.
+_CALENDAR_MIN_OBSERVED = 3
+_CALENDAR_STATUS_ORDER = {"overdue": 0, "due": 1, "unknown": 2, "current": 3}
+
+
+def _distinct_retrieval_dates(conn: sqlite3.Connection, table: str) -> list[str]:
+    """Every distinct YYYY-MM-DD this table carries a `retrieved_at` for.
+
+    Ask the schema first — reference tables such as `authorities` have no
+    `retrieved_at` — so this stays quiet on them rather than raising.
+    """
+    if not any(col["name"] == "retrieved_at"
+               for col in catalog.columns_of(conn, table)):
+        return []
+    return [r["d"] for r in _rows(
+        conn,
+        f"SELECT DISTINCT substr(retrieved_at, 1, 10) AS d FROM {table} "
+        "WHERE retrieved_at IS NOT NULL AND retrieved_at <> '' ORDER BY d")]
+
+
+def _observed_interval_days(dates: list[str]) -> int | None:
+    """Median gap in days between consecutive distinct retrieval dates.
+
+    None below `_CALENDAR_MIN_OBSERVED` dates: two points make one gap, and
+    one gap is not a cadence. `dates` arrives sorted ascending.
+    """
+    if len(dates) < _CALENDAR_MIN_OBSERVED:
+        return None
+    gaps: list[int] = []
+    for a, b in zip(dates, dates[1:]):
+        try:
+            delta = (date.fromisoformat(b) - date.fromisoformat(a)).days
+        except ValueError:
+            continue
+        if delta > 0:
+            gaps.append(delta)
+    if len(gaps) < _CALENDAR_MIN_OBSERVED - 1:
+        return None
+    gaps.sort()
+    mid = len(gaps) // 2
+    if len(gaps) % 2:
+        return gaps[mid]
+    return round((gaps[mid - 1] + gaps[mid]) / 2)
+
+
+def publication_calendar(conn: sqlite3.Connection, *,
+                          today: str | None = None) -> dict:
+    """Per-source release cadence, last publication and overdue/unknown status.
+
+    Read-only and derived: the stated cadence is registry metadata, everything
+    else is measured from retrieval history on this request. Stated and
+    observed cadences are reported in separate fields and never combined.
+    """
+    as_of = date.fromisoformat(today) if today else date.today()
+
+    rows: list[dict] = []
+    by_status: dict[str, int] = {}
+    by_basis: dict[str, int] = {}
+    for ds in datasets.PUBLIC_DATASETS:
+        _public(list(ds.public_tables))
+        seen: set[str] = set()
+        for t in ds.public_tables:
+            seen.update(_distinct_retrieval_dates(conn, t))
+        dated = sorted(seen)
+        last_pub = dated[-1] if dated else None
+        observed = _observed_interval_days(dated)
+        stated = ds.stated_cadence_days
+
+        if stated is not None:
+            basis, cadence_days = "stated", stated
+        elif observed is not None:
+            basis, cadence_days = "observed", observed
+        else:
+            basis, cadence_days = "unknown", None
+
+        next_expected = None
+        status = "unknown"
+        overdue_by_days = None
+        if cadence_days and last_pub:
+            try:
+                nxt = date.fromisoformat(last_pub) + timedelta(days=cadence_days)
+            except ValueError:
+                nxt = None
+            if nxt is not None:
+                next_expected = nxt.isoformat()
+                grace = max(7, round(cadence_days * 0.25))
+                if as_of <= nxt:
+                    status = "current"
+                elif as_of <= nxt + timedelta(days=grace):
+                    status = "due"
+                else:
+                    status = "overdue"
+                    overdue_by_days = (as_of - nxt).days
+
+        by_status[status] = by_status.get(status, 0) + 1
+        by_basis[basis] = by_basis.get(basis, 0) + 1
+        rows.append({
+            "dataset_id": ds.dataset_id,
+            "title": ds.title,
+            "publisher": ds.publisher,
+            "official_url": ds.official_url,
+            "evidence_layer": ds.evidence_layer,
+            "evidence_layer_label": EVIDENCE_LAYERS.get(
+                ds.evidence_layer, ds.evidence_layer),
+            "stated_cadence": ds.cadence,
+            "stated_cadence_days": stated,
+            "observed_interval_days": observed,
+            "observed_sample": len(dated),
+            "cadence_basis": basis,
+            "cadence_days": cadence_days,
+            "last_publication": last_pub,
+            "next_expected": next_expected,
+            "status": status,
+            "overdue_by_days": overdue_by_days,
+        })
+
+    rows.sort(key=lambda r: (
+        _CALENDAR_STATUS_ORDER.get(r["status"], 9),
+        r["next_expected"] or "9999",
+        r["title"].lower()))
+
+    return {
+        "as_of": as_of.isoformat(),
+        "datasets": rows,
+        "counts": {"by_status": by_status, "by_basis": by_basis},
+        "statuses": list(_CALENDAR_STATUS_ORDER),
+        "note": "The stated cadence is what the publisher says. The observed "
+                "interval is the median gap between retrievals this warehouse "
+                "holds — an estimate, shown only with three or more dated "
+                "retrievals, and never merged with the stated figure.",
+        "caveat": "A next-expected date is projected from the last retrieval "
+                  "here, not a publisher commitment. “Overdue” can mean "
+                  "the source has not released, or that collection here has "
+                  "not run — this view does not tell the two apart, only that "
+                  "the freshness needs explaining.",
+    }
+
+
+# --- "what changed?" evidence feed (BETA-090) ---------------------------------
+#
+# There is no persisted change-event table and this adds none — no new
+# collection-time write path. The feed is *derived* on each request from
+# signals the warehouse already records, each classed as one kind:
+#
+#   release     — a run of the shared module runner (`run_ledger`)
+#   refreshed   — a source table's most recent retrieval moved (catalogue
+#                 freshness), i.e. a collection changed it
+#   reparsed    — a document got a new active parsed version (parser change)
+#   superseded  — a provider now trades as a successor (verified lineage)
+#   verified    — a human review decision resolved a candidate (alias review)
+#
+# The three axes the objective names are kept apart: a collection change
+# (`refreshed`/`release`), a parser change (`reparsed`) and a human-review
+# change (`verified`/`superseded`) are different kinds and are never merged
+# into one count.
+CHANGE_KINDS = ("release", "refreshed", "reparsed", "superseded", "verified")
+_CHANGE_MAX = 500
+
+
+def change_feed(conn: sqlite3.Connection, *, kind=None, source=None,
+                 evidence_type=None, since=None, limit: int = 200) -> dict:
+    _public(["run_ledger", "document_versions", "document_records", "providers",
+              "alias_decisions"])
+    if kind is not None and kind not in CHANGE_KINDS:
+        raise QueryError(f"unknown change kind {kind!r}")
+    limit = max(1, min(int(limit), _CHANGE_MAX))
+    present = {obj["name"] for obj in catalog.list_objects(conn)}
+    events: list[dict] = []
+
+    def keep(**event) -> None:
+        events.append({
+            "kind": event["kind"], "at": event.get("at"),
+            "source": event.get("source"),
+            "evidence_type": event.get("evidence_type"),
+            "entity": event.get("entity"),
+            "detail": event.get("detail"),
+            "release": event.get("release"),
+        })
+
+    if "run_ledger" in present:
+        for r in _rows(conn, """
+            SELECT run_id, origin, status, finished_at, started_at,
+                   modules_ok, modules_failed
+            FROM run_ledger ORDER BY started_at DESC LIMIT 30"""):
+            keep(kind="release", at=r["finished_at"] or r["started_at"],
+                 source="pipeline", evidence_type=None, entity=r["origin"],
+                 detail=(f"run {r['origin']} {r['status']} — "
+                         f"{r['modules_ok'] or 0} ok"
+                         + (f", {r['modules_failed']} failed"
+                            if r["modules_failed"] else "")),
+                 release=r["run_id"])
+
+    # `refreshed`: the catalogue's measured last-retrieval per dataset.
+    for figures in (_dataset_figures(conn, ds) for ds in datasets.PUBLIC_DATASETS):
+        last = figures.get("last_retrieved_at")
+        if last:
+            keep(kind="refreshed", at=last, source=figures.get("publisher"),
+                 evidence_type=figures.get("dataset_id"),
+                 entity=None,
+                 detail=f"{figures.get('title')}: latest retrieval {last[:10]}")
+
+    if {"document_versions", "document_records"} <= present:
+        for r in _rows(conn, """
+            SELECT v.document_id, v.parser_name, v.parser_version, v.created_at,
+                   d.title
+            FROM document_versions v
+            JOIN document_records d ON d.document_id = v.document_id
+            WHERE v.is_active = 1
+              AND EXISTS (SELECT 1 FROM document_versions v2
+                          WHERE v2.document_id = v.document_id
+                            AND v2.is_active = 0)
+            ORDER BY v.created_at DESC LIMIT 60"""):
+            keep(kind="reparsed", at=r["created_at"], source="document parser",
+                 evidence_type="document", entity=r["document_id"],
+                 detail=(f"{r['title'] or r['document_id']}: reparsed with "
+                         f"{r['parser_name']} {r['parser_version']}"))
+
+    if "providers" in present:
+        for r in _rows(conn, """
+            SELECT p.provider_key, p.canonical_name, s.canonical_name AS successor
+            FROM providers p
+            LEFT JOIN providers s ON s.provider_key = p.superseded_by
+            WHERE p.superseded_by IS NOT NULL"""):
+            keep(kind="superseded", at=None, source="provider lineage",
+                 evidence_type="provider", entity=r["provider_key"],
+                 detail=(f"{r['canonical_name']} now trades as "
+                         f"{r['successor'] or r['provider_key']}"))
+
+    if "alias_decisions" in present:
+        for r in _rows(conn, """
+            SELECT decision_id, unmatched_name, canonical_name, target_scheme,
+                   status, decided_by, decided_at
+            FROM alias_decisions
+            WHERE status = 'confirmed'
+            ORDER BY decided_at DESC LIMIT 60"""):
+            keep(kind="verified", at=r["decided_at"], source="alias review",
+                 evidence_type=r["target_scheme"], entity=r["canonical_name"],
+                 detail=(f"“{r['unmatched_name']}” confirmed as "
+                         f"{r['canonical_name']} by {r['decided_by']}"))
+
+    if kind:
+        events = [e for e in events if e["kind"] == kind]
+    if source:
+        events = [e for e in events if e["source"] == source]
+    if evidence_type:
+        events = [e for e in events if e["evidence_type"] == evidence_type]
+    if since:
+        events = [e for e in events if e["at"] and e["at"][:10] >= str(since)[:10]]
+
+    events.sort(key=lambda e: (e["at"] or ""), reverse=True)
+    truncated = len(events) > limit
+    events = events[:limit]
+
+    by_kind: dict[str, int] = {}
+    for e in events:
+        by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
+
+    return {
+        "events": events,
+        "truncated": truncated,
+        "counts": {"by_kind": by_kind},
+        "kinds": list(CHANGE_KINDS),
+        "note": "Derived from the run ledger, catalogue freshness, document "
+                "reparses and verified provider/alias changes. A collection "
+                "change, a parser change and a human-review change are "
+                "distinct kinds and their counts are never added.",
+        "caveat": "This feed reveals what the warehouse recorded changing. It "
+                  "is not a record of what a source published — a source can "
+                  "change with no collection here, and this feed will not show "
+                  "it until the next run.",
     }
 
 
@@ -542,6 +1165,10 @@ def providers(conn: sqlite3.Connection) -> list[dict]:
                p.canonical_name,
                p.is_target,
                p.notes,
+               p.status,
+               p.superseded_by,
+               (SELECT sp.canonical_name FROM providers sp
+                 WHERE sp.provider_key = p.superseded_by) AS superseded_by_name,
                (SELECT COUNT(*) FROM contracts c
                   JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
                  WHERE sa.supplier_key = p.provider_key) AS contract_count,
@@ -653,8 +1280,8 @@ def ending_soon(conn: sqlite3.Connection, clause: str, params: dict,
                  (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END)
                    AS matched
         FROM contracts c{clause}
-        {'AND' if clause else 'WHERE'} c.date_end >= :window_start
-              AND c.date_end <= :window_end
+        {'AND' if clause else 'WHERE'} c.date_end >= %(window_start)s
+              AND c.date_end <= %(window_end)s
         GROUP BY quarter ORDER BY quarter""",
         {**params, "window_start": window_start, "window_end": window_end})
     return {
@@ -684,7 +1311,11 @@ _NOTICE_SELECT = """
                -- Appended, not inserted. The CSV export takes its column
                -- order from these keys, and a downstream reader who counted
                -- columns should not have them move underneath them.
-               c.source_system, c.notice_web_url
+               c.source_system, c.notice_web_url,
+               -- The OCDS id that links related releases of one procurement
+               -- (BETA-050). Stable across the lifecycle; the process view is
+               -- keyed by it.
+               c.ocid
         FROM contracts c{clause}
         -- NULLS LAST is said rather than left to the engine: SQLite puts them
         -- last under DESC and PostgreSQL puts them first, so the same list
@@ -696,32 +1327,57 @@ _NOTICE_SELECT = """
         ORDER BY c.date_published DESC NULLS LAST, c.notice_id"""
 
 
-def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only):
+def _contract_filters(provider_key, buyer_ons_code, year_from, year_to, psr_only,
+                      q=None, since_retrieved_at=None, *, ilike=False):
     where, params = [], {}
     if provider_key:
         where.append(
             "c.supplier_name_raw IN (SELECT alias_raw FROM supplier_aliases "
-            "WHERE supplier_key = :provider_key)")
+            "WHERE supplier_key = %(provider_key)s)")
         params["provider_key"] = provider_key
     if buyer_ons_code:
-        where.append("c.buyer_ons_code = :buyer")
+        where.append("c.buyer_ons_code = %(buyer)s")
         params["buyer"] = buyer_ons_code
     if year_from:
-        where.append("substr(c.date_published, 1, 4) >= :year_from")
+        where.append("substr(c.date_published, 1, 4) >= %(year_from)s")
         params["year_from"] = str(year_from)
     if year_to:
-        where.append("substr(c.date_published, 1, 4) <= :year_to")
+        where.append("substr(c.date_published, 1, 4) <= %(year_to)s")
         params["year_to"] = str(year_to)
     if psr_only:
         where.append("c.psr_basis IS NOT NULL")
+    if q:
+        # BETA-040: case-insensitive substring over the two names a reader
+        # recognises a notice by. On PostgreSQL this is ILIKE, which the
+        # pg_trgm GIN indexes on buyer_name / supplier_name_raw (migration
+        # 0069) turn into an index scan; on SQLite it is LIKE, whose ASCII
+        # case-folding is enough and whose plan is the documented
+        # sequential-scan fallback that same migration describes. A caller's
+        # `%` and `_` are escaped so the term cannot act as a wildcard.
+        op = "ILIKE" if ilike else "LIKE"
+        term = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params["contract_q"] = f"%{term}%"
+        where.append(
+            f"(c.buyer_name {op} %(contract_q)s ESCAPE '\\' "
+            f"OR c.supplier_name_raw {op} %(contract_q)s ESCAPE '\\')")
+    if since_retrieved_at:
+        # A plain string comparison, like the year bounds above: retrieved_at
+        # is an ISO-8601 timestamp and sorts lexically. Lets a reader ask
+        # "notices this warehouse has seen since <date>" and get a result set
+        # a shared link reproduces.
+        where.append("c.retrieved_at >= %(since_retrieved_at)s")
+        params["since_retrieved_at"] = since_retrieved_at
     return (f" WHERE {' AND '.join(where)}" if where else ""), params
 
 
 def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=None,
-               year_from=None, year_to=None, psr_only=False, limit=500) -> dict:
+               year_from=None, year_to=None, psr_only=False, q=None,
+               since_retrieved_at=None, limit=500, offset=0) -> dict:
     _public(["contracts", "supplier_aliases", "providers"])
     clause, params = _contract_filters(
-        provider_key, buyer_ons_code, year_from, year_to, psr_only)
+        provider_key, buyer_ons_code, year_from, year_to, psr_only,
+        q=q, since_retrieved_at=since_retrieved_at,
+        ilike=True)
 
     totals = _one(conn, f"""
         SELECT COUNT(*) AS total,
@@ -782,13 +1438,32 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         GROUP BY c.buyer_name, c.buyer_ons_code
         ORDER BY value_gbp DESC LIMIT 25""", params)
 
-    notices = _rows(conn, _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT :limit",
-                     {**params, "limit": max(1, min(int(limit), 5000))})
+    page_limit = max(1, min(int(limit), 5000))
+    page_offset = max(0, int(offset))
+    notices = _rows(
+        conn,
+        _NOTICE_SELECT.format(clause=clause) + "\n        LIMIT %(limit)s OFFSET %(offset)s",
+        {**params, "limit": page_limit, "offset": page_offset})
     _add_notice_links(notices)
+
+    # The overview's "largest notices" list, narrowed to notices matched to a
+    # tracked provider by exact supplier-name -- otherwise the largest values
+    # in the corpus are dominated by cross-government framework notices with
+    # no provider attached at all, which is not a useful "biggest deal we
+    # found" list for the campaign.
+    largest_matched_to_provider = _rows(conn, f"""
+        SELECT c.notice_id, c.buyer_name, c.title, c.value_core, c.source_url,
+               sa.canonical_name
+        FROM contracts c
+        JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
+        {clause}
+        {'AND' if clause else 'WHERE'} c.value_core IS NOT NULL
+        ORDER BY c.value_core DESC LIMIT 5""", params)
 
     return {
         **totals,
         "value_concentration": _value_concentration(conn, clause, params),
+        "largest_matched_to_provider": largest_matched_to_provider,
         "matched_to_provider": _one(conn, f"""
             SELECT COUNT(*) AS matched FROM contracts c{clause}
             {'AND' if clause else 'WHERE'} c.supplier_name_raw IN
@@ -804,6 +1479,16 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
         "ending_soon": ending_soon(conn, clause, params),
         "top_buyers": top_buyers,
         "notices": notices,
+        # BETA-040: what window of the matching set `notices` is, so the page
+        # can offer "show more" and a reader can tell a short list from a
+        # complete one. `total` above is the count over the same filters.
+        "page": {
+            "limit": page_limit,
+            "offset": page_offset,
+            "returned": len(notices),
+            "q": q or None,
+            "since_retrieved_at": since_retrieved_at or None,
+        },
         "caveats": {
             "value": CAVEATS["contract_value"],
             "value_sum": CAVEATS["contract_value_sum"],
@@ -816,7 +1501,8 @@ def contracts(conn: sqlite3.Connection, *, provider_key=None, buyer_ons_code=Non
 
 def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
                           buyer_ons_code=None, year_from=None, year_to=None,
-                          psr_only=False, batch: int = 2000
+                          psr_only=False, q=None, since_retrieved_at=None,
+                          batch: int = 2000
                           ) -> tuple[int, Iterator[dict]]:
     """Every notice matching these filters, counted first and then streamed.
 
@@ -840,7 +1526,9 @@ def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
     """
     _public(["contracts", "supplier_aliases"])
     clause, params = _contract_filters(
-        provider_key, buyer_ons_code, year_from, year_to, psr_only)
+        provider_key, buyer_ons_code, year_from, year_to, psr_only,
+        q=q, since_retrieved_at=since_retrieved_at,
+        ilike=True)
     total = _one(conn, f"SELECT COUNT(*) AS n FROM contracts c{clause}",
                   params).get("n", 0)
 
@@ -858,6 +1546,133 @@ def all_contract_notices(conn: sqlite3.Connection, *, provider_key=None,
             cursor.close()
 
     return total, rows()
+
+
+# OCDS release tags -> the lifecycle stage they name. The stage a notice
+# belongs to is the one its own `tag` declares (stored in
+# `contracts.notice_type` as a comma-joined string by m01) — this view never
+# infers a stage from the absence of another.
+_OCDS_STAGE: dict[str, str] = {
+    "planning": "planning",
+    "tender": "tender", "tenderAmendment": "tender", "tenderUpdate": "tender",
+    "tenderCancellation": "tender",
+    "award": "award", "awardUpdate": "award", "awardCancellation": "award",
+    "contract": "contract", "contractUpdate": "contract",
+    "contractAmendment": "amendment",
+    "contractTermination": "termination",
+    "implementation": "implementation", "implementationUpdate": "implementation",
+}
+# Display / lifecycle order.
+_STAGE_ORDER: tuple[str, ...] = (
+    "planning", "tender", "award", "contract", "amendment", "termination",
+    "implementation", "other")
+# Classification order: when a notice carries tags mapping to more than one
+# stage, the most specific / latest one wins — a `contractAmendment` also
+# tagged `contract` is an amendment.
+_STAGE_PRECEDENCE: tuple[str, ...] = (
+    "termination", "amendment", "implementation", "contract", "award",
+    "tender", "planning", "other")
+
+
+def _stage_of(notice_type: str | None) -> tuple[str, list[str]]:
+    """The lifecycle stage a notice belongs to, and its raw OCDS tags.
+
+    A notice can carry several tags; `_STAGE_PRECEDENCE` picks the most
+    specific. An unrecognised or absent tag is `other` — surfaced, not dropped.
+    """
+    tags = [t.strip() for t in (notice_type or "").split(",") if t.strip()]
+    stages = {_OCDS_STAGE[t] for t in tags if t in _OCDS_STAGE}
+    for candidate in _STAGE_PRECEDENCE:
+        if candidate in stages:
+            return candidate, tags
+    return "other", tags
+
+
+def contract_process(conn: sqlite3.Connection, ocid: str) -> dict:
+    """The notices that share one OCID, grouped into published lifecycle
+    stages (BETA-050).
+
+    Deterministic and additive: it reads `contracts` rows for `ocid`, buckets
+    each by the stage its own OCDS tag names, and returns them ordered by
+    publication date within each stage. It computes no completion, renewal,
+    performance or continuity — see `CAVEATS["contract_process"]`.
+    """
+    _public(["contracts", "supplier_aliases"])
+
+    rows = _rows(conn, """
+        SELECT c.notice_id, c.supplier_id, c.notice_type, c.notice_web_url,
+               c.buyer_name, c.buyer_ons_code, c.supplier_name_raw,
+               c.title, c.description, c.value_core, c.value_max, c.currency,
+               c.date_published, c.date_start, c.date_end, c.procedure_type,
+               c.source_url, c.retrieved_at, c.source_system,
+               CASE WHEN c.supplier_name_raw IN
+                    (SELECT alias_raw FROM supplier_aliases) THEN 1 ELSE 0 END
+                    AS supplier_is_tracked
+        FROM contracts c
+        WHERE c.ocid = %(ocid)s
+        ORDER BY c.date_published, c.notice_id, c.supplier_id""",
+        {"ocid": ocid})
+    if not rows:
+        raise QueryError(f"No contract notices for OCID {ocid!r}.")
+
+    # One entry per notice_id; a multi-supplier award is several rows.
+    notices: dict[str, dict] = {}
+    for row in rows:
+        stage, tags = _stage_of(row["notice_type"])
+        entry = notices.setdefault(row["notice_id"], {
+            "notice_id": row["notice_id"],
+            "stage": stage,
+            "ocds_tags": tags,
+            "title": row["title"],
+            "notice_type_raw": row["notice_type"],
+            "date_published": row["date_published"],
+            "date_start": row["date_start"],
+            "date_end": row["date_end"],
+            "procedure_type": row["procedure_type"],
+            "value_core": row["value_core"],
+            "value_max": row["value_max"],
+            "currency": row["currency"],
+            "buyer_name": row["buyer_name"],
+            "buyer_ons_code": row["buyer_ons_code"],
+            "source_url": row["source_url"],
+            "retrieved_at": row["retrieved_at"],
+            "notice_web_url": row["notice_web_url"] or notice_page_url(
+                row["source_system"], row["notice_id"]),
+            "suppliers": [],
+        })
+        if row["supplier_name_raw"]:
+            entry["suppliers"].append({
+                "name": row["supplier_name_raw"],
+                "is_tracked_provider": bool(row["supplier_is_tracked"]),
+            })
+
+    ordered = sorted(
+        notices.values(),
+        key=lambda n: (n["date_published"] or "", n["notice_id"]))
+    by_stage: dict[str, list[dict]] = {}
+    for notice in ordered:
+        by_stage.setdefault(notice["stage"], []).append(notice)
+
+    stages = [
+        {"stage": name, "present": name in by_stage,
+         "notices": by_stage.get(name, [])}
+        for name in _STAGE_ORDER
+    ]
+    published_at = [n["date_published"] for n in ordered if n["date_published"]]
+    buyer = ordered[0]
+    return {
+        "ocid": ocid,
+        "buyer": {"name": buyer["buyer_name"],
+                   "ons_code": buyer["buyer_ons_code"]},
+        "stage_order": list(_STAGE_ORDER),
+        "stages": stages,
+        "notice_count": len(ordered),
+        "date_range": {
+            "earliest": min(published_at) if published_at else None,
+            "latest": max(published_at) if published_at else None,
+        },
+        "caveat": CAVEATS["contract_process"],
+    }
 
 
 def _add_notice_links(notices: list[dict]) -> None:
@@ -958,9 +1773,180 @@ def _median_value(conn, clause: str, params: dict) -> float | None:
 # --- pay ----------------------------------------------------------------------
 
 
+# The workforce pay explorer (BETA-070). A closed registry: each source group
+# names the response arrays it owns, the role-text field to match a `role`
+# filter against in each, and the pay units it can legitimately carry. The
+# groups are never summed or ranked against one another — this is an index
+# over unlike evidence, not a composite. `role`/`pay_unit`/`source` narrow
+# what is returned; they add nothing and combine nothing.
+PAY_SOURCE_GROUPS = {
+    "indicative_wage": {
+        "label": "Indicative wage",
+        # `arrays` is everything the group owns and every `source`/`role`/
+        # `pay_unit` filter narrows; `primary` is the discrete-evidence
+        # array(s) whose length the explorer's group count reports, so a
+        # derived chart aggregate does not inflate the number.
+        "arrays": ("charity_wage_series",),
+        "primary": ("charity_wage_series",),
+        "role_fields": {},                      # no role dimension
+        "units": ("per employee, per year",),
+    },
+    "advertised_roles": {
+        "label": "Advertised roles",
+        "arrays": ("nhs_job_adverts", "nhs_job_by_band", "repeat_advertised_roles"),
+        "primary": ("nhs_job_adverts",),
+        "role_fields": {
+            "nhs_job_adverts": ("job_title",),
+            "repeat_advertised_roles": ("job_title_normalised",),
+        },
+        "units": ("annual", "hourly"),
+    },
+    "published_statutory": {
+        "label": "Published & statutory pay",
+        "arrays": ("provider_published_pay", "statutory_pay_rates",
+                   "living_wage_accreditations", "gender_pay_gap_reports"),
+        "primary": ("provider_published_pay", "statutory_pay_rates",
+                    "living_wage_accreditations", "gender_pay_gap_reports"),
+        "role_fields": {
+            "provider_published_pay": ("section", "mention_text"),
+            "statutory_pay_rates": ("band_role", "band_label"),
+        },
+        "units": ("hourly", "percent"),
+    },
+    "workforce_census": {
+        "label": "Workforce census",
+        "arrays": ("workforce_census",),
+        "primary": ("workforce_census",),
+        "role_fields": {"workforce_census": ("workforce_segment", "metric")},
+        "units": ("varies by metric",),
+    },
+    "external_comparators": {
+        "label": "External comparators",
+        "arrays": ("ons_ashe_observations", "skills_for_care_estimates"),
+        "primary": ("ons_ashe_observations", "skills_for_care_estimates"),
+        "role_fields": {
+            "ons_ashe_observations": ("dimension_label",),
+            "skills_for_care_estimates": ("job_role", "job_role_group"),
+        },
+        "units": ("hourly", "annual"),
+    },
+}
+
+PAY_UNITS = ("hourly", "annual", "other")
+
+# Which pay unit a row of a given array carries, as a callable. `None` means
+# the array has no single unit to filter on and a `pay_unit` filter drops it.
+_PAY_UNIT_OF = {
+    "nhs_job_adverts": lambda r: {"year": "annual", "annum": "annual",
+                                   "hour": "hourly"}.get(
+        (r.get("salary_period") or "").lower(), "other"),
+    "provider_published_pay": lambda r: {"year": "annual", "annum": "annual",
+                                          "hour": "hourly"}.get(
+        (r.get("salary_period") or "").lower(), "other"),
+    "statutory_pay_rates": lambda r: "hourly",
+    "ons_ashe_observations": lambda r: "hourly"
+        if "hour" in (r.get("unit_of_measure") or "").lower() else "annual",
+    "skills_for_care_estimates": lambda r: "hourly"
+        if r.get("hourly_pay") is not None else "annual",
+    "charity_wage_series": lambda r: "annual",
+}
+
+
+def _pay_role_match(row: dict, fields: tuple[str, ...], term: str) -> bool:
+    term = term.lower()
+    return any(term in str(row.get(f) or "").lower() for f in fields)
+
+
+def _apply_pay_filters(payload: dict, *, role: str | None, source: str | None,
+                        pay_unit: str | None) -> None:
+    """Narrow the already-built pay arrays in place (BETA-070).
+
+    Order does not matter: each filter is a row predicate on one array, never
+    a join or a rollup across arrays. A group the `source` filter excludes is
+    emptied, not removed, so the payload shape is unchanged.
+    """
+    active_arrays: set[str] = set()
+    for key, group in PAY_SOURCE_GROUPS.items():
+        if source and key != source:
+            for name in group["arrays"]:
+                if name in payload:
+                    payload[name] = []
+            continue
+        active_arrays.update(group["arrays"])
+
+    for key, group in PAY_SOURCE_GROUPS.items():
+        if source and key != source:
+            continue
+        for name in group["arrays"]:
+            rows = payload.get(name)
+            if not isinstance(rows, list) or not rows:
+                continue
+            if role:
+                fields = group["role_fields"].get(name)
+                rows = [r for r in rows if fields and _pay_role_match(r, fields, role)] \
+                    if fields else []
+            if pay_unit:
+                unit_of = _PAY_UNIT_OF.get(name)
+                rows = [r for r in rows if unit_of and unit_of(r) == pay_unit] \
+                    if unit_of else []
+            payload[name] = rows
+
+
+def _pay_source_groups(payload: dict) -> list[dict]:
+    """One entry per source group: label, row count, units, caveat keys.
+
+    The count is the sum of the group's array lengths *after* filtering — an
+    index the explorer can show, not a figure to quote. Groups stay separate.
+    """
+    out = []
+    for key, group in PAY_SOURCE_GROUPS.items():
+        count = sum(len(payload.get(name) or [])
+                    for name in group["primary"] if isinstance(payload.get(name), list))
+        out.append({
+            "key": key,
+            "label": group["label"],
+            "count": count,
+            "units": list(group["units"]),
+            "arrays": list(group["arrays"]),
+        })
+    return out
+
+
+def _pay_filters_available(payload: dict) -> dict:
+    """Distinct role labels and units present in the current payload, so the
+    explorer's selects are populated from data rather than a hard-coded list
+    that drifts."""
+    roles: set[str] = set()
+    for group in PAY_SOURCE_GROUPS.values():
+        for name, fields in group["role_fields"].items():
+            for row in payload.get(name) or []:
+                for f in fields:
+                    value = str(row.get(f) or "").strip()
+                    if value:
+                        roles.add(value)
+    return {
+        "roles": sorted(roles)[:200],
+        "pay_units": list(PAY_UNITS),
+        "sources": [{"key": k, "label": v["label"]}
+                    for k, v in PAY_SOURCE_GROUPS.items()],
+    }
+
+
 def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
-         year_to=None) -> dict:
-    """The campaign's central evidence, and the most caveat-heavy payload here."""
+         year_to=None, role=None, source=None, pay_unit=None) -> dict:
+    """The campaign's central evidence, and the most caveat-heavy payload here.
+
+    BETA-070: `role` (case-insensitive substring on each source's role text),
+    `source` (one closed `PAY_SOURCE_GROUPS` key) and `pay_unit` (`hourly` /
+    `annual` / `other`) narrow the returned rows. They never combine sources
+    or produce a rate, ratio or score — the groups remain separate arrays.
+    """
+    if source is not None and source not in PAY_SOURCE_GROUPS:
+        raise QueryError(f"unknown pay source {source!r}")
+    if pay_unit is not None and pay_unit not in PAY_UNITS:
+        raise QueryError(f"pay_unit must be one of {', '.join(PAY_UNITS)}")
+    role = (role or "").strip() or None
+
     _public(["v_wage_per_employee", "charity_financials", "provider_identifiers",
               "providers", "nhs_job_adverts", "v_nhs_repeat_advertised_roles",
               "workforce_census_metrics", "statutory_pay_rates",
@@ -972,13 +1958,13 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
     if provider_key:
         wage_where.append(
             "w.charity_number IN (SELECT identifier FROM provider_identifiers "
-            "WHERE provider_key = :provider_key AND scheme = 'charity_number')")
+            "WHERE provider_key = %(provider_key)s AND scheme = 'charity_number')")
         wage_params["provider_key"] = provider_key
     if year_from:
-        wage_where.append("substr(w.financial_year_end, 1, 4) >= :year_from")
+        wage_where.append("substr(w.financial_year_end, 1, 4) >= %(year_from)s")
         wage_params["year_from"] = str(year_from)
     if year_to:
-        wage_where.append("substr(w.financial_year_end, 1, 4) <= :year_to")
+        wage_where.append("substr(w.financial_year_end, 1, 4) <= %(year_to)s")
         wage_params["year_to"] = str(year_to)
     wage_clause = f" WHERE {' AND '.join(wage_where)}" if wage_where else ""
 
@@ -995,7 +1981,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
 
     job_where, job_params = [], {}
     if provider_key:
-        job_where.append("n.provider_key = :provider_key")
+        job_where.append("n.provider_key = %(provider_key)s")
         job_params["provider_key"] = provider_key
     job_clause = f" WHERE {' AND '.join(job_where)}" if job_where else ""
 
@@ -1030,7 +2016,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
     try:
         repeat_roles = _rows(conn, f"""
             SELECT r.* FROM v_nhs_repeat_advertised_roles r
-            {' WHERE r.provider_key = :provider_key' if provider_key else ''}
+            {' WHERE r.provider_key = %(provider_key)s' if provider_key else ''}
             ORDER BY r.advert_count DESC""", job_params)
     except QueryError:
         repeat_roles = []
@@ -1061,7 +2047,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                l.payload_sha256
         FROM living_wage_accreditations l
         LEFT JOIN providers p ON p.provider_key = l.provider_key
-        {'WHERE l.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE l.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY p.canonical_name, l.searched_variant""", provider_params)
     gender_pay_gap = _rows(conn, f"""
         SELECT g.provider_key, p.canonical_name, g.reporting_year,
@@ -1073,7 +2059,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                g.source_system, g.payload_sha256
         FROM gender_pay_gap_reports g
         LEFT JOIN providers p ON p.provider_key = g.provider_key
-        {'WHERE g.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE g.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY g.reporting_year DESC, p.canonical_name, g.employer_name""",
         provider_params)
     provider_published_pay = _rows(conn, f"""
@@ -1083,7 +2069,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
                m.retrieved_at, m.source_system, m.payload_sha256
         FROM provider_pay_mentions m
         LEFT JOIN providers p ON p.provider_key = m.provider_key
-        {'WHERE m.provider_key = :provider_key' if provider_key else ''}
+        {'WHERE m.provider_key = %(provider_key)s' if provider_key else ''}
         ORDER BY p.canonical_name, m.page_url, m.mention_index""", provider_params)
     ashe = _rows(conn, """
         SELECT dataset_id, dataset_title, edition, version, dimension_kind,
@@ -1102,7 +2088,7 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
         ORDER BY year DESC, sector, service, job_role_group, job_role
         LIMIT 500""")
 
-    return {
+    payload = {
         "charity_wage_series": charity_wage_series,
         "nhs_job_adverts": adverts,
         "nhs_job_by_band": by_band,
@@ -1136,6 +2122,23 @@ def pay(conn: sqlite3.Connection, *, provider_key=None, year_from=None,
         },
     }
 
+    # BETA-070: the role picker is populated from every role present at the
+    # current provider/year scope, before the role/unit filters narrow the
+    # rows — otherwise choosing a role would empty its own picker.
+    payload["filters_available"] = _pay_filters_available(payload)
+    # Then narrow the arrays to the requested role / source group / pay unit
+    # and attach the per-group index. `source_groups` counts are computed from
+    # the final arrays, so a filtered view's counts match what it shows.
+    # `census_*` counts above describe the unfiltered census and stay the
+    # page's caveat basis.
+    _apply_pay_filters(payload, role=role, source=source, pay_unit=pay_unit)
+    payload["source_groups"] = _pay_source_groups(payload)
+    payload["filters_applied"] = {
+        "role": role, "source": source, "pay_unit": pay_unit,
+        "provider_key": provider_key, "year_from": year_from, "year_to": year_to,
+    }
+    return payload
+
 
 def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
                   provider_key=None, limit: int = 500) -> dict:
@@ -1144,10 +2147,10 @@ def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
 
     where, params = [], {}
     if authority_ons_code:
-        where.append("s.authority_ons_code = :authority_ons_code")
+        where.append("s.authority_ons_code = %(authority_ons_code)s")
         params["authority_ons_code"] = authority_ons_code
     if provider_key:
-        where.append("s.provider_key = :provider_key")
+        where.append("s.provider_key = %(provider_key)s")
         params["provider_key"] = provider_key
     clause = f" WHERE {' AND '.join(where)}" if where else ""
     total = _one(conn, f"SELECT COUNT(*) AS n FROM council_spend s{clause}", params).get("n", 0)
@@ -1161,11 +2164,11 @@ def council_spend(conn: sqlite3.Connection, *, authority_ons_code=None,
         LEFT JOIN providers p ON p.provider_key = s.provider_key
         {clause}
         ORDER BY s.retrieved_at DESC, s.authority_ons_code, s.file_url, s.row_index
-        LIMIT :limit""", {**params, "limit": limit})
+        LIMIT %(limit)s""", {**params, "limit": limit})
 
     file_where, file_params = [], {}
     if authority_ons_code:
-        file_where.append("f.authority_ons_code = :authority_ons_code")
+        file_where.append("f.authority_ons_code = %(authority_ons_code)s")
         file_params["authority_ons_code"] = authority_ons_code
     file_clause = f" WHERE {' AND '.join(file_where)}" if file_where else ""
     files = _rows(conn, f"""
@@ -1225,6 +2228,81 @@ GEOGRAPHY_METRICS = {
 }
 
 
+# --- unified evidence atlas (BETA-078) ------------------------------------
+#
+# One closed registry of every layer the atlas can show. Exactly one is drawn
+# at a time — there is no overlay, no arithmetic between layers and no
+# composite score. Each entry carries everything a client needs to render the
+# layer and its accessible table without knowing anything else about it:
+# which existing endpoint serves it, the legend, the unit, the caveat, the
+# GeoJSON property that keys a feature, and the table columns.
+#
+# `kind`:
+#   "choropleth" — an authority fill from /api/v1/geography?metric=<param>
+#   "points"     — markers/clusters from /api/v1/layers, layer <layer>
+#   "authority"  — an authority fill from /api/v1/layers, layer <layer>
+
+def _atlas_choropleth(key: str, legend: str, caveat: str) -> dict:
+    meta = GEOGRAPHY_METRICS[key]
+    return {
+        "key": key, "label": meta["label"], "kind": "choropleth",
+        "endpoint": "geography", "param": {"metric": key}, "unit": meta["unit"],
+        "legend": legend, "geometry_key": "ons_code", "caveat": caveat,
+        "table_columns": ["authority_name", "region", "value"],
+    }
+
+
+def atlas_layers() -> dict:
+    """The closed atlas layer registry (BETA-078). No DB read: this is a
+    manifest the geography workspace uses to offer one layer at a time."""
+    layers = [
+        _atlas_choropleth(
+            "grant_drug_alcohol", "Darker = larger ring-fenced allocation",
+            "The ring-fenced figure is part of the total grant, not additional "
+            "to it. It is never summed with or differenced from the total."),
+        _atlas_choropleth(
+            "grant_total", "Darker = larger total allocation",
+            CAVEATS["grant_not_budget"]),
+        _atlas_choropleth(
+            "grant_per_head", "Darker = higher allocation per head",
+            "Per-head figures use the grant's own published denominator; they "
+            "are not recomputed here."),
+        _atlas_choropleth(
+            "budget_public_health", "Darker = larger budgeted spend",
+            CAVEATS["budget_detail"]),
+        _atlas_choropleth(
+            "treatment_numbers", "Darker = more people in treatment",
+            "A published service-demand figure, not a workforce or need "
+            "figure, and never divided by one."),
+        _atlas_choropleth(
+            "contract_value", "Darker = higher awarded notice value",
+            CAVEATS["contract_value"]),
+        {
+            "key": "cqc_locations", "label": "CQC-registered locations",
+            "kind": "points", "endpoint": "layers", "layer": "cqc_locations",
+            "unit": "one marker per registered location",
+            "legend": "Clusters show a count; a single marker is one location",
+            "geometry_key": "location_id",
+            "table_columns": ["location_name", "region", "overall_rating"],
+            "caveat": " ".join(LAYER_CAVEATS["cqc_locations"]),
+        },
+        {
+            "key": "coverage", "label": "What evidence is held here",
+            "kind": "authority", "endpoint": "layers", "layer": "coverage",
+            "unit": "count of evidence kinds held",
+            "legend": "Darker = more kinds of evidence held for this authority",
+            "geometry_key": "ons_code",
+            "table_columns": ["authority_name", "kinds_held"],
+            "caveat": CAVEATS["coverage_absence"],
+        },
+    ]
+    return {
+        "layers": layers,
+        "note": "Exactly one layer is shown at a time. The atlas performs no "
+                "arithmetic between layers and produces no composite score.",
+    }
+
+
 def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> dict:
     """One value per authority for the choropleth.
 
@@ -1254,7 +2332,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
         year = available[0] if available else None
 
     if "grant_type" in spec:
-        year_clause = " AND g.financial_year = :year" if year else ""
+        year_clause = " AND g.financial_year = %(year)s" if year else ""
         if year:
             params["year"] = year
         params["grant_type"] = spec["grant_type"]
@@ -1266,7 +2344,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
                    g.allocation_status
             FROM public_health_grants g
             JOIN authorities a ON a.ons_code = g.ons_code
-            WHERE g.grant_type = :grant_type{year_clause}
+            WHERE g.grant_type = %(grant_type)s{year_clause}
             GROUP BY g.ons_code, a.name, a.region, g.financial_year,
                      g.allocation_status
             ORDER BY value DESC"""
@@ -1276,11 +2354,11 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
         status = _rows(conn, f"""
             SELECT g.financial_year, g.allocation_status, COUNT(*) AS n
             FROM public_health_grants g
-            WHERE g.grant_type = :grant_type{year_clause}
+            WHERE g.grant_type = %(grant_type)s{year_clause}
             GROUP BY g.financial_year, g.allocation_status
             ORDER BY g.financial_year""", params)
     elif metric == "budget_public_health":
-        year_clause = " AND b.financial_year = :year" if year else ""
+        year_clause = " AND b.financial_year = %(year)s" if year else ""
         if year:
             params["year"] = year
         sql = f"""
@@ -1292,7 +2370,7 @@ def geography(conn: sqlite3.Connection, *, metric="grant_total", year=None) -> d
             ORDER BY value DESC"""
     elif metric == "treatment_numbers":
         caveat = CAVEATS["treatment_not_need"]
-        year_clause = " AND f.time_period = :year" if year else ""
+        year_clause = " AND f.time_period = %(year)s" if year else ""
         if year:
             params["year"] = year
         sql = f"""
@@ -1340,7 +2418,7 @@ def geography_years(conn: sqlite3.Connection, metric: str) -> list[str]:
     spec = GEOGRAPHY_METRICS.get(metric, {})
     if "grant_type" in spec:
         rows = _rows(conn, "SELECT DISTINCT financial_year AS y FROM public_health_grants "
-                            "WHERE grant_type = ? ORDER BY y DESC", (spec["grant_type"],))
+                            "WHERE grant_type = %s ORDER BY y DESC", (spec["grant_type"],))
     elif metric == "budget_public_health":
         rows = _rows(conn, "SELECT DISTINCT financial_year AS y "
                             "FROM v_la_public_health_budget ORDER BY y DESC")
@@ -1409,13 +2487,13 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
 
     ind_where, params = [], {}
     if indicator_id:
-        ind_where.append("i.indicator_id = :indicator_id")
+        ind_where.append("i.indicator_id = %(indicator_id)s")
         params["indicator_id"] = int(indicator_id)
     if topic:
-        ind_where.append("i.topic = :topic")
+        ind_where.append("i.topic = %(topic)s")
         params["topic"] = topic
     if substance:
-        ind_where.append("i.substance = :substance")
+        ind_where.append("i.substance = %(substance)s")
         params["substance"] = substance
     ind_clause = f" WHERE {' AND '.join(ind_where)}" if ind_where else ""
 
@@ -1430,12 +2508,12 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
                  "caveat": CAVEATS["treatment_not_need"]}
 
     ids = [i["indicator_id"] for i in indicators]
-    placeholders = ", ".join(f":i{n}" for n in range(len(ids)))
+    placeholders = ", ".join(f"%(i{n})s" for n in range(len(ids)))
     value_params = {f"i{n}": v for n, v in enumerate(ids)}
 
     area_clause = ""
     if ons_code:
-        area_clause = " AND f.ons_code = :ons_code"
+        area_clause = " AND f.ons_code = %(ons_code)s"
         value_params["ons_code"] = ons_code
 
     series = _rows(conn, f"""
@@ -1459,6 +2537,101 @@ def fingertips(conn: sqlite3.Connection, *, indicator_id=None, topic=None,
         "indicators": indicators,
         "series": series,
         "england_series": england,
+        "caveat": CAVEATS["treatment_not_need"],
+    }
+
+
+def treatment_metrics(conn: sqlite3.Connection) -> dict:
+    """A catalogue of treatment metrics, shown before a chart is drawn
+    (BETA-075).
+
+    Definition, unit, whether a 95% CI is published, the exact periods held,
+    authority and England coverage, and provenance — computed from the same
+    tables the treatment page charts, so a catalogue row cannot claim coverage
+    the chart does not have. Missing periods stay missing: `periods` is exactly
+    what was published for that metric, ordered, with no gap filled or zeroed.
+    """
+    _public(["fingertips_indicators", "fingertips_la_values",
+              "ndtms_la_statistics"])
+
+    metrics: list[dict] = []
+
+    indicators = _rows(conn, """
+        SELECT indicator_id, indicator_name, topic, substance, unit,
+               definition, source_url, retrieved_at
+        FROM fingertips_indicators
+        ORDER BY topic, indicator_name""")
+    for ind in indicators:
+        cov = _one(conn, """
+            SELECT COUNT(DISTINCT CASE WHEN area_level = 'local_authority'
+                                       THEN ons_code END) AS authority_count,
+                   MAX(CASE WHEN area_level = 'england' THEN 1 ELSE 0 END) AS england,
+                   MAX(CASE WHEN lower_ci_95 IS NOT NULL THEN 1 ELSE 0 END) AS has_ci,
+                   MAX(retrieved_at) AS retrieved_at
+            FROM fingertips_la_values WHERE indicator_id = %s""",
+            (ind["indicator_id"],))
+        periods = [r["time_period"] for r in _rows(conn, """
+            SELECT DISTINCT time_period, time_period_sortable
+            FROM fingertips_la_values WHERE indicator_id = %s
+            ORDER BY time_period_sortable""", (ind["indicator_id"],))]
+        metrics.append({
+            "source": "fingertips",
+            "key": f"fingertips:{ind['indicator_id']}",
+            "indicator_id": ind["indicator_id"],
+            "name": ind["indicator_name"],
+            "topic": ind["topic"],
+            "substance": ind["substance"],
+            "unit": ind["unit"],
+            "definition": ind["definition"],
+            "has_confidence_interval": bool(cov.get("has_ci")),
+            "periods": periods,
+            "period_count": len(periods),
+            "period_range": [periods[0], periods[-1]] if periods else None,
+            "authority_count": cov.get("authority_count") or 0,
+            "england_available": bool(cov.get("england")),
+            "source_url": ind["source_url"],
+            "retrieved_at": cov.get("retrieved_at") or ind["retrieved_at"],
+        })
+
+    # NDTMS: one catalogue row per source table seen, labelled from the
+    # edition-independent map. Every NDTMS figure is a modelled estimate
+    # published with a 95% CI, so `has_confidence_interval` is always true.
+    ndtms_refs = _rows(conn, """
+        SELECT table_ref,
+               COUNT(DISTINCT ons_code) AS authority_count,
+               COUNT(DISTINCT time_period) AS period_count,
+               MIN(time_period) AS first_period,
+               MAX(time_period) AS last_period,
+               MAX(retrieved_at) AS retrieved_at,
+               MAX(source_url) AS source_url
+        FROM ndtms_la_statistics
+        GROUP BY table_ref ORDER BY table_ref""")
+    for r in ndtms_refs:
+        ref = r["table_ref"] or ""
+        prevalence = ref in ("Table_2_1", "2_1_Drug_prevalence", "Table_2_2",
+                              "2_2_Alcohol_prevalence") or "prevalence" in ref.lower()
+        metrics.append({
+            "source": "ndtms",
+            "key": f"ndtms:{ref}",
+            "name": NDTMS_TABLES.get(ref, ref or "NDTMS estimate"),
+            "topic": "prevalence" if prevalence else "harm",
+            "substance": None,
+            "unit": "modelled estimate with 95% CI",
+            "definition": "NDTMS modelled local-authority estimate, published "
+                          "by OHID with a 95% confidence interval.",
+            "has_confidence_interval": True,
+            "periods": None,
+            "period_count": r["period_count"] or 0,
+            "period_range": [r["first_period"], r["last_period"]],
+            "authority_count": r["authority_count"] or 0,
+            "england_available": False,
+            "source_url": r["source_url"],
+            "retrieved_at": r["retrieved_at"],
+        })
+
+    return {
+        "metrics": metrics,
+        "count": len(metrics),
         "caveat": CAVEATS["treatment_not_need"],
     }
 
@@ -1657,10 +2830,10 @@ def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
     if not ons_code:
         return {**payload, "estimates": [], "other_rows": [], "authority": None}
 
-    where = ["s.ons_code = :ons_code"]
+    where = ["s.ons_code = %(ons_code)s"]
     params: dict = {"ons_code": ons_code}
     if table_ref:
-        where.append("s.table_ref = :table_ref")
+        where.append("s.table_ref = %(table_ref)s")
         params["table_ref"] = table_ref
 
     rows = _rows(conn, f"""
@@ -1676,7 +2849,7 @@ def ndtms(conn: sqlite3.Connection, *, ons_code=None, table_ref=None) -> dict:
     return {
         **payload,
         "authority": _one(conn, "SELECT ons_code, name, region FROM authorities "
-                                 "WHERE ons_code = ?", (ons_code,)),
+                                 "WHERE ons_code = %s", (ons_code,)),
         "estimates": estimates,
         "other_rows": other,
     }
@@ -1776,6 +2949,426 @@ def _sar_payload(conn: sqlite3.Connection) -> dict:
     }
 
 
+def safety(conn: sqlite3.Connection) -> dict:
+    """HSE enforcement notices attributed to a tracked provider (BETA-051).
+
+    Only `provider_key IS NOT NULL` rows — an exact tracked-name match, made
+    by `m33_hse_notices` — reach here; notices served on individuals were
+    excluded at collection. Every field is the register's own text, and the
+    published `result` (which may be an appeal decision or a withdrawal)
+    travels with each notice. Nothing here infers a compliance outcome.
+    """
+    _public(["hse_enforcement_notices", "providers"])
+
+    if not any(obj["name"] == "hse_enforcement_notices"
+               for obj in catalog.list_objects(conn)):
+        return {"notices": [], "by_provider": [], "by_type": [],
+                "total": 0, "caveat": CAVEATS["hse_notices"]}
+
+    notices = _rows(conn, """
+        SELECT h.notice_number, h.recipient_name, h.provider_key,
+               p.canonical_name AS provider_name,
+               h.notice_type, h.issuing_body, h.issue_date, h.compliance_date,
+               h.revised_compliance_date, h.result, h.industry, h.legislation,
+               h.contravention_text, h.local_authority,
+               h.source_url, h.retrieved_at
+        FROM hse_enforcement_notices h
+        LEFT JOIN providers p ON p.provider_key = h.provider_key
+        WHERE h.provider_key IS NOT NULL
+        ORDER BY h.issue_date DESC NULLS LAST, h.notice_number""")
+
+    by_provider = _rows(conn, """
+        SELECT h.provider_key, p.canonical_name AS provider_name,
+               COUNT(*) AS notice_count
+        FROM hse_enforcement_notices h
+        LEFT JOIN providers p ON p.provider_key = h.provider_key
+        WHERE h.provider_key IS NOT NULL
+        GROUP BY h.provider_key, p.canonical_name
+        ORDER BY notice_count DESC, p.canonical_name""")
+
+    by_type = _rows(conn, """
+        SELECT h.notice_type, COUNT(*) AS notice_count
+        FROM hse_enforcement_notices h
+        WHERE h.provider_key IS NOT NULL
+        GROUP BY h.notice_type ORDER BY notice_count DESC, h.notice_type""")
+
+    return {
+        "notices": notices,
+        "by_provider": by_provider,
+        "by_type": by_type,
+        "total": len(notices),
+        "caveat": CAVEATS["hse_notices"],
+    }
+
+
+# --- safety and legal evidence hub (BETA-079) ---------------------------------
+#
+# Five distinct accountability sources on one filterable chronology. They
+# encode materially different relationships and standards, so each event is
+# tagged with exactly one of these — and the four are NEVER summed, NEVER
+# treated as interchangeable, and a mention is NEVER a finding of fault:
+#
+#   addressed_to  — the document was formally sent to this organisation
+#   named_in      — the organisation is mentioned in the source text
+#   matched_to    — attributed by an exact name match in a public register
+#   regulated_by  — the organisation holds a registration/inspection record
+#
+SAFETY_LEGAL_LABELS = {
+    "addressed_to": "Addressed to — the source document was formally sent to "
+                    "this organisation.",
+    "named_in": "Named in — this organisation is mentioned in the source text. "
+                "A mention is not a finding, an allegation or a fault.",
+    "matched_to": "Matched to — attributed by an exact match of the "
+                  "organisation's name in a public register.",
+    "regulated_by": "Regulated by — this organisation holds a registration or "
+                    "inspection record with the regulator.",
+}
+
+SAFETY_LEGAL_SOURCES = ("pfd", "sar", "hse", "tribunal", "cqc")
+
+_SAFETY_LEGAL_MAX = 2000
+
+
+def safety_legal(conn: sqlite3.Connection, *, source=None, relationship=None,
+                  provider_key=None, year_from=None, year_to=None) -> dict:
+    """One filterable chronology over PFD reports, Safeguarding Adult Reviews,
+    HSE notices, employment-tribunal cases and CQC inspections (BETA-079).
+
+    Each event carries exactly one relationship label; the per-source and
+    per-relationship counts are returned separately and are never added
+    together. Personal data stays in the `restricted_` tables this does not
+    read.
+    """
+    _public(["pfd_reports", "pfd_provider_mentions", "sar_documents",
+              "sar_provider_mentions", "hse_enforcement_notices",
+              "tribunal_cases", "cqc_locations", "providers"])
+
+    present = {obj["name"] for obj in catalog.list_objects(conn)}
+    events: list[dict] = []
+
+    def keep(row: dict) -> None:
+        events.append(row)
+
+    if {"pfd_reports", "pfd_provider_mentions"} <= present:
+        for r in _rows(conn, """
+            SELECT m.mention_type, m.matched_name, m.provider_key,
+                   p.canonical_name, r.report_date, r.report_ref, r.report_url,
+                   r.coroner_area, r.source_url
+            FROM pfd_provider_mentions m
+            JOIN pfd_reports r ON r.report_ref = m.report_ref
+            LEFT JOIN providers p ON p.provider_key = m.provider_key
+            ORDER BY r.report_date DESC NULLS LAST"""):
+            keep({
+                "source": "pfd",
+                "relationship": "addressed_to"
+                    if r["mention_type"] == "recipient" else "named_in",
+                "date": r["report_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["matched_name"],
+                "entity_type": "provider",
+                "title": f"Prevention of Future Deaths report {r['report_ref']}",
+                "detail": f"Coroner area: {r['coroner_area'] or 'not recorded'}",
+                "result": None,
+                "source_url": r["report_url"] or r["source_url"],
+            })
+
+    if {"sar_documents", "sar_provider_mentions"} <= present:
+        for r in _rows(conn, """
+            SELECT m.matched_name, m.provider_key, p.canonical_name,
+                   d.document_url, d.sab_name, d.library_year
+            FROM sar_provider_mentions m
+            JOIN sar_documents d ON d.document_url = m.document_url
+            LEFT JOIN providers p ON p.provider_key = m.provider_key"""):
+            keep({
+                "source": "sar",
+                "relationship": "named_in",
+                "date": None,
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["matched_name"],
+                "entity_type": "provider",
+                "title": "Safeguarding Adult Review"
+                         + (f" — {r['sab_name']}" if r["sab_name"] else ""),
+                "detail": "National SAR Library"
+                          + (f", library year {r['library_year']}"
+                             if r["library_year"] else "")
+                          + "; no structured report date is published.",
+                "result": None,
+                "source_url": r["document_url"],
+            })
+
+    if "hse_enforcement_notices" in present:
+        for r in _rows(conn, """
+            SELECT h.notice_number, h.provider_key, p.canonical_name,
+                   h.recipient_name, h.notice_type, h.issue_date, h.result,
+                   h.source_url
+            FROM hse_enforcement_notices h
+            LEFT JOIN providers p ON p.provider_key = h.provider_key
+            WHERE h.provider_key IS NOT NULL
+            ORDER BY h.issue_date DESC NULLS LAST"""):
+            keep({
+                "source": "hse",
+                "relationship": "matched_to",
+                "date": r["issue_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["recipient_name"],
+                "entity_type": "provider",
+                "title": f"HSE {r['notice_type'] or 'enforcement'} notice {r['notice_number']}",
+                "detail": "Register text as published.",
+                # The published result may be an appeal decision or a
+                # withdrawal — it travels with the notice, never inferred.
+                "result": r["result"],
+                "source_url": r["source_url"],
+            })
+
+    if "tribunal_cases" in present:
+        for r in _rows(conn, """
+            SELECT t.case_number, t.provider_key, p.canonical_name,
+                   t.respondent_normalised, t.decision_date, t.outcome,
+                   t.outcome_confidence, t.source_url
+            FROM tribunal_cases t
+            LEFT JOIN providers p ON p.provider_key = t.provider_key
+            WHERE t.provider_key IS NOT NULL
+            ORDER BY t.decision_date DESC NULLS LAST"""):
+            keep({
+                "source": "tribunal",
+                "relationship": "named_in",
+                "date": r["decision_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["respondent_normalised"],
+                "entity_type": "provider",
+                "title": f"Employment tribunal case {r['case_number']}",
+                "detail": "A case with this organisation as a party. The "
+                          "outcome and its confidence are the source's.",
+                "result": (f"{r['outcome']} ({r['outcome_confidence']} confidence)"
+                           if r["outcome"] else None),
+                "source_url": r["source_url"],
+            })
+
+    if "cqc_locations" in present:
+        for r in _rows(conn, """
+            SELECT c.location_id, c.provider_key, p.canonical_name,
+                   c.location_name, c.last_inspection_date, c.overall_rating,
+                   c.overall_rating_date, c.source_url
+            FROM cqc_locations c
+            LEFT JOIN providers p ON p.provider_key = c.provider_key
+            WHERE c.provider_key IS NOT NULL
+              AND (c.last_inspection_date IS NOT NULL
+                   OR c.overall_rating_date IS NOT NULL)
+            ORDER BY COALESCE(c.last_inspection_date, c.overall_rating_date) DESC"""):
+            keep({
+                "source": "cqc",
+                "relationship": "regulated_by",
+                "date": r["last_inspection_date"] or r["overall_rating_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"],
+                "entity_type": "provider",
+                "title": f"CQC inspection — {r['location_name']}",
+                "detail": "A regulated location's most recent inspection. "
+                          "CQC registration covers only some service types.",
+                "result": r["overall_rating"],
+                "source_url": r["source_url"],
+            })
+
+    def year_of(value: str | None) -> str:
+        return (value or "")[:4]
+
+    if source:
+        events = [e for e in events if e["source"] == source]
+    if relationship:
+        events = [e for e in events if e["relationship"] == relationship]
+    if provider_key:
+        events = [e for e in events if e["entity_key"] == provider_key]
+    if year_from:
+        events = [e for e in events
+                  if e["date"] and year_of(e["date"]) >= str(year_from)]
+    if year_to:
+        events = [e for e in events
+                  if e["date"] and year_of(e["date"]) <= str(year_to)]
+
+    # Dated first (newest first), then the undated (SAR) at the end.
+    events.sort(key=lambda e: (e["date"] or "", ), reverse=True)
+    truncated = len(events) > _SAFETY_LEGAL_MAX
+    events = events[:_SAFETY_LEGAL_MAX]
+
+    by_source: dict[str, int] = {}
+    by_relationship: dict[str, int] = {}
+    for e in events:
+        by_source[e["source"]] = by_source.get(e["source"], 0) + 1
+        by_relationship[e["relationship"]] = \
+            by_relationship.get(e["relationship"], 0) + 1
+
+    return {
+        "events": events,
+        "truncated": truncated,
+        "counts": {"by_source": by_source, "by_relationship": by_relationship},
+        "labels": SAFETY_LEGAL_LABELS,
+        "sources": list(SAFETY_LEGAL_SOURCES),
+        "caveats": {
+            "pfd": CAVEATS["pfd_mentions"],
+            "sar": "SAR reports carry no structured date or excerpt; this "
+                   "stream is a finding aid to the National SAR Library.",
+            "hse": CAVEATS["hse_notices"],
+            "tribunal": "A tribunal case names an organisation as a party. It "
+                        "is not a finding against a named provider unless the "
+                        "decision itself says so.",
+            "cqc": "CQC registration covers only some service types; most "
+                   "community drug and alcohol provision is not CQC-registered.",
+        },
+        "note": "Five distinct evidence streams. Their counts are shown by "
+                "source and by relationship and are never added together. A "
+                "mention is never a finding of fault.",
+    }
+
+
+# The exact columns the CQC-location explorer publishes. An allowlist, not a
+# `SELECT *`: `cqc_locations` carries no personal data (registered managers
+# are in `restricted_cqc_location_contacts`, a separate table), but naming
+# the columns keeps it that way through a future ALTER.
+_CQC_LOCATION_COLUMNS = (
+    "location_id", "provider_id", "provider_key", "location_name", "postal_code",
+    "latitude", "longitude", "local_authority_raw", "local_authority_ons_code",
+    "region", "registration_status", "registration_date", "last_inspection_date",
+    "overall_rating", "overall_rating_date", "regulated_activities",
+    "service_types", "source_url", "retrieved_at",
+)
+
+_CQC_LOCATION_PAGE = 100
+_CQC_LOCATION_MAX = 500
+
+
+def cqc_locations(conn: sqlite3.Connection, *,
+                  provider_key: str | None = None,
+                  authority_ons_code: str | None = None,
+                  registration_status: str | None = None,
+                  regulated_activity: str | None = None,
+                  service_type: str | None = None,
+                  rating: str | None = None,
+                  limit: int = _CQC_LOCATION_PAGE, offset: int = 0) -> dict:
+    """CQC-registered locations of tracked providers (BETA-065).
+
+    Only `provider_key IS NOT NULL` rows — a location matched to a provider
+    this pipeline tracks. Read-only, no personal data (registered managers
+    live in `restricted_cqc_location_contacts`, never touched here). Every
+    field is CQC's own; `rating_source` names whether the rating came from
+    the API or the bulk-export fallback. This is not a service map and a
+    location count is not coverage — see the caveat.
+
+    `regulated_activity` is a contains match because CQC's activity names
+    themselves contain commas, so the comma-joined column cannot be split
+    unambiguously; `service_type` is an exact token match on the
+    (comma-separated, comma-free) gacServiceType names.
+    """
+    _public(["cqc_locations", "providers"], list(_CQC_LOCATION_COLUMNS)
+            + ["bulk_overall_rating", "bulk_overall_rating_date",
+               "bulk_rating_source_url"])
+
+    where = ["l.provider_key IS NOT NULL"]
+    binds: list = []
+    if provider_key:
+        where.append("l.provider_key = %s")
+        binds.append(provider_key)
+    if authority_ons_code:
+        where.append("l.local_authority_ons_code = %s")
+        binds.append(authority_ons_code)
+    if registration_status:
+        where.append("l.registration_status = %s")
+        binds.append(registration_status)
+    if rating:
+        where.append("COALESCE(l.overall_rating, l.bulk_overall_rating) = %s")
+        binds.append(rating)
+    if regulated_activity:
+        where.append("COALESCE(l.regulated_activities, '') LIKE %s ESCAPE '\\'")
+        binds.append(f"%{escape_like(regulated_activity)}%")
+    if service_type:
+        where.append(
+            "(',' || COALESCE(l.service_types, '') || ',') LIKE %s ESCAPE '\\'")
+        binds.append(f"%,{escape_like(service_type)},%")
+
+    clause = " AND ".join(where)
+    limit = max(1, min(int(limit), _CQC_LOCATION_MAX))
+    offset = max(0, int(offset))
+
+    cols = ", ".join(f"l.{c}" for c in _CQC_LOCATION_COLUMNS)
+    total = conn.execute(
+        f"SELECT COUNT(*) AS count FROM cqc_locations l WHERE {clause}", binds).fetchone()["count"]
+    without_coordinate = conn.execute(
+        f"SELECT COUNT(*) AS count FROM cqc_locations l WHERE {clause} "
+        "AND (l.latitude IS NULL OR l.longitude IS NULL)", binds).fetchone()["count"]
+
+    rows = _rows(conn, f"""
+        SELECT {cols}, p.canonical_name AS provider_name,
+               l.bulk_overall_rating, l.bulk_overall_rating_date
+        FROM cqc_locations l
+        LEFT JOIN providers p ON p.provider_key = l.provider_key
+        WHERE {clause}
+        ORDER BY p.canonical_name, l.location_name, l.location_id
+        LIMIT %s OFFSET %s""", [*binds, limit, offset])
+
+    for row in rows:
+        bulk = row.pop("bulk_overall_rating")
+        bulk_date = row.pop("bulk_overall_rating_date")
+        if row["overall_rating"] is None and bulk is not None:
+            row["overall_rating"] = bulk
+            row["overall_rating_date"] = bulk_date
+            row["rating_source"] = "bulk_export"
+        else:
+            row["rating_source"] = "api" if row["overall_rating"] is not None else None
+
+    # Facets over the base tracked-location scope (the provider_key filter),
+    # not the other selections — so the buckets a reader can switch to stay
+    # visible with their sizes while a selection narrows the table.
+    facet_where = "l.provider_key IS NOT NULL"
+    facet_binds: list = []
+    if provider_key:
+        facet_where += " AND l.provider_key = %s"
+        facet_binds.append(provider_key)
+
+    def _facet(expr: str) -> list[dict]:
+        return _rows(conn, f"""
+            SELECT {expr} AS value, COUNT(*) AS count
+            FROM cqc_locations l WHERE {facet_where} AND {expr} IS NOT NULL
+            GROUP BY value ORDER BY count DESC, value""", facet_binds)
+
+    # Split in Python rather than a recursive CTE: the separator is a plain
+    # comma and this keeps the query dialect-free.
+    service_type_counts: dict[str, int] = {}
+    for row in _rows(conn,
+                     f"SELECT service_types FROM cqc_locations l WHERE {facet_where}",
+                     facet_binds):
+        for token in (row["service_types"] or "").split(","):
+            token = token.strip()
+            if token:
+                service_type_counts[token] = service_type_counts.get(token, 0) + 1
+    service_type_facet = [
+        {"value": value, "count": count}
+        for value, count in sorted(service_type_counts.items(),
+                                    key=lambda kv: (-kv[1], kv[0]))]
+
+    return {
+        "results": rows,
+        "total": total,
+        "without_coordinate": without_coordinate,
+        "limit": limit,
+        "offset": offset,
+        "filters": {
+            "provider_key": provider_key,
+            "authority_ons_code": authority_ons_code,
+            "registration_status": registration_status,
+            "regulated_activity": regulated_activity,
+            "service_type": service_type,
+            "rating": rating,
+        },
+        "facets": {
+            "registration_status": _facet("l.registration_status"),
+            "overall_rating": _facet(
+                "COALESCE(l.overall_rating, l.bulk_overall_rating)"),
+            "region": _facet("l.region"),
+            "service_type": service_type_facet,
+        },
+        "caveat": CAVEATS["cqc_locations_explorer"],
+    }
+
+
 def pfd(conn: sqlite3.Connection) -> dict:
     """The sector-level view of the coroners' report corpus, plus Safeguarding
     Adult Reviews (see `_sar_payload`) -- two distinct evidence streams under
@@ -1852,6 +3445,44 @@ def pfd(conn: sqlite3.Connection) -> dict:
     }
 
 
+def all_pfd_reports(conn: sqlite3.Connection, *, batch: int = 2000
+                     ) -> tuple[int, Iterator[dict]]:
+    """Every PFD report, counted first and then streamed.
+
+    `pfd()` above returns `recent` — the newest 50, because it is answering
+    a page that already has other things to show beside the table. This
+    answers a download, where the cap is the bug: an export that ships the
+    newest 50 of 1,500+ reports and says nothing looks complete and is a few
+    percent of the corpus — the same failure `all_contract_notices` exists
+    to refuse (see its own docstring; this follows the identical shape:
+    count first, stream second, no `deadline()` guard because a complete
+    export is meant to take as long as it takes).
+
+    No filters, because `pfd()` itself takes none — every report is public
+    and there is no per-authority or per-provider slice of this corpus the
+    way contracts has one.
+    """
+    _public(["pfd_reports"])
+    total = _one(conn, "SELECT COUNT(*) AS n FROM pfd_reports").get("n", 0)
+
+    def rows() -> Iterator[dict]:
+        cursor = conn.execute("""
+            SELECT report_ref, report_date, coroner_area, categories,
+                   report_url, matters_of_concern IS NOT NULL AS has_concerns,
+                   source_url, retrieved_at
+            FROM pfd_reports ORDER BY report_ref DESC""")
+        try:
+            while True:
+                fetched = cursor.fetchmany(batch)
+                if not fetched:
+                    return
+                yield from (dict(row) for row in fetched)
+        finally:
+            cursor.close()
+
+    return total, rows()
+
+
 # --- provider deep dive -------------------------------------------------------
 
 
@@ -1870,10 +3501,17 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
               "v_provider_disclosure_gaps", "company_filings",
               "pfd_provider_mentions", "pfd_reports"])
 
-    provider = _one(conn, "SELECT * FROM providers WHERE provider_key = ?",
+    provider = _one(conn, "SELECT * FROM providers WHERE provider_key = %s",
                      (provider_key,))
     if not provider:
         raise QueryError(f"No provider {provider_key!r}.")
+
+    # The successor's display name, so the portal can link "now trading as X"
+    # / "merged into X" rather than printing a slug.
+    if provider.get("superseded_by"):
+        successor = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = %s",
+                          (provider["superseded_by"],))
+        provider["superseded_by_name"] = successor.get("canonical_name") if successor else None
 
     events: list[dict] = []
 
@@ -1883,7 +3521,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM charity_financials cf
         JOIN provider_identifiers pi ON pi.identifier = cf.charity_number
                                      AND pi.scheme = 'charity_number'
-        WHERE pi.provider_key = ?""", (provider_key,)):
+        WHERE pi.provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "charity_accounts",
             "label": "Annual accounts",
@@ -1895,7 +3533,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     for row in _rows(conn, """
         SELECT decision_date AS date, case_number, outcome, outcome_confidence,
                provider_match_basis, source_url, retrieved_at
-        FROM tribunal_cases WHERE provider_key = ?""", (provider_key,)):
+        FROM tribunal_cases WHERE provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "tribunal",
             "label": "Employment tribunal judgment",
@@ -1909,7 +3547,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     for row in _rows(conn, """
         SELECT posted_date AS date, job_title, salary_raw, advert_url,
                source_url, retrieved_at
-        FROM nhs_job_adverts WHERE provider_key = ?""", (provider_key,)):
+        FROM nhs_job_adverts WHERE provider_key = %s""", (provider_key,)):
         events.append({
             "date": row["date"], "event_type": "nhs_job_advert",
             "label": row["job_title"],
@@ -1924,7 +3562,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                c.source_url, c.retrieved_at
         FROM contracts c
         JOIN supplier_aliases sa ON sa.alias_raw = c.supplier_name_raw
-        WHERE sa.supplier_key = ?""", (provider_key,)):
+        WHERE sa.supplier_key = %s""", (provider_key,)):
         value = f" — £{row['value_core']:,.0f}" if row["value_core"] else ""
         # The timeline's "source" link is the one a reader actually follows,
         # so it gets the notice rather than the API cursor the row came from.
@@ -1948,7 +3586,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                overall_rating, overall_rating_date, registration_status,
                source_url, retrieved_at,
                bulk_overall_rating, bulk_overall_rating_date, bulk_rating_source_url
-        FROM cqc_locations WHERE provider_key = ?
+        FROM cqc_locations WHERE provider_key = %s
         ORDER BY location_name""", (provider_key,))
     # m26_cqc_directory backfills these two only when the API supplied
     # nothing at all for a location -- see its module docstring for why a
@@ -1966,13 +3604,13 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     edges = _rows(conn, """
         SELECT source_type, source_id, relationship, target_type, target_id,
                target_label, basis, source_url, retrieved_at
-        FROM v_entity_edges WHERE source_id = ? OR target_id = ?""",
+        FROM v_entity_edges WHERE source_id = %s OR target_id = %s""",
         (provider_key, provider_key))
 
     tribunals = _rows(conn, """
         SELECT case_number, decision_date, outcome, outcome_confidence, region,
                hearing_venue_raw, provider_match_basis, document_count, source_url
-        FROM tribunal_cases WHERE provider_key = ?
+        FROM tribunal_cases WHERE provider_key = %s
         ORDER BY decision_date DESC""", (provider_key,))
 
     # --- W-24: the four sources the deep dive stopped at ---------------------
@@ -1991,7 +3629,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM charity_financials cf
         JOIN provider_identifiers pi ON pi.identifier = cf.charity_number
                                      AND pi.scheme = 'charity_number'
-        WHERE pi.provider_key = ?
+        WHERE pi.provider_key = %s
         ORDER BY cf.financial_year_end""", (provider_key,))
     for row in charity_finance:
         income = row["total_income"]
@@ -2010,7 +3648,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                r.source_url, r.retrieved_at
         FROM cqc_location_reports r
         JOIN cqc_locations l ON l.location_id = r.location_id
-        WHERE l.provider_key = ?
+        WHERE l.provider_key = %s
         ORDER BY r.report_date DESC""", (provider_key,))
 
     # What each report *does not* discuss, from the view built over m14's
@@ -2021,12 +3659,12 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
     disclosure_gaps = _rows(conn, """
         SELECT d.financial_year_end, d.topic, d.search_terms, d.caveat
         FROM v_provider_disclosure_gaps d
-        WHERE d.provider_key = ?
+        WHERE d.provider_key = %s
         ORDER BY d.financial_year_end, d.topic""", (provider_key,))
     disclosed = _rows(conn, """
         SELECT d.financial_year_end, d.topic
         FROM provider_report_disclosure d
-        WHERE d.provider_key = ? AND d.matched = 1
+        WHERE d.provider_key = %s AND d.matched = 1
         ORDER BY d.financial_year_end, d.topic""", (provider_key,))
     # A year whose annual report was read but has no disclosure rows at all
     # was never searched. Distinct from every "not matched" cell above, and
@@ -2038,7 +3676,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         LEFT JOIN provider_report_disclosure d
                ON d.provider_key = ar.provider_key
               AND d.financial_year_end = ar.financial_year_end
-        WHERE ar.provider_key = ? AND d.provider_key IS NULL
+        WHERE ar.provider_key = %s AND d.provider_key IS NULL
         ORDER BY ar.financial_year_end""", (provider_key,))
 
     filings = _rows(conn, """
@@ -2047,7 +3685,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
         FROM company_filings f
         JOIN provider_identifiers pi ON pi.identifier = f.company_number
                                      AND pi.scheme = 'company_number'
-        WHERE pi.provider_key = ?
+        WHERE pi.provider_key = %s
         ORDER BY f.filing_date DESC""", (provider_key,))
 
     # --- W-25: the reports that mention this provider -------------------------
@@ -2062,7 +3700,7 @@ def provider_timeline(conn: sqlite3.Connection, provider_key: str) -> dict:
                r.report_date, r.coroner_area, r.report_url
         FROM pfd_provider_mentions m
         JOIN pfd_reports r ON r.report_ref = m.report_ref
-        WHERE m.provider_key = ?
+        WHERE m.provider_key = %s
         ORDER BY r.report_ref DESC""", (provider_key,))
 
     return {
@@ -2149,12 +3787,116 @@ def _coverage_cells(conn: sqlite3.Connection, ons_code: str) -> dict[str, int]:
         return cells
 
     sql = " UNION ALL ".join(
-        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = ?"
+        f"SELECT {i} AS i, COUNT(*) AS n FROM {table} WHERE {column} = %s"
         for i, (_label, table, column) in enumerate(counted)
     ) + " ORDER BY i"
     for row in conn.execute(sql, tuple(ons_code for _ in counted)):
         cells[counted[row["i"]][0]] = row["n"]
     return cells
+
+
+# provider status -> the forward relationship it implies, when there is a
+# `superseded_by`. `dissolved` has no target and is terminal.
+_LINEAGE_FORWARD = {
+    "renamed": "renamed_to",
+    "merged": "merged_into",
+}
+_LINEAGE_REVERSE = {
+    "renamed": "renamed_from",
+    "merged": "merged_from",
+}
+_LINEAGE_CHAIN_CAP = 20
+
+
+def provider_lineage(conn: sqlite3.Connection, provider_key: str) -> dict:
+    """The verified administrative lineage of one provider entity (BETA-066).
+
+    Reads only the lifecycle config already on `providers` (`status`,
+    `superseded_by`, seeded from `pipeline/providers.py::PROVIDER_STATUS`) and
+    the config-verified rows of `provider_identifiers`. It produces explicit
+    typed edges — `renamed_to` / `merged_into` / `dissolved` forward,
+    `renamed_from` / `merged_from` back — never an inferred ownership link and
+    never a person. Evidence that names an old identity stays attached to its
+    own `provider_key`; this describes the entity, not the evidence.
+    """
+    _public(["providers", "provider_identifiers"])
+
+    provider = _one(
+        conn,
+        "SELECT provider_key, canonical_name, status, superseded_by, is_target "
+        "FROM providers WHERE provider_key = %s", (provider_key,))
+    if not provider:
+        raise QueryError(f"No provider {provider_key!r}.")
+
+    def _name(key: str) -> str | None:
+        row = _one(conn, "SELECT canonical_name FROM providers WHERE provider_key = %s",
+                    (key,))
+        return row["canonical_name"] if row else None
+
+    edges: list[dict] = []
+    basis = ("provider lifecycle config (pipeline/providers.py PROVIDER_STATUS), "
+             "cross-checked against the registered company/charity record")
+
+    status = provider["status"]
+    superseded_by = provider["superseded_by"]
+    if status == "dissolved":
+        edges.append({
+            "relationship": "dissolved", "direction": "terminal",
+            "provider_key": None, "canonical_name": None, "basis": basis})
+    elif status in _LINEAGE_FORWARD and superseded_by:
+        edges.append({
+            "relationship": _LINEAGE_FORWARD[status], "direction": "successor",
+            "provider_key": superseded_by, "canonical_name": _name(superseded_by),
+            "basis": basis})
+
+    # Reverse edges: every provider whose config points at this one.
+    for row in _rows(
+        conn,
+        "SELECT provider_key, canonical_name, status FROM providers "
+        "WHERE superseded_by = %s ORDER BY canonical_name", (provider_key,)):
+        edges.append({
+            "relationship": _LINEAGE_REVERSE.get(row["status"], "superseded_from"),
+            "direction": "predecessor",
+            "provider_key": row["provider_key"],
+            "canonical_name": row["canonical_name"], "basis": basis})
+
+    # The forward chain to the surviving entity, with a cycle guard.
+    chain: list[dict] = [{
+        "provider_key": provider["provider_key"],
+        "canonical_name": provider["canonical_name"],
+        "status": provider["status"]}]
+    seen = {provider_key}
+    cursor = superseded_by
+    while cursor and cursor not in seen and len(chain) < _LINEAGE_CHAIN_CAP:
+        seen.add(cursor)
+        row = _one(conn,
+                    "SELECT provider_key, canonical_name, status, superseded_by "
+                    "FROM providers WHERE provider_key = %s", (cursor,))
+        if not row:
+            break
+        chain.append({"provider_key": row["provider_key"],
+                       "canonical_name": row["canonical_name"],
+                       "status": row["status"]})
+        cursor = row["superseded_by"]
+
+    identifiers = _rows(
+        conn,
+        "SELECT scheme, identifier, role FROM provider_identifiers "
+        "WHERE provider_key = %s AND status = 'verified' "
+        "ORDER BY scheme, identifier", (provider_key,))
+
+    return {
+        "provider": {
+            "provider_key": provider["provider_key"],
+            "canonical_name": provider["canonical_name"],
+            "status": provider["status"],
+            "is_target": bool(provider["is_target"]),
+        },
+        "edges": edges,
+        "chain": chain,
+        "identifiers": identifiers,
+        "caveat": CAVEATS["provider_lineage"],
+    }
 
 
 def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
@@ -2165,11 +3907,14 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "contracts", "supplier_aliases", "providers", "cqc_locations",
               "cdp_documents", "cdp_document_candidates", "committee_papers",
               "committee_paper_candidates", "foi_requests",
-              "foi_request_candidates"])
+              "foi_request_candidates", "rough_sleeping_snapshot",
+              "statutory_homelessness_snapshot",
+              "temporary_accommodation_snapshot",
+              "temporary_accommodation_breakdowns"])
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
-              "WHERE ons_code = ?", (ons_code,))
+              "WHERE ons_code = %s", (ons_code,))
     if not authority_row:
         raise QueryError(f"No authority {ons_code!r}.")
 
@@ -2180,14 +3925,14 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
     grant = _rows(conn, """
         SELECT financial_year, grant_type, allocation_status, amount, unit,
                source_url, retrieved_at, payload_sha256
-        FROM public_health_grants WHERE ons_code = ?
+        FROM public_health_grants WHERE ons_code = %s
         ORDER BY financial_year, grant_type""", (ons_code,))
 
     # Budgeted public health spend by year. The same aggregation the geography
     # page's budget metric uses, so the two cannot disagree.
     budget = _rows(conn, """
         SELECT b.financial_year, SUM(b.budget_gbp) AS amount
-        FROM v_la_public_health_budget b WHERE b.ons_code = ?
+        FROM v_la_public_health_budget b WHERE b.ons_code = %s
         GROUP BY b.financial_year ORDER BY b.financial_year""", (ons_code,))
 
     # W-27: the drill-down, by section and line code as published. Amounts
@@ -2197,7 +3942,7 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
     budget_detail = _rows(conn, """
         SELECT financial_year, section, line_code, line_number, column_label,
                amounts_multiplier, amount, value_text
-        FROM la_revenue_budgets WHERE ons_code = ?
+        FROM la_revenue_budgets WHERE ons_code = %s
         ORDER BY financial_year, section, line_number""", (ons_code,))
 
     # Treatment with its paired intervals, straight from the functions the
@@ -2218,6 +3963,37 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "caveats": contract_payload["caveats"],
     }
 
+    # Comparators (Modules 29-31): rough sleeping, statutory homelessness and
+    # temporary accommodation, requested and built specifically to sit beside
+    # this authority's own substance-misuse evidence — never combined with
+    # it, never a ratio, never a score. Each carries its own caveat rather
+    # than sharing one, because each source's own limitations differ (an
+    # unstandardised annual methodology; a quarterly figure that can be
+    # revised; a table that reads only the top-level totals).
+    rough_sleeping = _rows(conn, """
+        SELECT snapshot_year, count, count_text, rate_per_100k, rate_text,
+               source_url, retrieved_at, payload_sha256
+        FROM rough_sleeping_snapshot WHERE ons_code = %s
+        ORDER BY snapshot_year""", (ons_code,))
+    statutory_homelessness = _rows(conn, """
+        SELECT quarter_start, quarter_label, total_initial_assessments,
+               total_initial_assessments_text, total_owed_duty,
+               total_owed_duty_text, prevention_duty_owed, relief_duty_owed,
+               source_url, retrieved_at, payload_sha256
+        FROM statutory_homelessness_snapshot WHERE ons_code = %s
+        ORDER BY quarter_start""", (ons_code,))
+    temporary_accommodation = _rows(conn, """
+        SELECT quarter_start, quarter_label, total_households_ta,
+               total_households_ta_text, households_ta_with_children,
+               children_in_ta, source_url, retrieved_at, payload_sha256
+        FROM temporary_accommodation_snapshot WHERE ons_code = %s
+        ORDER BY quarter_start""", (ons_code,))
+    temporary_accommodation_breakdown = _rows(conn, """
+        SELECT quarter_start, quarter_label, measure, unit, households,
+               households_text, source_url, retrieved_at, payload_sha256
+        FROM temporary_accommodation_breakdowns WHERE ons_code = %s
+        ORDER BY quarter_start, measure""", (ons_code,))
+
     return {
         "authority": authority_row,
         "coverage": {
@@ -2230,6 +4006,18 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "budget_detail": {"rows": budget_detail},
         "treatment": treatment,
         "contracts": contracts_held,
+        "comparators": {
+            "rough_sleeping": {"rows": rough_sleeping,
+                                "caveat": CAVEATS["rough_sleeping_comparator"]},
+            "statutory_homelessness": {
+                "rows": statutory_homelessness,
+                "caveat": CAVEATS["statutory_homelessness_comparator"]},
+            "temporary_accommodation": {
+                "rows": temporary_accommodation,
+                "breakdown": temporary_accommodation_breakdown,
+                "breakdown_caveat": CAVEATS["temporary_accommodation_breakdown"],
+                "caveat": CAVEATS["temporary_accommodation_comparator"]},
+        },
         "caveats": {
             "grant_not_budget": CAVEATS["grant_not_budget"],
             "budget_detail": CAVEATS["budget_detail"],
@@ -2278,7 +4066,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
     authority_rows: list[dict] = []
     provider_rows: list[dict] = []
     if ons:
-        placeholders = ", ".join(f":o{n}" for n in range(len(ons)))
+        placeholders = ", ".join(f"%(o{n})s" for n in range(len(ons)))
         params = {f"o{n}": v for n, v in enumerate(ons)}
         authority_rows = _rows(conn, f"""
             SELECT ons_code, name, region, type FROM authorities
@@ -2288,7 +4076,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
         if missing:
             raise QueryError(f"No authority {missing[0]!r}.")
     if keys:
-        placeholders = ", ".join(f":p{n}" for n in range(len(keys)))
+        placeholders = ", ".join(f"%(p{n})s" for n in range(len(keys)))
         params = {f"p{n}": v for n, v in enumerate(keys)}
         provider_rows = _rows(conn, f"""
             SELECT provider_key, canonical_name, is_target FROM providers
@@ -2301,7 +4089,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
     series: dict[str, dict] = {}
 
     if ons:
-        in_clause = ", ".join(f":o{n}" for n in range(len(ons)))
+        in_clause = ", ".join(f"%(o{n})s" for n in range(len(ons)))
         on_params = {f"o{n}": v for n, v in enumerate(ons)}
 
         # The allocation series, as the authority page draws it: `allocation`
@@ -2373,7 +4161,7 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
         }
 
     if keys:
-        in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+        in_clause = ", ".join(f"%(p{n})s" for n in range(len(keys)))
         key_params = {f"p{n}": v for n, v in enumerate(keys)}
 
         # Income and expenditure as filed, per financial year end — one
@@ -2416,6 +4204,135 @@ def compare(conn: sqlite3.Connection, *, ons_codes=(), provider_keys=()) -> dict
     }
 
 
+# The pay-evidence layers a provider comparison keeps strictly separate. Each
+# is one source, with its own unit and its own caveat; the response places
+# them side by side and never derives a rank, score, difference or ratio
+# across them or within them. Larger selections stay well-defined: the API
+# accepts 2-4 keys and returns the same shape whatever the count.
+_PROVIDER_COMPARE_MIN = 2
+_PROVIDER_COMPARE_MAX = 4
+
+
+def providers_compare(conn: sqlite3.Connection, provider_keys) -> dict:
+    """Two to four providers across four separate pay-evidence layers.
+
+    Unlike `compare` (which plots authority *and* provider time series on
+    shared axes), this is provider-only and deliberately non-temporal: it
+    lays out Living Wage accreditation, the latest gender pay gap filing,
+    provider-published pay and recent NHS Jobs adverts as four independent
+    blocks. No layer is combined with another, and nothing here ranks,
+    scores, differences or ratios the providers — `tests/test_web_provider_compare.py`
+    pins the absence.
+    """
+    _public(["providers", "living_wage_accreditations", "gender_pay_gap_reports",
+              "provider_pay_mentions", "nhs_job_adverts"])
+
+    keys = list(dict.fromkeys(k for k in provider_keys if k))
+    if not _PROVIDER_COMPARE_MIN <= len(keys) <= _PROVIDER_COMPARE_MAX:
+        raise QueryError(
+            f"providers/compare needs between {_PROVIDER_COMPARE_MIN} and "
+            f"{_PROVIDER_COMPARE_MAX} distinct `provider_key` values.")
+
+    placeholders = ", ".join(f"%(p{n})s" for n in range(len(keys)))
+    params = {f"p{n}": v for n, v in enumerate(keys)}
+    known = {row["provider_key"]: row["canonical_name"] for row in _rows(
+        conn, f"SELECT provider_key, canonical_name FROM providers "
+              f"WHERE provider_key IN ({placeholders})", params)}
+    missing = [k for k in keys if k not in known]
+    if missing:
+        raise QueryError(f"No provider {missing[0]!r}.")
+
+    providers_list = [
+        {"provider_key": k, "canonical_name": known[k]} for k in keys]
+
+    def _by_provider(rows: list[dict]) -> dict:
+        out: dict[str, list[dict]] = {k: [] for k in keys}
+        for row in rows:
+            out.setdefault(row["provider_key"], []).append(row)
+        return out
+
+    living_wage = _by_provider(_rows(conn, f"""
+        SELECT l.provider_key, l.accredited, l.employer_name, l.match_basis,
+               l.searched_variant, l.pages_checked, l.source_url, l.retrieved_at
+        FROM living_wage_accreditations l
+        WHERE l.provider_key IN ({placeholders})
+        ORDER BY l.provider_key, l.retrieved_at DESC""", params))
+
+    # The latest reporting year only — an older filing is a different figure,
+    # not a trend point, and this view is not a time series.
+    gender_pay_gap = _by_provider(_rows(conn, f"""
+        SELECT g.provider_key, g.reporting_year, g.reporting_year_label,
+               g.employer_name, g.diff_mean_hourly_percent,
+               g.diff_median_hourly_percent, g.employer_size,
+               g.written_statement_url, g.source_url, g.retrieved_at
+        FROM gender_pay_gap_reports g
+        WHERE g.provider_key IN ({placeholders})
+          AND g.reporting_year = (
+            SELECT MAX(g2.reporting_year) FROM gender_pay_gap_reports g2
+            WHERE g2.provider_key = g.provider_key)
+        ORDER BY g.provider_key, g.employer_name""", params))
+
+    provider_pay = _by_provider(_rows(conn, f"""
+        SELECT m.provider_key, m.page_url, m.section, m.mention_text,
+               m.salary_raw, m.salary_min, m.salary_max, m.salary_period,
+               m.salary_basis, m.match_basis, m.source_url, m.retrieved_at
+        FROM provider_pay_mentions m
+        WHERE m.provider_key IN ({placeholders})
+        ORDER BY m.provider_key, m.page_url, m.mention_index""", params))
+
+    # Recent adverts only — bounded per provider so one prolific employer
+    # cannot dominate the block, and never summed into a count that would
+    # read as sector demand. The cap is a portable correlated count (top-N
+    # per group without a window function), the same shape both backends run.
+    nhs_jobs = _by_provider(_rows(conn, f"""
+        SELECT n.provider_key, n.job_title, n.salary_raw, n.salary_min,
+               n.salary_max, n.salary_period, n.salary_basis, n.contract_type,
+               n.working_pattern, n.posted_date, n.closing_date, n.advert_url,
+               n.provider_match_basis, n.source_url, n.retrieved_at
+        FROM nhs_job_adverts n
+        WHERE n.provider_key IN ({placeholders})
+          AND (SELECT COUNT(*) FROM nhs_job_adverts n2
+               WHERE n2.provider_key = n.provider_key
+                 AND (n2.posted_date > n.posted_date
+                      OR (n2.posted_date = n.posted_date
+                          AND n2.job_reference < n.job_reference))) < 10
+        ORDER BY n.provider_key, n.posted_date DESC, n.job_reference""", params))
+
+    return {
+        "providers": providers_list,
+        "layers": {
+            "living_wage": {
+                "unit": "accreditation status on the date checked (yes / no)",
+                "temporal": False,
+                "by_provider": living_wage,
+                "caveat": CAVEATS["living_wage_accreditations"],
+            },
+            "gender_pay_gap": {
+                "unit": "percentage gap in hourly pay, women vs men, from the "
+                        "employer's own latest filing",
+                "temporal": False,
+                "by_provider": gender_pay_gap,
+                "caveat": CAVEATS["gender_pay_gap"],
+            },
+            "provider_pay": {
+                "unit": "pay text as published on the provider's own website; "
+                        "mixed periods and bases, shown as found",
+                "temporal": False,
+                "by_provider": provider_pay,
+                "caveat": CAVEATS["provider_published_pay"],
+            },
+            "nhs_jobs": {
+                "unit": "advertised salary range per NHS Jobs advert; the "
+                        "10 most recent per provider, matched employer only",
+                "temporal": False,
+                "by_provider": nhs_jobs,
+                "caveat": CAVEATS["nhs_jobs_floor"],
+            },
+        },
+        "caveat": CAVEATS["provider_compare"],
+    }
+
+
 def _source_meta(conn: sqlite3.Connection, table: str, column: str,
                  operator: str, in_clause: str, params: dict) -> dict:
     """Provenance for an aggregated series whose rows do not carry it per
@@ -2437,7 +4354,7 @@ def _source_meta(conn: sqlite3.Connection, table: str, column: str,
 
 def _provider_source_meta(conn: sqlite3.Connection, table: str,
                           keys: list[str]) -> dict:
-    in_clause = ", ".join(f":p{n}" for n in range(len(keys)))
+    in_clause = ", ".join(f"%(p{n})s" for n in range(len(keys)))
     params = {f"p{n}": v for n, v in enumerate(keys)}
     return {
         "retrieved_at": _one(conn, f"""
@@ -2450,6 +4367,237 @@ def _provider_source_meta(conn: sqlite3.Connection, table: str,
             WHERE supplier_name_raw IN (
                 SELECT alias_raw FROM supplier_aliases WHERE supplier_key IN ({in_clause})
             ) AND source_url IS NOT NULL LIMIT 6""", params)],
+    }
+
+
+# --- relationship explorer -----------------------------------------------------
+#
+# One authority or provider's commissioning neighbourhood from the evidence
+# graph (docs/evidence-graph.md, migration 0050) — not the whole graph, and
+# not a force-directed map of the entire corpus. A one-hop view centred on
+# whichever entity the reader picked, the same "the reader picks the peers"
+# shape W-11's compare view already established, because a graph of
+# everything at once would invite exactly the size/importance/centrality
+# reading this pipeline never asserts.
+#
+# Reads the warehouse tables (entities, entity_relationships,
+# evidence_records), never Neo4j: Neo4j is an explicitly disposable
+# projection of these same rows (docs/evidence-graph.md — "delete
+# SectorTrace-managed Neo4j nodes and rebuild them from the warehouse
+# whenever recovery is needed"), so the citable source is here.
+#
+# predicate = 'AWARDED_TO' and derivation_type IN ('SOURCE_FACT',
+# 'DERIVED_RELATIONSHIP') only. Excluded explicitly, not by their current
+# absence:
+#   - REGISTERED_AS (provider -> company ownership) — a separate,
+#     not-yet-scoped view; this one is commissioning relationships only.
+#   - EXTRACTED_CLAIM / ANALYTICAL_SIGNAL — reserved for a not-yet-built
+#     extraction pipeline (see the graph_claims.review_status gate); nothing
+#     writes them today, but nothing here may assume that stays true.
+
+
+def relationships(conn: sqlite3.Connection, *,
+                   ons_code: str | None = None,
+                   provider_key: str | None = None) -> dict:
+    """The commissioning relationships touching one authority or provider.
+
+    Exactly one of `ons_code` or `provider_key` selects the centre entity.
+    """
+    _public(["entities", "entity_identifiers", "entity_relationships",
+              "evidence_records", "authorities", "providers"])
+
+    if bool(ons_code) == bool(provider_key):
+        raise QueryError(
+            "relationships needs exactly one of `ons_code` or `provider_key`.")
+
+    if catalog.object_type(conn, "entities") != "table":
+        # The evidence graph is optional infrastructure (migration 0050) and
+        # a warehouse that predates it, or has never run `graph backfill`,
+        # must render an empty neighbourhood rather than a 500 — the same
+        # primitive health.graph_status's own table-existence guard uses.
+        return _relationships_fallback(conn, ons_code, provider_key)
+
+    scheme, value = (("ons_code", ons_code) if ons_code
+                     else ("sectortrace_provider_key", provider_key))
+    center = _one(conn, """
+        SELECT e.entity_id, e.entity_type, e.canonical_name
+        FROM entity_identifiers i JOIN entities e ON e.entity_id = i.entity_id
+        WHERE i.identifier_scheme = %(scheme)s AND i.identifier_value = %(value)s
+        """, {"scheme": scheme, "value": value})
+    if not center:
+        return _relationships_fallback(conn, ons_code, provider_key)
+
+    edges = _rows(conn, """
+        SELECT r.relationship_id, r.subject_entity_id, r.object_entity_id,
+               r.valid_from, r.valid_to, r.confidence,
+               ev.source_url, ev.retrieved_at, ev.source_system
+        FROM entity_relationships r
+        LEFT JOIN evidence_records ev ON ev.evidence_id = r.evidence_id
+        WHERE (r.subject_entity_id = %(id)s OR r.object_entity_id = %(id)s)
+          AND r.predicate = 'AWARDED_TO'
+          AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        ORDER BY r.valid_from DESC""", {"id": center["entity_id"]})
+
+    neighbour_ids = sorted({
+        e["object_entity_id"] if e["subject_entity_id"] == center["entity_id"]
+        else e["subject_entity_id"] for e in edges})
+    neighbours = []
+    if neighbour_ids:
+        placeholders = ", ".join(f"%(n{n})s" for n in range(len(neighbour_ids)))
+        params = {f"n{n}": v for n, v in enumerate(neighbour_ids)}
+        neighbours = _rows(conn, f"""
+            SELECT entity_id, entity_type, canonical_name FROM entities
+            WHERE entity_id IN ({placeholders})""", params)
+
+    return {"center": center, "neighbours": neighbours, "edges": edges,
+            "caveat": CAVEATS["commissioning_relationship"]}
+
+
+def _relationships_fallback(conn: sqlite3.Connection,
+                             ons_code: str | None,
+                             provider_key: str | None) -> dict:
+    """No graph entity for this authority/provider — not backfilled yet, or
+    the graph tables don't exist at all. Absence of a connection, not
+    absence of the authority or provider itself, so this still has to name
+    who was asked about rather than just failing."""
+    if ons_code:
+        row = _one(conn, "SELECT name FROM authorities WHERE ons_code = %(v)s",
+                   {"v": ons_code})
+        entity_type, name = "LOCAL_AUTHORITY", row.get("name")
+    else:
+        row = _one(conn, "SELECT canonical_name AS name FROM providers "
+                          "WHERE provider_key = %(v)s", {"v": provider_key})
+        entity_type, name = "PROVIDER", row.get("name")
+    if not name:
+        raise QueryError(f"No {'authority' if ons_code else 'provider'} "
+                          f"{(ons_code or provider_key)!r}.")
+    return {"center": {"entity_id": None, "entity_type": entity_type,
+                        "canonical_name": name},
+            "neighbours": [], "edges": [],
+            "caveat": CAVEATS["commissioning_relationship"]}
+
+
+def relationship_detail(conn: sqlite3.Connection, relationship_id: str) -> dict:
+    """One `AWARDED_TO` edge, its two entities, and the dated contract notices
+    behind every edge between the same authority and provider (BETA-044).
+
+    Deterministic only. The edge is resolved to the authority/provider pair it
+    connects, then every `AWARDED_TO` edge between that pair is listed as a
+    timeline, each resolved back to its source notice through
+    `evidence_records.payload_sha256` — the same key the graph backfill wrote
+    it from. Nothing here manufactures a `REGISTERED_AS`, claim or signal
+    edge, and a missing notice date is left blank rather than inferred.
+    """
+    _public(["entities", "entity_identifiers", "entity_relationships",
+              "evidence_records", "contracts"])
+
+    if catalog.object_type(conn, "entity_relationships") != "table":
+        raise QueryError("The evidence graph is not built in this warehouse.")
+
+    edge = _one(conn, """
+        SELECT relationship_id, subject_entity_id, object_entity_id, predicate
+        FROM entity_relationships
+        WHERE relationship_id = %(id)s AND predicate = 'AWARDED_TO'
+          AND derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        """, {"id": relationship_id})
+    if not edge:
+        raise QueryError(f"No AWARDED_TO relationship {relationship_id!r}.")
+
+    ends = _rows(conn, """
+        SELECT e.entity_id, e.entity_type, e.canonical_name
+        FROM entities e
+        WHERE e.entity_id IN (%(a)s, %(b)s)
+        """, {"a": edge["subject_entity_id"], "b": edge["object_entity_id"]})
+    by_id = {row["entity_id"]: row for row in ends}
+    subject = by_id.get(edge["subject_entity_id"], {})
+    obj = by_id.get(edge["object_entity_id"], {})
+    authority = subject if subject.get("entity_type") == "LOCAL_AUTHORITY" else obj
+    provider = obj if authority is subject else subject
+    if not authority or not provider:
+        raise QueryError(
+            f"Relationship {relationship_id!r} does not connect an authority "
+            "and a provider.")
+
+    def _identifier(entity_id: str, scheme: str) -> str | None:
+        row = _one(conn, "SELECT identifier_value FROM entity_identifiers "
+                          "WHERE entity_id = %(id)s AND identifier_scheme = %(s)s",
+                   {"id": entity_id, "s": scheme})
+        return row.get("identifier_value")
+
+    # Every AWARDED_TO edge between this exact pair, with the notice each was
+    # written from. LEFT JOIN so an edge whose notice is no longer in
+    # `contracts` still appears (dates come from the edge in that case).
+    # Bounded (BETA-049): a drawer showing one relationship's history is not a
+    # place to stream a five-figure result set. `truncated` says when the cap
+    # bit; the full set is the contracts page, filtered to the pair.
+    TIMELINE_CAP = 500
+    timeline = _rows(conn, """
+        SELECT r.relationship_id, r.valid_from, r.valid_to, r.confidence,
+               ev.source_url AS evidence_source_url,
+               ev.retrieved_at AS evidence_retrieved_at,
+               ev.source_system,
+               c.notice_id, c.title, c.value_core, c.currency,
+               c.buyer_name, c.supplier_name_raw,
+               c.date_published, c.source_url AS notice_source_url,
+               c.retrieved_at AS notice_retrieved_at
+        FROM entity_relationships r
+        JOIN evidence_records ev ON ev.evidence_id = r.evidence_id
+        LEFT JOIN contracts c
+          ON c.payload_sha256 = ev.payload_sha256
+         AND c.source_system = ev.source_system
+        WHERE r.subject_entity_id = %(subj)s AND r.object_entity_id = %(obj)s
+          AND r.predicate = 'AWARDED_TO'
+          AND r.derivation_type IN ('SOURCE_FACT', 'DERIVED_RELATIONSHIP')
+        ORDER BY COALESCE(r.valid_from, c.date_published) DESC NULLS LAST,
+                 r.relationship_id
+        LIMIT %(cap)s
+        """, {"subj": edge["subject_entity_id"], "obj": edge["object_entity_id"],
+              "cap": TIMELINE_CAP + 1})
+    truncated = len(timeline) > TIMELINE_CAP
+    timeline = timeline[:TIMELINE_CAP]
+
+    events = []
+    for row in timeline:
+        events.append({
+            "relationship_id": row["relationship_id"],
+            "valid_from": row["valid_from"],
+            "valid_to": row["valid_to"],
+            "confidence": row["confidence"],
+            "notice": {
+                "notice_id": row["notice_id"],
+                "title": row["title"],
+                "value_core": row["value_core"],
+                "currency": row["currency"],
+                "buyer_name": row["buyer_name"],
+                "supplier_name_raw": row["supplier_name_raw"],
+                "date_published": row["date_published"],
+                "source_url": row["notice_source_url"],
+                "retrieved_at": row["notice_retrieved_at"],
+                "notice_web_url": notice_page_url(
+                    row["source_system"], row["notice_id"]),
+            } if row["notice_id"] else None,
+            "source_url": row["evidence_source_url"],
+            "retrieved_at": row["evidence_retrieved_at"],
+        })
+
+    return {
+        "relationship_id": relationship_id,
+        "predicate": "AWARDED_TO",
+        "authority": {
+            "entity_id": authority["entity_id"],
+            "name": authority["canonical_name"],
+            "ons_code": _identifier(authority["entity_id"], "ons_code"),
+        },
+        "provider": {
+            "entity_id": provider["entity_id"],
+            "name": provider["canonical_name"],
+            "provider_key": _identifier(
+                provider["entity_id"], "sectortrace_provider_key"),
+        },
+        "timeline": events,
+        "edge_count": len(events),
+        "truncated": truncated,
+        "caveat": CAVEATS["commissioning_relationship_timeline"],
     }
 
 
@@ -2572,8 +4720,9 @@ def _coverage_layer(conn: sqlite3.Connection) -> list[dict]:
             continue
         # Table and column names come from health.COVERAGE_COLUMNS, which is
         # code, not a request — the same trust as the admin matrix.
-        for (code,) in conn.execute(
-                f"SELECT DISTINCT {column} FROM {table} WHERE {column} IS NOT NULL"):
+        for row in conn.execute(
+                f"SELECT DISTINCT {column} AS code FROM {table} WHERE {column} IS NOT NULL"):
+            code = row["code"]
             if code in names:
                 held.setdefault(code, set()).add(label)
 
@@ -2637,7 +4786,7 @@ def claims(conn: sqlite3.Connection) -> dict:
         citations = []
         for citation in _rows(conn, """
                 SELECT evidence_table, evidence_key, cited_by, cited_at, note
-                FROM claim_citations WHERE claim_id = ? ORDER BY id""",
+                FROM claim_citations WHERE claim_id = %s ORDER BY id""",
                               (row["id"],)):
             resolved = claims_resolve(
                 conn, citation["evidence_table"], citation["evidence_key"])
@@ -2695,4 +4844,375 @@ def claims_resolve(conn: sqlite3.Connection, table: str,
         "url": resolved["url"],
         "source_url": resolved["source_url"],
         "retrieved_at": resolved["retrieved_at"],
+    }
+
+
+# --- document search (BETA-022) ------------------------------------------------
+#
+# `pipeline/documents/` (docs/document-analysis.md) already parses PDFs into
+# page-aware, provenanced, full-text-searchable elements — SQLite FTS5 on one
+# backend, PostgreSQL `tsvector` on the other — and `pipeline documents
+# search` has worked at the CLI since that layer shipped. Nothing before this
+# put it behind a web route. `docs/upgrade-roadmap.md`'s own "Corpus-wide
+# search" and "Full-text search over archived documents" entries both said to
+# revisit "once the promotion work has given it verified documents to search
+# rather than candidates" — which is exactly what has since happened here
+# (13,249 documents parsed, confirmed against the live warehouse before
+# writing this), so this is wiring an existing backend to a route, not
+# building search infrastructure from nothing.
+
+# The only two source systems actually bridged into `document_records` today
+# — confirmed against the live warehouse, not assumed from the docs:
+# `SELECT DISTINCT e.source_system FROM document_records d JOIN
+# evidence_records e ON e.evidence_id = d.evidence_id` returns exactly these
+# two. Both are public council governance papers (committee agendas/papers
+# via m09/m10, and community drug partnership documents); neither has a
+# restricted_ counterpart.
+#
+# This allowlist, not `_public()` alone, is the real safety boundary for this
+# route: `document_records`/`document_elements` are not `restricted_`-prefixed
+# tables and hold a generic `text` column no export guard recognises as
+# personal data (see `pipeline/exports/__init__.py`'s own `PERSONAL_DATA_COLUMNS`
+# comment: "exports must fail closed if one is ever added, rather than leaking
+# it because the prefix check passed" — the same principle applies here). If a
+# future session runs `pipeline documents register-existing --source
+# annual_reports`, or bridges PFD report bodies or tribunal judgment text
+# (both restricted per docs/CAVEATS.md's "Personal data" section) into this
+# same schema, it must NOT become searchable here just by existing in the
+# table. Fail closed: a source_system not in this tuple is never searched.
+DOCUMENT_SEARCH_SOURCES = ("committee_paper_promotion", "cdp_document_promotion")
+
+DOCUMENT_SEARCH_CAVEAT = (
+    "This searches page-level text extracted from published committee papers "
+    "and community drug partnership documents only — not the whole warehouse, "
+    "and not every document type the pipeline collects. A result is a page "
+    "that contains the term, not a finding: read the source page, and its own "
+    "caveats, before citing anything found here."
+)
+
+# The window a result shows around its first match. Sized to what the portal
+# renders without further truncation, so the client never has to guess where
+# in the page the match was.
+_SNIPPET_RADIUS = 140
+_SNIPPET_MAX = 320
+
+
+def _search_terms(query: str) -> list[str]:
+    """The words a reader typed, for locating where a page matched.
+
+    The FTS layer receives the raw query and interprets its own syntax; these
+    terms exist only to find the matching passage afterwards. Quoted spans
+    are kept whole and listed first — FTS5 reads "rough sleeping" as a
+    required phrase, so the passage that matched contains it verbatim, and
+    both this window and the portal's highlighter should prefer the phrase
+    over its words occurring separately. Bare operators like OR/NEAR are not
+    carried over: they are query syntax, not strings the page text contains.
+    """
+    value = query or ""
+    phrases = [p.strip().lower() for p in re.findall(r'"([^"]+)"', value)
+               if len(p.strip()) >= 2]
+    words = [w.lower() for w in re.findall(r"[A-Za-z0-9][A-Za-z0-9']*", value)
+             if len(w) >= 2]
+    return list(dict.fromkeys(phrases + words))
+
+
+def _match_snippet(text: str | None, terms: list[str]) -> str:
+    """A window onto the passage that matched, not the top of the page.
+
+    Computed here rather than with SQLite's snippet() and PostgreSQL's
+    ts_headline separately so both backends return byte-identical snippets
+    for the same text — the two engines' headline functions differ in their
+    splitting rules, and a result that changes shape depending on which
+    backend the warehouse runs on is a result that cannot be pinned by test.
+    Falls back to the head of the page when no term can be located (a
+    one-character query, punctuation-only input).
+    """
+    value = str(text or "")
+    if len(value) <= _SNIPPET_MAX:
+        return value
+    lower = value.lower()
+    # Phrase occurrences anchor the window before bare-word ones: a query
+    # like "sleeping duty" also contributes the words `sleeping`/`duty`, and
+    # whichever word happens to appear earliest in the page must not drag
+    # the window away from the passage that actually matched as a phrase.
+    phrases = [t for t in terms if " " in t]
+    words = [t for t in terms if " " not in t]
+    hit = -1
+    for group in (phrases, words):
+        hit = min((i for t in group for i in (lower.find(t),) if i >= 0),
+                  default=-1)
+        if hit >= 0:
+            break
+    if hit < 0:
+        return value[: _SNIPPET_MAX - 1] + "…"
+    start = max(0, hit - _SNIPPET_RADIUS)
+    end = min(len(value), start + _SNIPPET_MAX)
+    if start > 0:
+        boundary = value.find(" ", start)
+        if boundary != -1 and boundary < hit:
+            start = min(boundary + 1, hit)
+    if end < len(value):
+        boundary = value.rfind(" ", max(start, hit), end)
+        if boundary > start:
+            end = boundary
+    return ("…" if start > 0 else "") + value[start:end].strip() + ("…" if end < len(value) else "")
+
+
+# The two document facets a reader can narrow by (BETA-041). `document_type`
+# is `document_records`'s own classification label; `source_system` is
+# constrained to the allowlist above, so a facet value that is not in
+# DOCUMENT_SEARCH_SOURCES can never be selected and never appears in a count.
+_DOCUMENT_SEARCH_FACETS = ("source_system", "document_type")
+
+
+def _document_scope_filters(document_type, year_from, year_to, since_retrieved_at):
+    """Structured filters shared by both backends, as `" AND ..."` fragments.
+
+    Column expressions are the same on SQLite and PostgreSQL here —
+    `d`/`e` are the `document_records`/`evidence_records` aliases in both
+    branches — so this builds one list. `substr(published_at, 1, 4)` is a
+    string year on either engine; a row with no `published_at` drops out of a
+    year-bounded search, which is the honest answer for "documents from 2024".
+    Returned split in two: the date/source scope (which the facet counts also
+    apply) and the `document_type` narrowing (which they do not).
+    """
+    scope, scope_params = [], []
+    if year_from:
+        scope.append("substr(d.published_at, 1, 4) >= %s")
+        scope_params.append(str(year_from))
+    if year_to:
+        scope.append("substr(d.published_at, 1, 4) <= %s")
+        scope_params.append(str(year_to))
+    if since_retrieved_at:
+        scope.append("e.retrieved_at >= %s")
+        scope_params.append(since_retrieved_at)
+    type_sql, type_params = "", []
+    if document_type:
+        type_sql = " AND d.document_type = %s"
+        type_params = [document_type]
+    return "".join(f" AND {c}" for c in scope), scope_params, type_sql, type_params
+
+
+def document_search(conn: sqlite3.Connection, *, query: str,
+                    source_system: str | None = None,
+                    document_type: str | None = None,
+                    year_from: str | None = None, year_to: str | None = None,
+                    since_retrieved_at: str | None = None,
+                    limit: int = 25, offset: int = 0) -> dict:
+    _public(["document_records", "document_elements", "document_versions",
+             "evidence_records"])
+    query = (query or "").strip()
+    if not query:
+        raise QueryError("document_search needs a `q` parameter.")
+    if source_system is not None and source_system not in DOCUMENT_SEARCH_SOURCES:
+        # Fail closed, like the allowlist itself: an unknown source is not an
+        # empty result, it is a request for something this route does not
+        # publish.
+        raise QueryError(f"unknown source_system {source_system!r}")
+    limit = max(1, min(limit, 50))
+    # Clamp offsets so a malformed client request cannot produce a backend
+    # error or walk beyond the beginning of the ranked list.
+    offset = max(0, int(offset))
+
+    sources = (source_system,) if source_system else DOCUMENT_SEARCH_SOURCES
+    src_ph = ", ".join("%s" for _ in sources)
+    all_src_ph = ", ".join("%s" for _ in DOCUMENT_SEARCH_SOURCES)
+    scope_sql, scope_params, type_sql, type_params = _document_scope_filters(
+        document_type, year_from, year_to, since_retrieved_at)
+
+    _tail_cols = ("d.document_type, d.title, d.display_title, d.title_basis, "
+                  "d.filename, d.published_at, "
+                  "e.source_url, e.retrieved_at, e.source_system")
+
+    frm = (
+        "FROM document_elements de "
+        "JOIN document_versions dv ON dv.document_version_id = de.document_version_id "
+        "JOIN document_records d ON d.document_id = dv.document_id "
+        "JOIN evidence_records e ON e.evidence_id = d.evidence_id"
+    )
+    cols = ("de.document_element_id, d.document_id, de.page_number, "
+            "de.element_type, de.text, " + _tail_cols)
+    # `websearch_to_tsquery` accepts a reader's quotes, OR and -term without
+    # raising, and `ts_rank_cd` gives a deterministic relevance order.
+    _tsv = "to_tsvector('simple', COALESCE(de.text, ''))"
+    _tsq = "websearch_to_tsquery('simple', %s)"
+    match = f"dv.is_active = 1 AND {_tsv} @@ {_tsq}"
+    order = (f"ORDER BY ts_rank_cd({_tsv}, {_tsq}) DESC, "
+             "d.document_id, de.page_number, de.document_element_id")
+
+    where = f"WHERE {match} AND e.source_system IN ({src_ph}){scope_sql}{type_sql}"
+    # PostgreSQL's ORDER BY repeats the tsquery bind.
+    order_binds = (query,)
+    filt_params = (*scope_params, *type_params)
+
+    sql = f"SELECT {cols} {frm} {where} {order} LIMIT %s OFFSET %s"
+    params = (query, *sources, *filt_params, *order_binds, limit, offset)
+    count_sql = f"SELECT COUNT(*) AS count {frm} {where}"
+    count_params = (query, *sources, *filt_params)
+
+    # Facet counts: over the text query and the date/source scope only, not
+    # the `source_system` / `document_type` selection — so the buckets a
+    # reader can switch to stay visible with their sizes while a selection
+    # narrows the results below.
+    facet_where = f"WHERE {match} AND e.source_system IN ({all_src_ph}){scope_sql}"
+    facet_params = (query, *DOCUMENT_SEARCH_SOURCES, *scope_params)
+
+    try:
+        rows = _rows(conn, sql, params)
+        total = conn.execute(count_sql, count_params).fetchone()["count"]
+        facets = {
+            facet: _rows(
+                conn,
+                f"SELECT {'e.source_system' if facet == 'source_system' else 'd.document_type'} "
+                f"AS value, COUNT(*) AS count {frm} {facet_where} "
+                f"GROUP BY value ORDER BY count DESC, value",
+                facet_params)
+            for facet in _DOCUMENT_SEARCH_FACETS
+        }
+    except db.Error as error:
+        # A reader's search term is not a schema problem this route should
+        # crash on, so turn parser/cancellation errors into a query error.
+        raise QueryError(f"Could not search for {query!r}: {error}") from None
+
+    terms = _search_terms(query)
+    return {
+        "results": [{
+            "document_id": r["document_id"],
+            # The exact element that matched — the anchor GET
+            # /api/v1/documents/{id}?element_id=… needs for the context view.
+            "document_element_id": r["document_element_id"],
+            "document_type": r["document_type"],
+            "source_system": r["source_system"],
+            # BETA-062: the derived display title, falling back to the raw
+            # source label then the filename for rows the backfill has not
+            # reached. `title_basis` says which rung `title` came from so the
+            # portal can mark a title it did not get from the source itself.
+            "title": r["display_title"] or r["title"] or r["filename"],
+            "title_basis": r["title_basis"],
+            "source_title": r["title"],
+            "page_number": r["page_number"],
+            "element_type": r["element_type"],
+            "text": r["text"],
+            # The window the portal renders: centred on what matched, so a
+            # result is self-explaining even when the match sits mid-page.
+            "snippet": _match_snippet(r["text"], terms),
+            "source_url": r["source_url"],
+            "retrieved_at": r["retrieved_at"],
+            "published_at": r["published_at"],
+        } for r in rows],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "query": query,
+        "facets": facets,
+        "filters": {
+            "source_system": source_system,
+            "document_type": document_type,
+            "year_from": year_from or None,
+            "year_to": year_to or None,
+            "since_retrieved_at": since_retrieved_at or None,
+        },
+        "caveat": DOCUMENT_SEARCH_CAVEAT,
+    }
+
+
+# At most this many elements either side of a matched element (BETA-042). A
+# ceiling, not a default a caller can raise: bounded context aids scrutiny of
+# one hit; an unbounded one is a way to reassemble a whole copyrighted
+# document a page at a time, which docs/CAVEATS.md does not allow.
+#
+# BETA-081 (the reading room) raised this from 3 to 8. A single response is
+# still a bounded window — a readable passage, not the document — and the
+# reading room's "earlier/later" re-anchors on an edge element rather than
+# asking for one enormous window. The source URL is always shown for the
+# whole document.
+_DOCUMENT_CONTEXT_MAX = 8
+
+
+def document_context(conn: sqlite3.Connection, document_id: str, *,
+                     element_id: str | None = None, context: int = 3) -> dict:
+    """The passage around one matched element, from the active parse only.
+
+    `GET /api/v1/documents/{id}?element_id=…&context=…`. The same
+    `DOCUMENT_SEARCH_SOURCES` allowlist as `document_search` is the safety
+    boundary — a document from an unlisted source is not published here at
+    all — and only the `is_active` version's elements are ever returned, so a
+    link made before a reparse refuses rather than anchoring on stale text.
+    """
+    _public(["document_records", "document_elements", "document_versions",
+             "evidence_records"])
+    context = max(0, min(int(context), _DOCUMENT_CONTEXT_MAX))
+
+    meta = _one(
+        conn,
+        "SELECT d.document_id, d.document_type, d.title, d.display_title, "
+        "d.title_basis, d.filename, "
+        "d.published_at, e.source_url, e.retrieved_at, e.source_system "
+        "FROM document_records d "
+        "JOIN evidence_records e ON e.evidence_id = d.evidence_id "
+        "WHERE d.document_id = %s", (document_id,))
+    if not meta or meta["source_system"] not in DOCUMENT_SEARCH_SOURCES:
+        raise QueryError(f"No document {document_id!r}.")
+
+    version = _one(
+        conn,
+        "SELECT document_version_id, parser_name, parser_version "
+        "FROM document_versions WHERE document_id = %s AND is_active = 1",
+        (document_id,))
+    if not version:
+        raise QueryError(f"Document {document_id!r} has no active parsed version.")
+
+    elements = _rows(
+        conn,
+        "SELECT document_element_id, sequence, page_number, element_type, "
+        "heading_level, text FROM document_elements "
+        "WHERE document_version_id = %s ORDER BY sequence",
+        (version["document_version_id"],))
+
+    anchor_index = None
+    if element_id is not None:
+        anchor_index = next(
+            (i for i, e in enumerate(elements)
+             if e["document_element_id"] == element_id), None)
+        if anchor_index is None:
+            raise QueryError(
+                f"Element {element_id!r} is not in the active version of "
+                f"document {document_id!r}.")
+        lo = max(0, anchor_index - context)
+        hi = min(len(elements), anchor_index + context + 1)
+    else:
+        # No anchor: the head of the document, same window size.
+        lo, hi = 0, min(len(elements), 2 * context + 1)
+
+    window = [{
+        "document_element_id": e["document_element_id"],
+        "sequence": e["sequence"],
+        "page_number": e["page_number"],
+        "element_type": e["element_type"],
+        "heading_level": e["heading_level"],
+        "text": e["text"],
+        "is_anchor": element_id is not None
+        and e["document_element_id"] == element_id,
+    } for e in elements[lo:hi]]
+
+    return {
+        "document_id": meta["document_id"],
+        "document_type": meta["document_type"],
+        "title": meta["display_title"] or meta["title"] or meta["filename"],
+        "title_basis": meta["title_basis"],
+        "source_title": meta["title"],
+        "source_url": meta["source_url"],
+        "retrieved_at": meta["retrieved_at"],
+        "published_at": meta["published_at"],
+        "source_system": meta["source_system"],
+        "parser": {"name": version["parser_name"],
+                   "version": version["parser_version"]},
+        "anchor_element_id": element_id,
+        "context": context,
+        "element_count": len(elements),
+        "range": {"from": lo, "to": hi},
+        "has_more_before": lo > 0,
+        "has_more_after": hi < len(elements),
+        "elements": window,
+        "caveat": DOCUMENT_SEARCH_CAVEAT,
     }

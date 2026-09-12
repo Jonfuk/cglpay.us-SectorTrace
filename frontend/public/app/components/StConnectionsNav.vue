@@ -1,0 +1,2 @@
+<template><nav class="flex flex-wrap gap-2" aria-label="Connection evidence views"><NuxtLink to="/relationships" class="atlas-button" active-class="st-connection-current">Commissioning</NuxtLink><NuxtLink to="/pathfinder" class="atlas-button" active-class="st-connection-current">Verified paths</NuxtLink><NuxtLink to="/cooccurrence" class="atlas-button" active-class="st-connection-current">Mentioned together</NuxtLink></nav></template>
+<style scoped>.st-connection-current { border-color: var(--interactive-secondary); background: var(--surface-elevated); }</style>

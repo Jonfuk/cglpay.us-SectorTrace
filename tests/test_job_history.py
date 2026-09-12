@@ -40,8 +40,8 @@ def wait_until_finished(registry, job_id, settings=None, timeout=5.0):
 def _persisted_state(settings, job_id):
     conn = db.get_connection(settings)
     try:
-        row = conn.execute("SELECT state FROM job_runs WHERE id = ?", (job_id,)).fetchone()
-        return row[0] if row else None
+        row = conn.execute("SELECT state FROM job_runs WHERE id = %s", (job_id,)).fetchone()
+        return row["state"] if row else None
     except Exception:
         return None
     finally:
@@ -85,7 +85,7 @@ def test_a_job_that_never_finished_reappears_as_interrupted(conn, settings):
     assert registry.get(7).state == "interrupted"
     # And it is not holding the slot — a dead job must not refuse a live one.
     assert registry.running() is None
-    assert rows(conn)[0][3] == "interrupted", "the correction is written back"
+    assert rows(conn)[0]["state"] == "interrupted", "the correction is written back"
 
 
 def test_ids_continue_rather_than_restarting(conn, settings):
@@ -97,7 +97,7 @@ def test_ids_continue_rather_than_restarting(conn, settings):
     fresh = start_and_wait(second, settings)
 
     assert fresh.id == 3, "a job id must mean one job across the whole warehouse"
-    assert sorted(row[0] for row in rows(conn)) == [1, 2, 3]
+    assert sorted(row["id"] for row in rows(conn)) == [1, 2, 3]
 
 
 def test_a_dry_run_is_a_column_not_a_json_field(conn, settings):
@@ -105,7 +105,7 @@ def test_a_dry_run_is_a_column_not_a_json_field(conn, settings):
     start_and_wait(registry, settings, label="m13 — dry run", args={"dry_run": True})
     start_and_wait(registry, settings, label="m13", args={"dry_run": False})
 
-    assert [row[4] for row in rows(conn)] == [1, 0]
+    assert [row["dry_run"] for row in rows(conn)] == [1, 0]
 
 
 def test_a_failing_job_records_why(conn, settings):
@@ -118,8 +118,8 @@ def test_a_failing_job_records_why(conn, settings):
     wait_until_finished(registry, job.id, settings)
 
     stored = rows(conn)[0]
-    assert stored[3] == "failed"
-    assert stored[5] is not None, "a failed job still finished at a time"
+    assert stored["state"] == "failed"
+    assert stored["finished_at"] is not None, "a failed job still finished at a time"
     reloaded = JobRegistry(store=JobStore(settings)).get(job.id)
     assert "the source changed shape" in reloaded.error
 
@@ -142,7 +142,8 @@ def test_a_store_that_cannot_write_does_not_stop_the_run(settings, tmp_path):
     Recording history is bookkeeping around running the pipeline. Bookkeeping
     that can refuse a run is worse than bookkeeping that is missing a row.
     """
-    settings.database_path = tmp_path / "no-schema.db"
+    settings.database_url = settings.database_url.replace(
+        "/sectortrace", "/sectortrace_missing_for_test")
     registry = JobRegistry(store=JobStore(settings))
 
     job = start_and_wait(registry)
@@ -156,7 +157,7 @@ def test_history_is_capped(conn, settings):
     for i in range(1, 8):
         conn.execute(
             "INSERT INTO job_runs (id, kind, label, args_json, state, dry_run, started_at) "
-            "VALUES (?, 'run', ?, '{}', 'finished', 0, '2026-08-13T01:00:00+00:00')",
+            "VALUES (%s, 'run', %s, '{}', 'finished', 0, '2026-08-13T01:00:00+00:00')",
             (i, f"job {i}"))
     conn.commit()
 

@@ -41,6 +41,9 @@ MODULE_META: dict[str, "ModuleMeta"] = {}
 @dataclass(frozen=True)
 class ModuleMeta:
     name: str
+    # Operator-only collectors are never included in `run all`; they require
+    # an explicit source-specific gate and may write restricted shadow data.
+    operator_only: bool = False
     # Whether the module actually filters on ctx.since. Declared per module so
     # `--since` cannot be quietly ignored: the CLI warns when it is passed to
     # a module that does not use it, which otherwise looks like a successful
@@ -123,13 +126,14 @@ class ModuleContext:
 def register_module(name: str, supports_since: bool = False, since_note: str = "",
                      supports_source: bool = False, source_note: str = "",
                      depends_on: tuple[str, ...] = (),
-                     depends_note: str = "") -> Callable[[ModuleFn], ModuleFn]:
+                     depends_note: str = "", operator_only: bool = False) -> Callable[[ModuleFn], ModuleFn]:
     def decorator(fn: ModuleFn) -> ModuleFn:
         MODULE_REGISTRY[name] = fn
         MODULE_META[name] = ModuleMeta(
             name=name, supports_since=supports_since, since_note=since_note,
             supports_source=supports_source, source_note=source_note,
-            depends_on=tuple(depends_on), depends_note=depends_note)
+            depends_on=tuple(depends_on), depends_note=depends_note,
+            operator_only=operator_only)
         return fn
 
     return decorator
@@ -153,7 +157,9 @@ def resolve_run_order(names: list[str] | None = None) -> list[str]:
     Dependencies on modules outside `names` are ignored rather than pulled in:
     asking for a subset should run that subset, not silently expand it.
     """
-    selected = list(MODULE_REGISTRY) if names is None else list(names)
+    selected = ([name for name in MODULE_REGISTRY
+                 if not module_meta(name).operator_only]
+                if names is None else list(names))
     remaining = set(selected)
 
     ordered: list[str] = []
@@ -190,7 +196,9 @@ def resolve_run_waves(names: list[str] | None = None) -> list[list[str]]:
     APIs proceed independently; the four that share www.gov.uk queue behind
     each other on that host and nowhere else.
     """
-    selected = list(MODULE_REGISTRY) if names is None else list(names)
+    selected = ([name for name in MODULE_REGISTRY
+                 if not module_meta(name).operator_only]
+                if names is None else list(names))
     remaining = set(selected)
 
     waves: list[list[str]] = []

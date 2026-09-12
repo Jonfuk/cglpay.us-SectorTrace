@@ -40,6 +40,13 @@ PUBLIC_STATIC_PATHS = {
     "/api.html",
     "/js/theme.js",
     "/js/components.js",
+    "/js/palette.js",
+    "/js/filterstate.js",
+    "/js/myarea.js",
+    "/js/recent.js",
+    "/js/notebook.js",
+    "/js/savedsearch.js",
+    "/js/journey.js",
     "/js/pages/overview.js",
     "/js/pages/pay.js",
     "/js/pages/contracts.js",
@@ -51,6 +58,20 @@ PUBLIC_STATIC_PATHS = {
     "/js/pages/compare.js",
     "/js/pages/claims.js",
     "/js/pages/coverage.js",
+    "/js/pages/relationships.js",
+    "/js/pages/documents.js",
+    "/js/pages/catalogue.js",
+    "/js/pages/cqc.js",
+    "/js/pages/changes.js",
+    "/js/pages/calendar.js",
+    "/js/pages/revisions.js",
+    "/js/pages/pathfinder.js",
+    "/js/pages/timeline.js",
+    "/js/pages/cooccurrence.js",
+    "/js/pages/discrepancies.js",
+    "/js/pages/diary.js",
+    "/js/pages/links.js",
+    "/js/pages/doctables.js",
     "/vendor/echarts.min.js",
     "/vendor/d3.min.js",
     "/vendor/tabulator.min.js",
@@ -67,11 +88,13 @@ PUBLIC_STATIC_PATHS = {
     "/fonts/space-grotesk-700.woff2",
     "/fonts/archivo-narrow-500.woff2",
     "/fonts/archivo-narrow-700.woff2",
+    "/assets/england-regions.json",
 }
 
 # The portal's read-only API, as route names under /api/v1/.
 PUBLIC_API_ROUTES = {
     "summary",
+    "meta",
     "providers",
     "authorities",
     "contracts",
@@ -80,25 +103,49 @@ PUBLIC_API_ROUTES = {
     "geography",
     "boundaries",
     "fingertips",
+    "treatment_metrics",
     "ndtms",
     "compare",
     "layers",
+    "atlas_layers",
     "pfd",
+    "safety_legal",
     "freshness",
     "claims",
+    "relationships",
+    "relationship_path",
+    "coverage_timeline",
+    "cooccurrence",
+    "discrepancies",
+    "contract_diary",
+    "source_link",
+    "document_tables",
+    "document_search",
+    "catalogue",
+    "provider_compare",
+    "changes",
+    "publication_calendar",
+    "record_diff",
+    "safety",
+    "cqc_locations",
 }
 
 # Route patterns under /api/v1/ that take a parameter.
 PUBLIC_API_PATTERNS = {
     r"providers/([a-z0-9_]+)/timeline",
+    r"providers/([a-z0-9_]+)/lineage",
     r"authorities/([A-Z][0-9]{8})",
+    r"documents/([A-Za-z0-9_-]{1,80})",
+    r"catalogue/([a-z0-9-]{1,64})",
+    r"relationships/(relationship:[0-9a-f]{64})",
+    r"contracts/process/([A-Za-z0-9_-]{1,100})",
 }
 
 # Published under /api/v1/ and dispatched before the table above, so it is not
 # a `route ==` literal in `_public_api` and would otherwise be absent from
 # every list here. It is part of the same public surface and the documentation
 # must cover it.
-PUBLIC_API_EXTRA = {"export"}
+PUBLIC_API_EXTRA = {"export", "feed"}
 
 # Files the portal is made of. Admin work does not edit these, and no admin
 # module may import from them -- see test_the_admin_ui_does_not_import_portal_code.
@@ -354,7 +401,8 @@ def test_the_admin_assets_served_are_the_operator_files(client):
 def test_the_admin_modules_are_served(client):
     """A module that 404s takes the whole import graph with it, and the page
     keeps working well enough that nobody notices the palette is gone."""
-    for name in ("shell", "dom", "theme", "palette", "pipeline", "health", "exports"):
+    for name in ("shell", "dom", "context", "theme", "palette", "pipeline",
+                 "health", "exports", "search", "claimreview"):
         response = client.get(f"/admin/js/{name}.js")
         assert response.status_code == 200, f"/admin/js/{name}.js is not served"
         assert response.headers["Content-Type"].startswith("text/javascript")
@@ -377,8 +425,21 @@ def test_the_api_documentation_answers_at_the_address_a_reader_would_guess(clien
 
 def test_the_operator_api_is_not_reachable_under_the_public_prefix(client):
     """An operator route answering under /api/v1/ would be published."""
-    for route in ("overview", "schema", "review", "review/facets", "overrides"):
+    for route in ("overview", "schema", "review", "review/facets", "overrides",
+                  "search", "claim-candidates", "claim-gate", "claim-ontology",
+                  "pg-capabilities"):
         assert client.get(f"/api/v1/{route}").status_code == 404
+
+
+def test_semantic_search_is_an_operator_route_only(client):
+    """BETA-034A's retrieval finding aid is /api/admin/search. It reads the
+    parsed archive, not restricted_ data, but it is the operator's tool and
+    stays behind the same network-trust boundary as the rest of /api/admin."""
+    # Answers under /api/admin (400 for the missing query, not 404 for a
+    # missing route), and not at all under the public prefix.
+    assert client.get("/api/admin/search").status_code == 400
+    assert client.get("/api/admin/search?q=recruitment").status_code == 200
+    assert client.get("/api/v1/search?q=recruitment").status_code == 404
 
 
 def test_public_responses_are_cacheable_and_operator_responses_are_not(client):

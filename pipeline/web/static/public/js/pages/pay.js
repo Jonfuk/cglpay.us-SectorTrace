@@ -11,7 +11,91 @@
 import { el, replace, fetchJSON, filterParams, num, gbp, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, tableCard, symbolFor, escapeHtml,
-          truncate, shareButton, findingBlock, evidenceMeta } from '/js/components.js';
+          truncate, shareButton, findingBlock, evidenceMeta, evidenceHealthStrip,
+          revealOnScroll } from '/js/components.js';
+
+/* BETA-070 workforce pay explorer.
+ *
+ * The page already grouped pay evidence into source-specific panels; this adds
+ * a control strip that narrows those panels by source group, role text and pay
+ * unit, with the state carried in the hash query so a filtered view is a link.
+ * It combines nothing: `source` picks exactly one group to show, `role` is a
+ * substring match per source, `pay_unit` keeps rows explicitly carrying that
+ * unit. Counts on the chips are the server's post-filter `source_groups`
+ * index, not a figure to quote. */
+
+const EXPLORER_KEYS = ['source', 'role', 'pay_unit'];
+
+function readExplorer(params) {
+  const q = params || new URLSearchParams(location.hash.split('?')[1] || '');
+  return {
+    source: q.get('source') || '',
+    role: q.get('role') || '',
+    pay_unit: q.get('pay_unit') || '',
+  };
+}
+
+function setExplorer(patch) {
+  const q = new URLSearchParams(location.hash.split('?')[1] || '');
+  for (const [k, v] of Object.entries(patch)) {
+    if (v) q.set(k, v); else q.delete(k);
+  }
+  const query = q.toString();
+  location.hash = `#/pay${query ? `?${query}` : ''}`;
+}
+
+function explorerStrip(data, current) {
+  const groups = data.source_groups || [];
+  const avail = data.filters_available || { roles: [], pay_units: [] };
+  const total = groups.reduce((n, g) => n + (g.count || 0), 0);
+
+  const chip = (key, label, count, active) => el('button', {
+    type: 'button',
+    class: `filter-chip${active ? ' is-active' : ''}`,
+    'aria-pressed': String(active),
+    onclick: () => setExplorer({ source: key }),
+  }, `${label} · ${num(count)}`);
+
+  const roleList = el('datalist', { id: 'pay-role-options' },
+    ...(avail.roles || []).map((r) => el('option', { value: r })));
+
+  const roleInput = el('input', {
+    type: 'search', list: 'pay-role-options', value: current.role,
+    placeholder: 'Any role', 'aria-label': 'Filter by role text',
+    onchange: (e) => setExplorer({ role: e.target.value.trim() }),
+  });
+
+  const unitSelect = el('select', {
+    'aria-label': 'Pay unit',
+    onchange: (e) => setExplorer({ pay_unit: e.target.value }),
+  },
+    el('option', { value: '', text: 'Any pay unit' }),
+    ...(avail.pay_units || []).map((u) =>
+      el('option', { value: u, text: u[0].toUpperCase() + u.slice(1), selected: current.pay_unit === u })));
+
+  const activeBits = [];
+  if (current.source) {
+    const g = groups.find((x) => x.key === current.source);
+    activeBits.push(`Source: ${g ? g.label : current.source}`);
+  }
+  if (current.role) activeBits.push(`Role: ${current.role}`);
+  if (current.pay_unit) activeBits.push(`Unit: ${current.pay_unit}`);
+
+  return el('div', { class: 'pay-explorer', role: 'region', 'aria-label': 'Pay evidence explorer' },
+    el('div', { class: 'pay-explorer-groups' },
+      chip('', 'All sources', total, !current.source),
+      ...groups.map((g) => chip(g.key, g.label, g.count, current.source === g.key))),
+    el('div', { class: 'pay-explorer-fields' },
+      el('label', {}, 'Role ', roleInput), roleList,
+      el('label', {}, 'Unit ', unitSelect),
+      activeBits.length
+        ? el('button', { type: 'button', class: 'filter-clear',
+            onclick: () => setExplorer({ source: '', role: '', pay_unit: '' }) }, 'Clear explorer')
+        : null),
+    activeBits.length
+      ? el('p', { class: 'small muted', text: `Showing ${activeBits.join(' · ')}. Sources are never combined.` })
+      : null);
+}
 
 function takeaway(status, statusClass, text) {
   return el('div', { class: 'takeaway' },
@@ -24,21 +108,26 @@ function scrollToLayer(id) {
   if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-export async function render(main) {
+export async function render(main, { params = null } = {}) {
   const charts = [];
+  const explorer = readExplorer(params);
   let data;
   try {
-    data = await fetchJSON('pay', filterParams());
+    data = await fetchJSON('pay', { ...filterParams(), ...explorer });
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main, { params })));
     return () => {};
   }
+  // When a single source group is selected the page shows only that group's
+  // section — "focused", the word in the objective. `null` shows all four.
+  const only = explorer.source || null;
+  const show = (id) => !only || only === id;
 
   const page = el('div', {},
-    el('div', { class: 'hero' },
+    el('div', { class: 'hero hero-animated' },
       el('h1', { text: 'Pay & benchmarks' }),
       el('p', { class: 'lede' },
-        'Explore published pay, advertised roles and workforce context. Each source layer answers a different question, so they are not combined into one pay score.'),
+        'Explore published pay, advertised roles and statutory floors. Each source layer answers a different question, so they are not combined into one pay score.'),
       el('div', { class: 'hero-actions' },
         shareButton({
           title: 'SectorTrace pay evidence',
@@ -49,8 +138,22 @@ export async function render(main) {
         el('button', { type: 'button', onclick: () => scrollToLayer('wage') }, 'Indicative wage'),
         el('button', { type: 'button', onclick: () => scrollToLayer('adverts') }, 'Advertised roles'),
         el('button', { type: 'button', onclick: () => scrollToLayer('published-pay') }, 'Published & statutory pay'),
-        el('button', { type: 'button', onclick: () => scrollToLayer('census') }, 'Workforce context'),
         el('button', { type: 'button', onclick: () => scrollToLayer('benchmarks') }, 'External comparators'))),
+    (() => {
+      const meta = evidenceMeta(data);
+      const census = data.census_total || 0;
+      return evidenceHealthStrip({
+        scope: 'Published pay signals for tracked drug and alcohol treatment providers, England.',
+        retrievedAt: meta.retrievedAt,
+        verification: !census ? 'n/a'
+          : data.census_all_unverified ? 'unverified'
+          : data.census_verified_count < data.census_total ? 'partly verified' : 'verified',
+        coverage: 'partial',
+        licence: { name: 'Varies by source (OGL v3.0, NHS Benchmarking, provider-owned)' },
+        limitation: 'None of these layers is payroll data; they are not combined into a pay figure.',
+      });
+    })(),
+    explorerStrip(data, explorer),
     (() => {
       const meta = evidenceMeta(data);
       return findingBlock({
@@ -66,29 +169,68 @@ export async function render(main) {
       el('summary', { text: 'How to read pay evidence' }),
       el('p', { text: 'Charity accounts provide an indicative wage measure; NHS Jobs records advertised vacancies; provider pages record what an organisation published; statutory rates are legal hourly floors.' }),
       el('p', { text: 'None is payroll data. Labour-market benchmarks provide context only, and the portal does not calculate gaps, ratios, or a combined trend from unlike sources.' })),
-    el('div', { id: 'wage' }),
-    el('div', { id: 'adverts' }),
-    el('div', { id: 'published-pay' }),
-    el('div', { id: 'census' }),
-    el('div', { id: 'benchmarks' }));
+    show('indicative_wage') ? el('div', { id: 'wage' }) : null,
+    show('advertised_roles') ? el('div', { id: 'adverts' }) : null,
+    show('published_statutory') ? el('div', { id: 'published-pay' }) : null,
+    show('external_comparators') ? el('div', { id: 'benchmarks' }) : null,
+    only === 'workforce_census' ? el('div', { id: 'census' }) : null,
+    only && !['indicative_wage', 'advertised_roles', 'published_statutory',
+             'external_comparators', 'workforce_census'].includes(only)
+      ? el('p', { class: 'small muted', text: 'Unknown source group.' }) : null);
   replace(main, page);
 
-  renderWage(page.querySelector('#wage'), data, charts);
-  renderAdverts(page.querySelector('#adverts'), data, charts);
-  renderPublishedPay(page.querySelector('#published-pay'), data);
-  renderCensus(page.querySelector('#census'), data, charts);
-  renderBenchmarks(page.querySelector('#benchmarks'), data);
+  if (show('indicative_wage')) renderWage(page.querySelector('#wage'), data, charts);
+  if (show('advertised_roles')) renderAdverts(page.querySelector('#adverts'), data, charts);
+  if (show('published_statutory')) renderPublishedPay(page.querySelector('#published-pay'), data, charts);
+  if (show('external_comparators')) renderBenchmarks(page.querySelector('#benchmarks'), data);
+  if (only === 'workforce_census') renderCensus(page.querySelector('#census'), data);
 
+  revealOnScroll(page);
   return () => disposeCharts(charts);
+}
+
+// --- workforce census (BETA-070: was fetched but unrendered on this page) ---
+
+function renderCensus(container, data) {
+  const rows = data.workforce_census || [];
+  const note = data.census_all_unverified
+    ? data.caveats?.census_unverified_note
+    : (data.census_verified_count < data.census_total
+        ? data.caveats?.census_partly_verified_note
+        : data.caveats?.census_comparability_note);
+  replace(container, section(
+    'Workforce census measures',
+    'Published workforce metrics (vacancy, turnover and similar) as recorded '
+    + 'by the source. Segments and years are not differenced or combined.',
+    pinnedCaveat(note, 'How to read the census'),
+    rows.length ? tableCard('Workforce census', [
+      { title: 'Year', field: 'census_year' },
+      { title: 'Metric', field: 'metric' },
+      { title: 'Segment', field: 'workforce_segment' },
+      { title: 'Value', field: 'value' },
+      { title: 'Unit', field: 'unit' },
+      { title: 'Verified', field: 'verified', formatter: (c) => c.getValue() ? 'yes' : 'not checked' },
+    ], rows, { height: 320 }) : noData('workforce census metrics', './start.sh run m06_workforce_census'),
+    provenanceFromRows(rows, { tables: ['workforce_census_metrics'], module: 'm06_workforce_census' })));
 }
 
 // --- 2c. provider-published and statutory pay evidence ---------------------
 
-function renderPublishedPay(container, data) {
+function renderPublishedPay(container, data, charts) {
   const rates = data.statutory_pay_rates || [];
   const published = data.provider_published_pay || [];
   const accreditations = data.living_wage_accreditations || [];
   const genderPayGap = data.gender_pay_gap_reports || [];
+  const genderPayGapHolder = el('div', {});
+
+  // `rates` is already ordered by effective_from DESC, period_label DESC
+  // (public_queries.pay), so the first row's period is the current one.
+  // Under-18s are excluded from the current period specifically: they
+  // cannot legally be recruited into a CQC-regulated adult substance
+  // misuse service, so that row never applies to this sector's workforce.
+  const currentPeriod = rates[0]?.period_label;
+  const currentRates = rates.filter(
+    (r) => r.period_label === currentPeriod && r.band_label !== 'Under 18');
 
   replace(container, section(
     'Published pay and employment evidence',
@@ -102,14 +244,13 @@ function renderPublishedPay(container, data) {
       el('div', { class: 'panel' },
         el('h3', { text: 'Statutory minimum rates' }),
         pinnedCaveat(data.caveats?.statutory_pay_rates_note, 'Hourly floors only'),
-        rates.length ? tableCard('Published rates', [
+        currentRates.length ? tableCard('Published rates', [
           { title: 'Period', field: 'period_label' },
           { title: 'Band', field: 'band_label' },
           { title: 'Role', field: 'band_role' },
-          { title: 'Rate (hourly)', field: 'amount', formatter: (c) => gbp(c.getValue(), { compact: false }) },
           { title: 'Published value', field: 'value_text' },
-        ], rates, { height: 280 }) : noData('statutory pay rates', './start.sh run m17_statutory_pay_rates'),
-        provenanceFromRows(rates, { tables: ['statutory_pay_rates'], module: 'm17_statutory_pay_rates' })),
+        ], currentRates, { height: 240 }) : noData('statutory pay rates', './start.sh run m17_statutory_pay_rates'),
+        provenanceFromRows(currentRates, { tables: ['statutory_pay_rates'], module: 'm17_statutory_pay_rates' })),
       el('div', { class: 'panel' },
         el('h3', { text: 'Living Wage Foundation checks' }),
         pinnedCaveat(data.caveats?.living_wage_note, 'How to read “not found”'),
@@ -135,22 +276,40 @@ function renderPublishedPay(container, data) {
     el('div', { class: 'panel' },
       el('h3', { text: 'Gender pay gap filings' }),
       pinnedCaveat(data.caveats?.gender_pay_gap_note, 'Missing is not zero'),
-      genderPayGap.length ? tableCard('Matched filings', [
-        { title: 'Provider', field: 'canonical_name' },
-        { title: 'Reporting year', field: 'reporting_year_label' },
-        { title: 'Employer', field: 'employer_name' },
-        { title: 'Median hourly gap', field: 'diff_median_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
-        { title: 'Mean hourly gap', field: 'diff_mean_hourly_percent', formatter: (c) => c.getValue() == null ? '—' : `${c.getValue()}%` },
-        { title: 'Employer size', field: 'employer_size' },
-      ], genderPayGap, { height: 320 }) : noData('matched gender pay gap filings', './start.sh run m20_gender_pay_gap'),
+      genderPayGap.length ? genderPayGapHolder
+        : noData('matched gender pay gap filings', './start.sh run m20_gender_pay_gap'),
       provenanceFromRows(genderPayGap, { tables: ['gender_pay_gap_reports'], module: 'm20_gender_pay_gap' }))));
+
+  if (!genderPayGap.length) return;
+
+  charts.push(mountChart(genderPayGapHolder, {
+    legend: { top: 0 },
+    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' },
+      valueFormatter: (v) => (v == null ? '—' : `${v}%`) },
+    xAxis: {
+      type: 'category',
+      data: genderPayGap.map((r) => `${truncate(r.canonical_name || r.employer_name || '—', 20)} · ${r.reporting_year_label || '—'}`),
+      axisLabel: { rotate: 20 },
+    },
+    yAxis: { type: 'value', name: 'hourly pay gap (%)', axisLabel: { formatter: (v) => `${v}%` } },
+    series: [
+      { name: 'Median hourly gap', type: 'bar', data: genderPayGap.map((r) => r.diff_median_hourly_percent) },
+      { name: 'Mean hourly gap', type: 'bar', data: genderPayGap.map((r) => r.diff_mean_hourly_percent) },
+    ],
+  }, {
+    height: 'short',
+    aria: 'Bar chart of median and mean hourly gender pay gap percentages for '
+      + 'each matched gender pay gap filing, by provider and reporting year.',
+  }));
 }
 
 // --- 2d. contextual comparators ---------------------------------------------
 
 function renderBenchmarks(container, data) {
   const ashe = data.ons_ashe_observations || [];
-  const skills = data.skills_for_care_estimates || [];
+  // Rows with no hourly pay figure carry nothing this table can show —
+  // annual-only estimates are still readable in the export, just not here.
+  const skills = (data.skills_for_care_estimates || []).filter((r) => r.hourly_pay != null);
 
   replace(container, section(
     'Context only: external comparators',
@@ -231,6 +390,12 @@ function renderWage(container, data, charts) {
     }),
   }));
 
+  // BETA-074: years where every series is missing — flagged as an explicit
+  // note under the chart rather than closing the gap.
+  const allSeries = [...seriesFor('indicative_wage_per_head', 'per head'),
+    ...seriesFor('indicative_wage_per_fte', 'per FTE')];
+  const missingYears = years.filter((_, i) => allSeries.every((s) => s.data[i] == null));
+
   charts.push(mountChart(holder, {
     legend: { top: 0, type: 'scroll' },
     tooltip: {
@@ -239,14 +404,23 @@ function renderWage(container, data, charts) {
     },
     xAxis: { type: 'category', data: years.map(isoDate) },
     yAxis: { type: 'value', name: '£ per employee', axisLabel: { formatter: (v) => gbp(v) } },
-    series: [...seriesFor('indicative_wage_per_head', 'per head'),
-      ...seriesFor('indicative_wage_per_fte', 'per FTE')],
+    series: allSeries,
   }, {
     aria: 'Line chart of indicative wage per employee by financial year. '
       + 'Headcount and full-time-equivalent denominators are shown separately '
       + 'because they differ materially.',
+    zoom: true,
+    tableHref: '#pay-wage-table',
+    missingNote: missingYears.length
+      ? `No published figure for ${missingYears.map(isoDate).join(', ')} — the gap is left open, not filled.`
+      : null,
   }));
 
+  // Newest report first. The chart above reads `rows` in ascending year order
+  // for its x-axis, so the table gets its own sorted copy rather than a
+  // mutation of the array the chart already built its series from.
+  const newestFirst = [...rows].sort(
+    (a, b) => (b.financial_year_end || '').localeCompare(a.financial_year_end || ''));
   container.append(tableCard('Charity accounts — wages and employees', [
     { title: 'Provider', field: 'canonical_name' },
     { title: 'Charity no.', field: 'charity_number' },
@@ -259,7 +433,8 @@ function renderWage(container, data, charts) {
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
     { title: 'Per FTE', field: 'indicative_wage_per_fte',
       formatter: (c) => gbp(c.getValue(), { compact: false }) },
-  ], rows, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300 }));
+  ], newestFirst, { exportEndpoint: 'pay', exportParams: filterParams(), height: 300,
+    anchorId: 'pay-wage-table' }));
 }
 
 // --- 2b. NHS Jobs advertised pay ---------------------------------------------
@@ -338,6 +513,7 @@ function renderAdverts(container, data, charts) {
     height: 'short',
     aria: 'Scatter chart of advertised minimum salary against the date each '
       + 'advert was posted.',
+    zoom: true,
   }));
 
   if (repeats.length) {
@@ -357,99 +533,3 @@ function renderAdverts(container, data, charts) {
   }
 }
 
-// --- 2c. workforce census ----------------------------------------------------
-
-/** The verification caveat that is true right now, or none once all of them
- *  have been checked.
- *
- *  Three states rather than two, because a census metric became something a
- *  person can check one at a time (migration 0033) and a corpus that is partly
- *  checked is the state it will be in for most of its life. */
-function censusCaveat(data) {
-  const total = data.census_total ?? (data.workforce_census || []).length;
-  const verified = data.census_verified_count ?? 0;
-  if (!total || verified >= total) return null;
-  return verified === 0
-    ? pinnedCaveat(data.caveats?.census_unverified_note,
-                    'Every figure below is unverified')
-    : pinnedCaveat(data.caveats?.census_partly_verified_note,
-                    `${verified} of ${total} figures below `
-                    + `${verified === 1 ? 'has' : 'have'} been checked`);
-}
-
-function renderCensus(container, data, charts) {
-  const rows = data.workforce_census || [];
-  const holder = el('div', {});
-
-  replace(container, section(
-    'Workforce census indicators',
-    'Vacancy, turnover and headcount measures as published in the sector '
-    + 'workforce census.',
-    takeaway(rows.length ? (data.census_verified_count ? 'Partly verified' : 'Unverified') : 'Not collected',
-      rows.length && data.census_verified_count ? 'unverified' : 'neutral',
-      rows.length
-        ? 'These are workforce measures, not pay measures. Their verification status is shown before the chart and in the table.'
-        : 'No workforce-census rows match the current filters; a blank is not zero.'),
-    el('div', { class: 'panel' },
-      pinnedCaveat(data.caveats?.census_comparability_note, 'Not comparable between years'),
-      // Pinned until nothing below is unverified, not until something is
-      // verified. The chart draws every figure whatever its flag, so the
-      // caveat that used to vanish the moment one figure was checked would
-      // have left the other sixty-seven on screen with nothing said about
-      // them. The verified count goes in the heading so the reader can see
-      // which way the number is moving.
-      censusCaveat(data),
-      holder,
-      provenanceFromRows(rows, { tables: ['workforce_census_metrics'], module: 'm06_workforce_census' }))));
-
-  if (!rows.length) {
-    replace(holder, noData('workforce census metrics', './start.sh run m06_workforce_census'));
-    return;
-  }
-
-  const years = [...new Set(rows.map((r) => r.census_year))].sort();
-  const metrics = [...new Set(rows.map((r) => r.metric))];
-
-  charts.push(mountChart(holder, {
-    legend: { top: 0 },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: years },
-    yAxis: { type: 'value' },
-    series: metrics.map((metric, index) => ({
-      name: metric,
-      type: 'bar',
-      symbol: symbolFor(index),
-      data: years.map((year) => {
-        const matching = rows.filter((r) => r.census_year === year && r.metric === metric);
-        // One bar per (year, metric). Where the census reports several
-        // segments, the highest is shown and the table below carries them all
-        // — averaging segments would invent a figure the census never
-        // published.
-        return matching.length ? Math.max(...matching.map((m) => m.value ?? 0)) : null;
-      }),
-    })),
-  }, {
-    // The screen-reader description carries the verification state too. A
-    // caveat that only exists as a visual panel beside the chart is a caveat
-    // half the audience does not get.
-    aria: 'Grouped bar chart of workforce census metrics by census year. '
-      + `${data.census_verified_count ?? 0} of `
-      + `${data.census_total ?? rows.length} figures have been checked against `
-      + 'the page they were parsed from; the rest are unverified. Figures are '
-      + 'not comparable between census years.',
-  }));
-
-  container.append(tableCard('Census metrics', [
-    { title: 'Year', field: 'census_year' },
-    { title: 'Metric', field: 'metric' },
-    { title: 'Segment', field: 'workforce_segment' },
-    { title: 'Value', field: 'value' },
-    { title: 'Unit', field: 'unit' },
-    { title: 'Verified', field: 'verified',
-      formatter: (c) => (c.getValue() ? 'yes' : 'AWAITING VERIFICATION') },
-    { title: 'Source page', field: 'source_page' },
-  ], rows, {
-    height: 320,
-    rowClass: (row) => (row.verified ? null : 'unverified-row'),
-  }));
-}

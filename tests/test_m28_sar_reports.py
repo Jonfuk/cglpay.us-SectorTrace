@@ -105,7 +105,7 @@ def test_read_docx_records_a_parse_failure_for_a_corrupt_file(conn):
     assert text is None
     assert source is None
     failure = conn.execute(
-        "SELECT reason FROM parse_failures WHERE source_url = ?",
+        "SELECT reason FROM parse_failures WHERE source_url = %s",
         ("https://example.org/bad.docx",)).fetchone()
     assert "DOCX could not be opened" in failure["reason"]
 
@@ -119,6 +119,7 @@ def test_parse_library_page_reads_title_href_and_year():
         "title": "HSAB SAR Edward report.pdf",
         "href": "./2026/HSAB SAR Edward report.pdf",
         "library_year": 2026,
+        "base": sar.LIBRARY_URL,
     }
     assert rows[2]["library_year"] == 2025
     assert rows[2]["title"] == "Camden Hannah"
@@ -178,6 +179,145 @@ def test_extract_sab_name_only_searches_the_opening():
     assert sar.extract_sab_name(text) is None
 
 
+@pytest.mark.parametrize("text,expected", [
+    # Boards that have renamed to a "Partnership" style, and the "Adult
+    # Safeguarding Board" word order — all the same body.
+    ("Published by the Merton Safeguarding Adults Partnership Board.",
+     "Merton Safeguarding Adults Partnership Board"),
+    ("A new SAR commissioned by Suffolk Safeguarding Partnership Board.",
+     "Suffolk Safeguarding Partnership Board"),
+    ("This review was overseen by the Camden Adult Safeguarding Board.",
+     "Camden Adult Safeguarding Board"),
+])
+def test_extract_sab_name_accepts_partnership_and_word_order_variants(text, expected):
+    assert sar.extract_sab_name(text) == expected
+
+
+def test_extract_sab_name_collapses_a_line_wrapped_name():
+    text = "Report of the Manchester Safeguarding\nAdults Board\n\n1. Introduction"
+    assert sar.extract_sab_name(text) == "Manchester Safeguarding Adults Board"
+
+
+def test_extract_sab_name_falls_back_to_the_stated_commissioner():
+    """When the name is not in the strict phrase position, "commissioned by
+    X" is a firmer attribution than a bare mention, so it is used."""
+    text = ("Executive Summary\n\nThis Safeguarding Adults Review was "
+            "commissioned by the Telford and Wrekin Safeguarding Adults "
+            "Board following the death of an adult.")
+    assert sar.extract_sab_name(text) == "Telford and Wrekin Safeguarding Adults Board"
+
+
+# --- the SAB directory and layered resolution -------------------------------------
+
+def test_parse_sab_directory_groups_by_nation():
+    boards = sar.parse_sab_directory(SAB_DIRECTORY_HTML)
+    by_name = {b["name"]: b for b in boards}
+    assert by_name["Leeds Safeguarding Adults Board"]["nation"] == "England"
+    assert by_name["Leeds Safeguarding Adults Board"]["website_url"] == "https://example.gov.uk/leeds-sab"
+    assert by_name["Cardiff and Vale Safeguarding Board"]["nation"] == "Wales"
+    # Scotland's "Adult Support and Protection" naming is recognised.
+    assert by_name["Dundee Adult Support and Protection Committee"]["nation"] == "Scotland"
+    # A trailing parenthetical member-authority list is dropped from the name.
+    assert "Mid and West Wales Safeguarding Board" in by_name
+    # The site's own nav ("What is a Safeguarding Adults Review?") is not a board.
+    assert not any("What is a" in b["name"] for b in boards)
+
+
+def test_build_sab_index_is_england_only_and_place_keyed():
+    index = sar.build_sab_index(sar.parse_sab_directory(SAB_DIRECTORY_HTML))
+    assert index["camden"] == "Camden Safeguarding Adults Partnership Board"
+    assert index["leeds"] == "Leeds Safeguarding Adults Board"
+    assert "cardiff and vale" not in index  # Wales excluded
+
+
+_IDX = {"camden": "Camden Safeguarding Adults Partnership Board",
+        "leeds": "Leeds Safeguarding Adults Board"}
+
+
+def test_resolve_sab_name_canonicalises_a_text_match_to_the_directory():
+    # The document says "Camden Safeguarding Adults Board"; the directory's
+    # official name is the "...Partnership Board" form. The canonical wins.
+    name, source = sar.resolve_sab_name(
+        "This Safeguarding Adults Review was commissioned by Camden Safeguarding Adults Board.",
+        "Hannah SAR.pdf", _IDX)
+    assert name == "Camden Safeguarding Adults Partnership Board"
+    assert source == "document_text"
+
+
+def test_resolve_sab_name_falls_back_to_the_library_title():
+    name, source = sar.resolve_sab_name(
+        "An executive summary. No board is named anywhere in this short brief.",
+        "Leeds SAR - Executive Summary - Adult K.pdf", _IDX)
+    assert name == "Leeds Safeguarding Adults Board"
+    assert source == "sab_directory"
+
+
+def test_resolve_sab_name_keeps_an_unverified_text_name_when_not_in_the_directory():
+    name, source = sar.resolve_sab_name(
+        "Commissioned by the Barsetshire Safeguarding Adults Board.", "x.pdf", _IDX)
+    assert name == "Barsetshire Safeguarding Adults Board"
+    assert source == "document_text_unverified"
+
+
+def test_resolve_sab_name_none_when_nothing_matches():
+    assert sar.resolve_sab_name("Nothing here.", "Violet SAR V2.pdf", _IDX) == (None, None)
+
+
+def test_directory_fetch_failure_falls_back_to_stored_boards(httpx_mock, settings, conn):
+    """A flaky directory page must not wipe out a working set of board names:
+    the resolution index rebuilds from safeguarding_adults_boards rows."""
+    conn.execute(
+        "INSERT INTO safeguarding_adults_boards (name, nation, website_url, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('Leeds Safeguarding Adults Board', 'England', 'https://x', "
+        "'https://x', '2026-01-01T00:00:00Z', 200, 'test', 'h')")
+    conn.commit()
+
+    httpx_mock.add_response(url="https://www.anncrafttrust.org/robots.txt",
+                             status_code=404, text="", is_reusable=True)
+    httpx_mock.add_response(url=sar.SAB_DIRECTORY_URL, status_code=403, text="Forbidden")
+
+    index = sar._collect_sab_directory(
+        ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None),
+        "m28_sar_reports")
+    assert index.get("leeds") == "Leeds Safeguarding Adults Board"
+
+
+def test_parse_scie_library_page_reads_the_collection_table():
+    rows = sar.parse_scie_library_page(SCIE_HTML)
+    assert len(rows) == 1
+    assert rows[0]["title"] == "01 Croydon Mr A Exec Summary March 2016"
+    assert rows[0]["library_year"] == 2015
+    assert rows[0]["base"] == sar.SCIE_LIBRARY_URL
+    # Its href resolves against the SCIE directory, not search.html — the
+    # bug that 404'd every SCIE document on the first attempt.
+    url = sar.resolve_document_url(rows[0]["href"], rows[0]["base"])
+    assert url == ("https://nationalnetwork.org.uk/SCIE%20Library%202015-2018/"
+                   "01%20Croydon%20Mr%20A%20Exec%20Summary%20March%202016.pdf")
+
+
+def test_run_folds_in_the_scie_collection(httpx_mock, settings, conn, monkeypatch):
+    _allow_all_robots(httpx_mock)
+    _mock_aux_sources(httpx_mock, with_scie_doc=True)
+    httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
+    for href in ("./2026/HSAB SAR Edward report.pdf", "./2025/Camden Hannah (1).pdf"):
+        httpx_mock.add_response(url=sar.resolve_document_url(href), content=b"%PDF-1.4 fake")
+    httpx_mock.add_response(url=sar.resolve_document_url("./2026/MrBSARFinalReport.docx"),
+                            content=_build_docx(DOCX_PARAGRAPHS))
+    scie_url = sar.resolve_document_url(
+        "./01 Croydon Mr A Exec Summary March 2016.pdf", sar.SCIE_LIBRARY_URL)
+    httpx_mock.add_response(url=scie_url, content=b"%PDF-1.4 fake")
+    monkeypatch.setattr(sar.pdftext, "page_texts", lambda *a, **k: [REPORT_TEXT])
+
+    sar.run(ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None))
+
+    rows = {r["document_url"]: dict(r) for r in
+            conn.execute("SELECT * FROM sar_documents").fetchall()}
+    assert scie_url in rows
+    assert rows[scie_url]["library_year"] == 2015
+    assert conn.execute("SELECT COUNT(*) AS n FROM safeguarding_adults_boards").fetchone()["n"] == 6
+
+
 # --- provider mentions --------------------------------------------------------------
 
 def test_find_provider_mentions_matches_known_variant():
@@ -230,8 +370,56 @@ def _allow_all_robots(httpx_mock) -> None:
                              status_code=404, text="", is_reusable=True)
 
 
+SAB_DIRECTORY_HTML = """
+<html><body>
+ <p><a href="https://www.anncrafttrust.org/x">What is a Safeguarding Adults Review?</a></p>
+ <h2>England</h2>
+ <ul>
+  <li><a href="https://example.gov.uk/camden-sab">Camden Safeguarding Adults Partnership Board</a></li>
+  <li><a href="https://example.gov.uk/herts-sab">Hertfordshire Safeguarding Adults Board</a></li>
+  <li><a href="https://example.gov.uk/leeds-sab">Leeds Safeguarding Adults Board</a></li>
+ </ul>
+ <h2>Wales</h2>
+ <ul>
+  <li><a href="https://example.wales/cardiff">Cardiff and Vale Safeguarding Board</a></li>
+  <li><a href="https://example.wales/mww">Mid and West Wales Safeguarding Board (Carmarthenshire, Ceredigion, Pembrokeshire, Powys)</a></li>
+ </ul>
+ <h2>Scotland</h2>
+ <ul><li><a href="https://example.scot/dundee">Dundee Adult Support and Protection Committee</a></li></ul>
+</body></html>
+"""
+
+# The SCIE page: same <table> + <button class="collapsible"> shape as the
+# main library, under one "SCIE Library 2015-2018" heading, hrefs relative
+# to the SCIE directory.
+SCIE_HTML = """
+<html><body>
+ <button type="button" class="collapsible">SCIE Library 2015-2018</button>
+ <div class="content">
+  <table border="0">
+   <tr><td> 01 Croydon Mr A Exec Summary March 2016 </td>
+    <td> <a href="./01 Croydon Mr A Exec Summary March 2016.pdf"><img src="../download-button.png"> Download</a></td></tr>
+  </table>
+ </div>
+</body></html>
+"""
+
+
+def _mock_aux_sources(httpx_mock, *, with_scie_doc: bool = False) -> None:
+    """Mock the two sources run() now reads before the main library: the Ann
+    Craft Trust board directory and the SCIE collection page."""
+    httpx_mock.add_response(url="https://www.anncrafttrust.org/robots.txt",
+                             status_code=404, text="", is_reusable=True)
+    httpx_mock.add_response(url=sar.SAB_DIRECTORY_URL, text=SAB_DIRECTORY_HTML,
+                             is_reusable=True)
+    httpx_mock.add_response(url=sar.SCIE_LIBRARY_URL,
+                             text=SCIE_HTML if with_scie_doc else "<html><body><h1>SCIE</h1></body></html>",
+                             is_reusable=True)
+
+
 def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
     _allow_all_robots(httpx_mock)
+    _mock_aux_sources(httpx_mock)
     httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
     edward_url = sar.resolve_document_url("./2026/HSAB SAR Edward report.pdf")
     mr_b_url = sar.resolve_document_url("./2026/MrBSARFinalReport.docx")
@@ -284,13 +472,13 @@ def test_run_end_to_end(httpx_mock, settings, conn, monkeypatch):
         (mr_b_url, "turning_point")}
 
     terms = {r["term"]: r["occurrences"] for r in conn.execute(
-        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
+        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = %s",
         (edward_url,)).fetchall()}
     assert terms["staffing"] == 1
     assert terms["vacancy"] == 1
 
     docx_terms = {r["term"]: r["occurrences"] for r in conn.execute(
-        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = ?",
+        "SELECT term, occurrences FROM sar_concern_terms WHERE document_url = %s",
         (mr_b_url,)).fetchall()}
     assert docx_terms["caseload"] == 1
 
@@ -300,7 +488,7 @@ def _insert_sar_document(conn, document_url: str, *, ext: str, year: int,
     conn.execute(
         "INSERT INTO sar_documents (document_url, document_ext, library_year, sab_name, "
         "has_body_text, source_url, retrieved_at, http_status, source_system, payload_sha256) "
-        "VALUES (?, ?, ?, ?, ?, ?, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
+        "VALUES (%s, %s, %s, %s, %s, %s, '2026-01-01T00:00:00Z', 200, 'test', 'abc')",
         (document_url, ext, year, sab_name, has_body_text, document_url))
     conn.commit()
 
@@ -313,6 +501,7 @@ def test_run_skips_a_document_already_processed(httpx_mock, settings, conn):
     new document are mocked.
     """
     _allow_all_robots(httpx_mock)
+    _mock_aux_sources(httpx_mock)
     httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
 
     already = sar.resolve_document_url("./2026/HSAB SAR Edward report.pdf")
@@ -339,6 +528,7 @@ def test_run_retries_a_document_recorded_with_no_text(httpx_mock, settings, conn
     done" rule. A plain rerun must pick it up without any special command.
     """
     _allow_all_robots(httpx_mock)
+    _mock_aux_sources(httpx_mock)
     httpx_mock.add_response(url=sar.LIBRARY_URL, text=LIBRARY_HTML, is_reusable=True)
 
     mr_b_url = sar.resolve_document_url("./2026/MrBSARFinalReport.docx")
@@ -355,7 +545,7 @@ def test_run_retries_a_document_recorded_with_no_text(httpx_mock, settings, conn
     sar.run(ctx)
 
     row = conn.execute(
-        "SELECT has_body_text, sab_name FROM sar_documents WHERE document_url = ?",
+        "SELECT has_body_text, sab_name FROM sar_documents WHERE document_url = %s",
         (mr_b_url,)).fetchone()
     assert row["has_body_text"] == 1
     assert row["sab_name"] == "Turning Point Safeguarding Adults Board"

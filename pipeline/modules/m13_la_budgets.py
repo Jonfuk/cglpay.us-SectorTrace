@@ -381,15 +381,20 @@ def run(ctx: ModuleContext) -> None:
                         continue
 
                     extracted = extract_budget_rows(rows, structure, multiplier)
+                    budget_write_rows: list[dict] = []
                     for entry in extracted:
-                        db.upsert(conn, "la_revenue_budgets", {
+                        budget_write_rows.append({
                             **entry,
                             "financial_year": pub["financial_year"],
                             "source_document": attachment["url"],
                             **provenance,
-                        }, natural_key=["ons_code", "financial_year", "line_code"])
+                        })
                         budget_rows += 1
 
+                    db.upsert_many(
+                        conn, "la_revenue_budgets", budget_write_rows,
+                        natural_key=["ons_code", "financial_year", "line_code"],
+                    )
                     db.upsert(conn, "la_budget_publications", {
                         "publication_slug": pub["publication_slug"],
                         "document_url": attachment["url"],

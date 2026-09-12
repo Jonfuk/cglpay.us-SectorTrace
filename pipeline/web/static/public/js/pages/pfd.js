@@ -26,10 +26,103 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, sourceLink } from '/app.js';
+import { el, replace, fetchJSON, num, sourceLink, isoDate } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart,
           disposeCharts, provenanceFromRows, tableCard, shareButton,
           findingBlock, evidenceMeta } from '/js/components.js';
+
+/* BETA-079: the safety & legal chronology. One filterable list over PFD,
+ * SAR, HSE, tribunal and CQC evidence, each event carrying exactly one
+ * relationship label. The per-source and per-relationship counts are shown
+ * separately and NEVER added; a mention is never a finding of fault. */
+const SL_SOURCE_LABELS = { pfd: 'Coroners’ reports', sar: 'Safeguarding reviews',
+  hse: 'HSE notices', tribunal: 'Tribunal cases', cqc: 'CQC inspections' };
+const SL_REL_LABELS = { addressed_to: 'Addressed to', named_in: 'Named in',
+  matched_to: 'Matched to', regulated_by: 'Regulated by' };
+
+function slQuery() {
+  const q = new URLSearchParams(location.hash.split('?')[1] || '');
+  return { source: q.get('source') || '', relationship: q.get('relationship') || '' };
+}
+function slSet(patch) {
+  const q = new URLSearchParams(location.hash.split('?')[1] || '');
+  for (const [k, v] of Object.entries(patch)) { if (v) q.set(k, v); else q.delete(k); }
+  const s = q.toString();
+  location.hash = `#/pfd${s ? `?${s}` : ''}`;
+}
+
+async function renderChronology(container, current) {
+  let data;
+  try {
+    data = await fetchJSON('safety_legal', current);
+  } catch (error) {
+    replace(container, section('Safety & legal chronology', null,
+      errorCard(error, () => renderChronology(container, current))));
+    return;
+  }
+  const bySource = data.counts?.by_source || {};
+  const byRel = data.counts?.by_relationship || {};
+
+  const chip = (key, label, count, active, patch) => el('button', {
+    type: 'button', class: `filter-chip${active ? ' is-active' : ''}`,
+    'aria-pressed': String(active), onclick: () => slSet(patch),
+  }, `${label} · ${num(count || 0)}`);
+
+  const sourceChips = el('div', { class: 'sl-chiprow' },
+    chip('', 'All sources', Object.values(bySource).reduce((a, b) => a + b, 0),
+      !current.source, { source: '' }),
+    ...(data.sources || []).map((s) =>
+      chip(s, SL_SOURCE_LABELS[s] || s, bySource[s], current.source === s, { source: s })));
+  const relChips = el('div', { class: 'sl-chiprow' },
+    chip('', 'Any relationship', Object.values(byRel).reduce((a, b) => a + b, 0),
+      !current.relationship, { relationship: '' }),
+    ...Object.keys(SL_REL_LABELS).map((r) =>
+      chip(r, SL_REL_LABELS[r], byRel[r], current.relationship === r, { relationship: r })));
+
+  const rows = (data.events || []).map((e) => ({
+    date: e.date ? isoDate(e.date) : 'no published date',
+    source: SL_SOURCE_LABELS[e.source] || e.source,
+    relationship: SL_REL_LABELS[e.relationship] || e.relationship,
+    entity: e.entity_name || 'unmatched',
+    title: e.title,
+    result: e.result || '—',
+    source_url: e.source_url || '',
+  }));
+
+  const caveatBits = Object.entries(data.caveats || {})
+    .filter(([k]) => !current.source || k === current.source)
+    .map(([k, v]) => pinnedCaveat(v, `Read this with the ${SL_SOURCE_LABELS[k] || k}`));
+
+  replace(container, section('Safety & legal chronology',
+    'Five distinct evidence streams on one timeline. Their counts are shown by '
+    + 'source and by relationship and are never added together.',
+    el('div', { class: 'panel' },
+      el('p', { class: 'small', text: data.note }),
+      el('div', { class: 'sl-relationship-key' },
+        ...Object.entries(data.labels || {}).map(([, text]) =>
+          el('p', { class: 'small muted', text }))),
+      el('h3', { text: 'Filter by source' }), sourceChips,
+      el('h3', { text: 'Filter by relationship' }), relChips,
+      ...caveatBits,
+      rows.length
+        ? tableCard('Chronology', [
+            { title: 'Date', field: 'date', priority: 0 },
+            { title: 'Source', field: 'source', priority: 1 },
+            { title: 'Relationship', field: 'relationship', priority: 2 },
+            { title: 'Organisation', field: 'entity', priority: 1 },
+            { title: 'Record', field: 'title', priority: 3 },
+            { title: 'Published result', field: 'result', priority: 4 },
+            { title: 'Source', field: 'source_url', priority: 5, headerFilter: false,
+              formatter: (c) => (c.getValue()
+                ? `<a href="${c.getValue()}" target="_blank" rel="noopener noreferrer">open ↗</a>` : ''),
+              htmlOutput: true },
+          ], rows, { height: 520, total: rows.length })
+        : noData('safety and legal events matching this filter'),
+      data.truncated
+        ? el('p', { class: 'small muted', text:
+            'The chronology is capped; narrow the filters to see the rest.' })
+        : null)));
+}
 
 export async function render(main) {
   const charts = [];
@@ -37,7 +130,7 @@ export async function render(main) {
   try {
     data = await fetchJSON('pfd');
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 
@@ -73,6 +166,8 @@ export async function render(main) {
       el('p', { text: 'A provider mention is not a finding of fault, causation, prevalence, or responsibility. “Sent to” and “named in” are different facts.' }),
       el('p', { text: 'Some publications are metadata stubs, so an absent concern is a source limitation rather than evidence of absence.' }),
       el('p', { text: 'Safeguarding Adult Reviews carry none of these numbers as a "matters of concern" excerpt — the source has no shared template across ~150 boards for that to be trusted from.' })),
+    el('div', { id: 'chronology' }),
+    el('h2', { text: 'Coroners’ reports in detail' }),
     el('div', { id: 'recent' }),
     el('div', { id: 'year' }),
     el('div', { id: 'area' }),
@@ -86,14 +181,24 @@ export async function render(main) {
     el('div', { id: 'sar-year' }),
     el('div', { id: 'sar-board' }),
     el('div', { id: 'sar-terms' }),
-    el('div', { id: 'sar-mentions' }));
+    el('div', { id: 'sar-mentions' }),
+    el('h2', { text: 'HSE enforcement notices' }),
+    el('p', { class: 'lede' },
+      'A third, separate evidence stream: improvement and prohibition notices ',
+      'the Health and Safety Executive served on an organisation whose name ',
+      'exactly matches a tracked provider. Not combined with the reports above.'),
+    el('div', { id: 'hse' }));
   replace(main, page);
+
+  // BETA-079: the unified chronology, above the detailed per-source panels.
+  renderChronology(page.querySelector('#chronology'), slQuery());
 
   renderRecent(page.querySelector('#recent'), data);
   renderYears(page.querySelector('#year'), data, charts);
   renderAreas(page.querySelector('#area'), data, charts);
   renderTerms(page.querySelector('#terms'), data, charts);
   renderMentions(page.querySelector('#mentions'), data);
+  renderHse(page.querySelector('#hse'));
 
   renderSarRecent(page.querySelector('#sar-recent'), sar);
   renderSarYears(page.querySelector('#sar-year'), sar, charts);
@@ -102,6 +207,38 @@ export async function render(main) {
   renderSarMentions(page.querySelector('#sar-mentions'), sar);
 
   return () => disposeCharts(charts);
+}
+
+/* BETA-051: HSE enforcement notices attributed to a tracked provider by
+ * exact name match. Its own fetch — a separate route (/api/v1/safety) and a
+ * separate evidence stream that must not be summed with the reports above. */
+async function renderHse(container) {
+  let data;
+  try {
+    data = await fetchJSON('safety');
+  } catch (error) {
+    replace(container, section('HSE enforcement notices', null,
+      errorCard(error, () => renderHse(container))));
+    return;
+  }
+  const notices = data.notices || [];
+  replace(container, section(
+    `${num(data.total)} enforcement notice${data.total === 1 ? '' : 's'}`,
+    'Served by HSE on an organisation whose name exactly matches a tracked '
+    + 'provider. Individuals are excluded, and the register covers only '
+    + 'HSE-enforced workplaces.',
+    pinnedCaveat(data.caveat, 'A notice is not a settled outcome'),
+    notices.length
+      ? tableCard('Notices', [
+          { title: 'Provider', field: 'provider_name' },
+          { title: 'Type', field: 'notice_type', width: 120 },
+          { title: 'Issued', field: 'issue_date', width: 110 },
+          { title: 'Result', field: 'result', width: 140 },
+          { title: 'Legislation', field: 'legislation' },
+          { title: 'Number', field: 'notice_number', width: 110 },
+        ], notices, { height: 360 })
+      : noData('enforcement notices matched to a tracked provider',
+               './start.sh run m33_hse_notices')));
 }
 
 /* Reports by year, stacked by whether the publication carried the matters of
@@ -253,7 +390,13 @@ function renderRecent(container, data) {
         formatter: (c) => (c.getValue() ? 'yes' : 'stub') },
       { title: 'Report', field: 'report_url', width: 90, headerFilter: false,
         formatter: (c) => sourceLink(c.getValue(), 'report ↗') },
-    ], recent, { height: 520, total: (data.totals || {}).reports }),
+    ], recent, {
+      height: 520, total: (data.totals || {}).reports,
+      // The complete corpus, not just these 50 -- server.py streams every
+      // row from its own unwindowed query (public_queries.all_pfd_reports),
+      // the same pattern contracts.js's export uses for the same reason.
+      exportEndpoint: 'pfd',
+    }),
     provenanceFromRows(recent, { module: 'm08_pfd_reports', tables: ['pfd_reports'] })));
 }
 

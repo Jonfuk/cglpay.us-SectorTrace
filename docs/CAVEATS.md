@@ -59,6 +59,27 @@ anyone using it.
 
 ## Per source
 
+### Open Jobs (operator-only shadow observations)
+
+- An Open Jobs row is an aggregator observation of an advertisement, not a
+  confirmed vacancy, successful recruitment event, staffing measure or
+  provider fact. The source may relay employer or ATS text and may include
+  deterministic or model-derived enrichment; those origins remain separate.
+- The collector is disabled by default and its tables are excluded from all
+  public catalogue, query and export projections. Nothing is promoted to
+  evidence or to a provider without a human review decision.
+- Lifecycle values describe the upstream export or crawler report only:
+  `closed` is not proof that a role was filled, `left_dataset` is not closure,
+  `unknown` remains unresolved, and `carried` does not refresh employer
+  confirmation. Absence-derived closures are not enabled.
+- Open Jobs' CC0 statement does not clear third-party employer or ATS rights.
+  Full descriptions and raw artifacts stay behind operator and restricted-data
+  boundaries; no bulk job-description reproduction is provided.
+- Pay is parsed only from identifiable source text using the existing salary
+  discipline. Rates are not annualised, converted, midpointed or inferred.
+  England geography and provider attribution remain nullable until supported
+  by evidence and a reversible review decision.
+
 ### Procurement (Modules 1)
 
 - Contract values are **estimates at notice stage** and may differ from actual
@@ -199,6 +220,14 @@ anyone using it.
   services. Most community drug and alcohol provision is not CQC-registered.
 - Counting locations per authority does not measure service coverage, and
   absence of a location does not mean absence of a service.
+- **The public CQC-location explorer (`/api/v1/cqc_locations`, the portal's
+  "CQC-registered locations" page, BETA-065) returns only tracked providers'
+  locations, over an explicit column allowlist — no registered-manager or
+  contact field, which live in `restricted_cqc_location_contacts`.** A
+  rating is CQC's own, as at its last inspection; where the API supplied
+  none, the bulk export's rating is shown and labelled `rating_source =
+  bulk_export`. A location count in that view is neither coverage nor
+  quality, and it is never combined with any other layer.
 
 ### Workforce census (Module 6)
 
@@ -337,6 +366,81 @@ anyone using it.
   which has no viewstate field. The search is a plain GET on
   `/ieSearchResults2.aspx`. Both faults produced the same symptom: a council
   that looked like it published nothing.
+- **A document's `display_title` is derived, and `title_basis` says how
+  (BETA-062).** `document_records.title` is whatever the collecting module
+  supplied — often a hash-like filename, sometimes nothing — so the portal
+  shows a `display_title` picked by a fixed precedence: the source's own
+  label, then the PDF `/Title`, then the first usable heading, then a
+  de-slugified filename. Only `title_basis='source_label'` is the document's
+  own words; anything else is our reconstruction and must not be quoted as
+  the document's title. `title_basis='unknown'` means nothing usable was
+  found and the raw fallback is shown. `pipeline documents backfill-titles`
+  cannot reach the `pdf_metadata` rung for versions parsed before the
+  migration — that needs a reparse — so an old scanned PDF may sit at
+  `filename` or `unknown` until it is reprocessed.
+- **Hybrid search over these documents (BETA-034A, `/api/admin/search`,
+  `pipeline nlp search`) returns leads, not findings.** A chunk is retrieved
+  because PostgreSQL full text, trigram similarity, its embedding, or a
+  deterministic reciprocal-rank fusion is close to the query — an
+  embedding says two passages are similar, never that a statement in one is
+  true. Candidate rank, vector similarity and the fused score are not evidence
+  strength, source authority, corroboration, extraction quality, or review
+  state, and are never counted, summed or compared across documents. Nothing the layer produces is
+  attributed to a provider or promoted to a claim without a person going
+  through the review queue → `graph_claims` path. The `stub` embedder is a
+  deterministic offline stand-in for CI and development and retrieves poorly
+  by design; only a run with the real model behind the `nlp` extra should be
+  read as retrieval at all.
+- **Temporal/change state describes the stored source, not the world.** A
+  passage or table marked `removed` means only that deterministic parsing did
+  not find it in the newer archived source version. A missing/unavailable URL,
+  a removed passage, or a superseded candidate is never proof that the fact it
+  once described has ceased. Unknown validity/effective dates remain NULL.
+  Authority, extraction quality, corroboration, temporal completeness and
+  review state are separate assertions; there is deliberately no combined
+  evidence-quality score.
+- **Ontology topic tags (BETA-034C, `document_topics` rows with
+  `match_method='ontology_v1'`) mark wording, not fact.** A row saying an
+  element is about `workforce.recruitment_difficulty` means the phrase is
+  present — including in "no recruitment difficulties this year". Whether a
+  tagged passage affirms, denies or merely reports the concept is not
+  decided until the assertion layer (034E); until then a tag is a reading
+  aid for finding passages, never a count of how many documents report a
+  problem. `keyword_v1` rows (the older, frozen `classify.py` vocabulary)
+  are a separate, coarser set and are not changed by this layer.
+- **Entity spans (BETA-034D, `document_concept_mentions`) are extractor
+  candidates, and `extraction_score` is not a probability of truth.** A
+  score of 1.0 means the offline stub made an exact dictionary hit; a GLiNER
+  score is the model's token→label confidence. A `PROVIDER` span becomes a
+  `document_entity_mentions` row — an attribution to a named organisation —
+  **only** through `pipeline nlp resolve`, and only on an exact normalised
+  name match against a registered entity. A span that does not resolve is a
+  lead for a person, never counted as "provider X is named in N documents".
+  The stub does not attempt `LOCATION`, `PROGRAMME` or unknown provider
+  names; absence of those spans is a limit of the offline path, not evidence
+  they are not there.
+- **Assertion status (BETA-034E, `document_assertions`) is a rule tagger's
+  reading of one sentence, not a verified fact.** `NEGATED` means a negation
+  cue sat near the span, `HISTORICAL` that a past-tense cue did, and so on;
+  the always-on detector is regex cue families, not a parser. It fixes the
+  gross error — "no recruitment difficulties" is no longer indistinguishable
+  from "recruitment difficulties remain" — but a sarcastic, deeply nested or
+  cross-sentence construction can still be misread. `detector_confidence` is
+  the tagger's confidence in *that class*, never a probability the underlying
+  statement is true, and it is never multiplied into anything. Use it to
+  filter a review queue, not to score evidence.
+- **Machine claim candidates (BETA-034F, `document_claim_candidates`) are not
+  claims and never become evidence on their own.** They are (subject,
+  predicate, object) triples a rule assembled from spans; the table is
+  high-volume and mostly unreviewed. A narrow policy queues a slice into
+  `review_queue` as `semantic_claim_candidate`; a person's verdict
+  (approve / reject / **correct**) is recorded in `claim_candidate_decisions`
+  against their name. Nothing a candidate does reaches the Evidence Graph:
+  the approved-candidate → `graph_claims` draft write is deliberately not
+  built (`graph_claims` has no writer anywhere yet). `relation_score` orders
+  a reviewer's worklist and is not a probability; a candidate's `predicate`
+  is from the closed `relations.yml` vocabulary, so "the layer proposed X" is
+  auditable, but "the layer proposed X" is not "X is true".
 
 ### Public Health Grant (Module 11)
 
@@ -581,6 +685,17 @@ anyone using it.
   `provider_identifiers` (or a company row m04 seeded) — never through an
   unverified discovery or a name. This is the one rule the whole universe
   exists to enforce.
+- **Entity lineage (`/api/v1/providers/{provider_key}/lineage`, the provider
+  page's "Entity lineage" block, BETA-066) is the verified administrative
+  record only.** It reads `providers.status` / `superseded_by` — seeded from
+  `pipeline/providers.py::PROVIDER_STATUS`, cross-checked against the
+  registered company and charity record — into explicit `renamed_to` /
+  `merged_into` / `dissolved` / `renamed_from` / `merged_from` edges and a
+  forward chain to the surviving entity. It says nothing about whether the
+  services, staff or contracts of a merged or dissolved organisation moved,
+  stayed or ended. No ownership structure is inferred and no individual
+  officer is named. Evidence bearing an older identity stays under that
+  `provider_key` and is not rewritten.
 - **A funder is a buyer that matched no authority.** The funder rows include
   NHS bodies, police and other public bodies, suppliers that also
   commission, and names that are simply unidentifiable; they were captured
@@ -647,9 +762,13 @@ anyone using it.
   they are rolling windows: consecutive columns share eleven months, so the
   difference between two of them is not a month's change and successive
   columns are not independent observations.
-- **Only the current report month is collected.** The site's own dropdown
-  addresses months back to April 2014; nothing here has walked them. An
-  absent month means it was never fetched, not that it does not exist.
+- **The normal run walks every exposed report version, but history is still
+  provisional.** The site's own dropdown currently addresses Adults back to
+  April 2014 (and Young People to a later start). `report_version_id` and
+  `report_month` identify each publication. Long backfills may be split into
+  inclusive `NDTMS_MONTHLY_MIN_VERSION`/`NDTMS_MONTHLY_MAX_VERSION` chunks;
+  an absent month means that chunk has not been fetched, not that it does not
+  exist.
 - **`dat_code` is NDTMS's own area code, not an ONS code.** NDTMS-style codes
   (`B18B`) and ONS-style ones (`00EQ`) sit in the same list, so `ons_code` is
   resolved from the area *name* against `authorities`; an unmatched name is
@@ -659,6 +778,15 @@ anyone using it.
   `value` NULL. They do not mean zero.
 - **Adults and young people are different cohorts**, reported separately and
   never added together.
+- **Power BI observations are a separate publication layer.** The dashboard
+  can be revised independently of the annual ODS and legacy monthly reports;
+  its exact response payload is archived and identified by hash. Do not merge
+  or difference Power BI rows against either existing table without a named
+  review decision.
+- **Unlabelled Power BI cell positions are not semantic measures.** The raw
+  response context, metric label when supplied, and column index are retained;
+  a changed report descriptor must not be treated as though a column position
+  still means the same thing.
 - A response whose `<h1>` does not name the area that was requested is
   discarded, not stored: the form re-renders the England-wide page rather than
   erroring when its anti-forgery token is rejected, so a missing area is a
@@ -690,6 +818,237 @@ anyone using it.
   falling back to the bare name, because falling back would answer a question
   nobody has looked at with whichever code happened to sort first.
 
+### Rough sleeping snapshot (Module 29)
+
+*Surfaced on the public authority page (BETA-017) as one of three
+"Comparators" tables, alongside Modules 30/31, below their own caveat.*
+
+- **This is a comparator, not sector evidence, and it is never combined with
+  the sector's own evidence.** It exists so a reader can look at rough
+  sleeping and substance-misuse figures for the same authority side by side —
+  the two are widely documented as overlapping populations — never to compute
+  a ratio, a correlation, or any other cross-layer figure. `docs/CAVEATS.md`'s
+  first rule applies here exactly as everywhere else in this pipeline: no
+  arithmetic across evidence layers.
+- **Methodology is not standardised between authorities, and that is the
+  single most important thing to carry when comparing two of them.** MHCLG's
+  own notes say each authority chooses its own approach — a count, an
+  evidence-based estimate, or an evidence-based estimate with a spotlight
+  count — and its own date within the October–November window. A difference
+  between two authorities' figures may be a difference in what was measured
+  and how, not only a difference in what exists on the street. This pipeline
+  stores no methodology field per authority because the source does not
+  publish one in the machine-readable table — only in prose — so this caveat
+  is the only place the limitation is recorded.
+- **`rate_per_100k` is MHCLG's own published figure, calculated from the
+  corresponding year's ONS population estimate — this pipeline never derives
+  a rate itself**, the same discipline as ONS ASHE and NDTMS's own published
+  rates. Do not recompute it from `count` and a different population source;
+  the two would disagree for reasons that have nothing to do with rough
+  sleeping.
+- **A single night's estimate, not a count of everyone who slept rough across
+  the season.** The snapshot records people seen, or believed, to be sleeping
+  rough on one chosen night. It excludes people in hostels, shelters, or
+  organised campsites, and it is not a measure of homelessness more broadly —
+  statutory homelessness is a separate MHCLG collection, read by Module 30
+  below.
+- **`[x]` (not available), `[z]` (not applicable) and `[n]` (no data — the
+  authority did not exist yet, from reorganisation) are kept verbatim in
+  `count_text`/`rate_text` with the numeric column `NULL`.** None of the
+  three means zero.
+- **A local authority code from an older edition of the time series that no
+  longer appears in this pipeline's `authorities` table is logged to
+  `review_queue` as `rough_sleeping_unmatched_authority`, not silently
+  dropped.** The 2010–2025 series spans several rounds of local government
+  reorganisation (unitary mergers, county splits); this pipeline does not yet
+  reconcile a predecessor code's history onto its successor the way Module 27
+  does for NDTMS, so a merged or split authority's older years may be under a
+  code no longer in `authorities` until that reconciliation is done.
+- **Coverage stops at what the evergreen source page currently publishes.**
+  MHCLG replaces the page's attachment each edition rather than keeping a
+  dated archive of every past one; this pipeline captures whatever the
+  current edition contains — the full 2010-to-date series it has always
+  republished so far — on every run. If a future edition ever narrowed that
+  window, an earlier year missing here would mean the source stopped
+  publishing it, not that this pipeline failed to collect it.
+
+### Statutory homelessness (Module 30)
+
+*Surfaced on the public authority page (BETA-017) alongside Modules 29/31 —
+see that section for how.*
+
+- **This is a comparator, not sector evidence, and it is never combined with
+  the sector's own evidence** — the same rule as Module 29, and for the same
+  reason (documented overlap between the homelessness and substance-misuse
+  populations). No arithmetic across evidence layers, no ratio, no
+  correlation computed by this pipeline.
+- **Only Table A1 is read** — the flagship count of households assessed and
+  what duty (if any) was owed. The workbook MHCLG publishes each quarter has
+  40+ other tables (prevention/relief outcomes by type, multiple-disadvantage
+  breakdowns); none of the rest are in this pipeline. Temporary accommodation
+  (Table TA1) is read separately by Module 31, below — do not assume it can
+  be derived from anything in this module's own table.
+- **A quarter can be revised after this pipeline first reads it, and a later
+  run silently overwrites the earlier figures on the natural key
+  `(ons_code, quarter_start)`.** MHCLG republishes recent quarters as
+  "(revised)" editions on the same evergreen page; this module always prefers
+  a revised edition over the original where both are attached. This means a
+  figure captured today may not match the same query run again next quarter
+  — the file, at the time it was last fetched, is the truth, not a frozen
+  snapshot of what MHCLG said on a particular date. `retrieved_at` on every
+  row is when *that* fetch happened; it is not a guarantee nothing has
+  changed since.
+- **The sheet layout is not the same across the whole series.** MHCLG has
+  published Table A1 under at least two structurally different layouts (an
+  older multi-row merged-header block and a newer flat single-header-row
+  form); this module resolves columns by keyword rather than fixed position
+  to cover both, and a future layout change it cannot resolve fails safely —
+  the quarter is logged to `review_queue` as
+  `statutory_homelessness_columns_unresolved`, not guessed at or silently
+  misaligned.
+- **`[x]` (not available), `[z]` (not applicable), `[n]` (no data) and `[c]`
+  (data suppressed, usually a small-number privacy rule) are kept verbatim in
+  each field's paired `_text` column with the numeric column `NULL`.** None
+  of the four means zero, and `[c]` in particular means a real, nonzero
+  figure exists but MHCLG has withheld it — treat it as materially different
+  from "nothing happened here".
+- **`not_threatened_no_duty` means something different before and after
+  MHCLG split the "no duty owed" reason out into three columns.** Confirmed
+  by hand against real published totals from both eras: in the older table
+  layout there is only one combined "no duty owed" column (this pipeline
+  reads it into `not_threatened_no_duty`, and `withdrew_no_duty`/
+  `not_eligible_no_duty` are `NULL` for that quarter — genuinely absent from
+  the source, not a parsing gap), and it equals
+  `total_initial_assessments − total_owed_duty` exactly (72,290 − 68,520 =
+  3,770 for October–December 2019). In the newer layout the same three
+  columns are separate, additive components of that same difference (4,130 +
+  3,600 + 610 ≈ 92,200 − 83,850 for January–March 2026, the small remainder
+  being MHCLG's own published rounding). **Whether `withdrew_no_duty` is
+  `NULL` for a given quarter is how to tell which meaning
+  `not_threatened_no_duty` carries for that row** — this pipeline does not
+  add a separate flag for it, and does not compute either total itself.
+- **Pre-2017 quarters are not collected.** Those files are plain `.xls`
+  (the old binary Excel format), which this pipeline has no reader for and
+  does not add a dependency for two years of history. This is a bounded,
+  documented gap in the series' start, not a silent one — the earliest
+  quarter this module can reach depends on the earliest quarter GOV.UK still
+  attaches as ODS or XLSX.
+- **A local authority code not in this pipeline's `authorities` table is
+  logged to `review_queue` as `statutory_homelessness_unmatched_authority`,
+  not silently dropped** — the same reorganisation-reconciliation gap
+  Module 29 has, unrelated to this module's own parsing.
+
+### Temporary accommodation (Module 31)
+
+*Surfaced on the public authority page (BETA-017): a "Comparators" section
+lower on every authority page holds one small table each for this module
+and Modules 29/30, each carrying its own caveat text (`public_queries.py`'s
+`CAVEATS["rough_sleeping_comparator"]` etc. — condensed from the fuller
+prose in this file, not a substitute for it). An authority with none of
+this data gets an honest "no comparators yet" message, the same convention
+every other section on the page already uses, not a missing section.*
+
+- **This is a comparator, not sector evidence, and it is never combined
+  with the sector's own evidence** — the same rule as Modules 29 and 30.
+- **Reads Table TA1 from the same quarterly workbook Module 30 reads Table
+  A1 from.** Discovery, per-quarter attachment selection and the
+  revision-preference rule are shared code, not independently maintained
+  copies — the revision, placeholder (`[x]`/`[z]`/`[n]`/`[c]`) and
+  pre-2017-`.xls`-gap caveats in Module 30's entry above apply here
+  identically and are not restated in full.
+- **The top-level totals are `temporary_accommodation_snapshot`; the
+  bed-and-breakfast "of which" block is `temporary_accommodation_breakdowns`
+  (BETA-064).** `total_households_ta`, `households_ta_with_children` and
+  `children_in_ta` are the snapshot. The breakdown is narrow — one row per
+  authority, quarter and `measure` — because the set of B&B columns is not
+  stable across the series: the older multi-row-header era splits
+  `bb_households` and `bb_households_with_children`, the flat-header era
+  publishes only `bb_households`. `_BB_MEASURES` in the module is a closed
+  set; a B&B column matching none of them is a
+  `temporary_accommodation_breakdown_unknown_column` review item, never a
+  guessed measure. **A measure absent for a quarter means the source did not
+  publish it, not zero.** The further "6 weeks", "pending review" and
+  "16/17-year-old applicant" splits within the B&B block are still not read.
+  This is context only — never a rate, never compared between authorities,
+  never differenced across quarters.
+- **One real edition published this table under a misnamed sheet.**
+  January–March 2023's workbook names the sheet `TA1_` rather than `TA1`
+  while every other sheet in the same file, including Table A1, is named
+  normally. `read_workbook_sheet` (shared with Module 30) resolves a
+  single unambiguous trailing-underscore variant; a workbook where more
+  than one sheet name would match after stripping is refused rather than
+  guessed at.
+
+### HSE enforcement notices (Module 33)
+
+*Surfaced through `/api/v1/safety`. Only notices whose recipient name exactly
+matches a tracked provider (`provider_key IS NOT NULL`) are published; the
+rest are collected but not served.*
+
+- **A served notice is a point-in-time fact, not a settled outcome.** The
+  register's own `result` field — `Complied`, `Withdrawn`, `Under appeal`,
+  `Appeal — notice affirmed / cancelled / modified` — is stored verbatim and
+  travels with every notice on the portal. A prohibition or improvement
+  notice can be appealed to an employment tribunal and cancelled or
+  modified. This pipeline never infers whether a notice was complied with,
+  and a count of notices is not a count of unsafe workplaces.
+- **Individuals are excluded, at parse time.** The register also lists
+  notices served on named people (directors, sole traders). A recipient that
+  reads as a personal name and carries no organisation token, and does not
+  exactly match a tracked provider, is dropped before anything is written.
+- **Exact name match only** — the same discipline as Modules 4 and 18. A
+  register spelling that is close to a tracked name but not an exact
+  normalised match is a `review_queue` item (`hse_name_near_miss`), never a
+  stored attribution.
+- **Coverage is HSE-enforced workplaces only.** Local authorities enforce
+  health and safety in many care and community settings; those notices are
+  on the LA's own register, not HSE's. An absence of notices here is not a
+  clean bill of health.
+- **The live-fetch path has not been validated against the real register.**
+  The result parser is written to HSE's documented notice-list structure and
+  is exercised by a representative fixture; the first real run should be
+  watched by a person, per the reduced-testing policy for a new source.
+
+---
+
+### ICB board papers (Module 34)
+
+*Discovery only. `icb_board_paper_candidates` holds everything captured;
+nothing reaches `icb_board_papers` without a person promoting it. Not surfaced
+on the public portal.*
+
+- **An ICB is not the commissioner of these services.** Drug and alcohol
+  treatment in England is commissioned by local authorities out of the public
+  health grant, not by the NHS. An Integrated Care Board plans and funds NHS
+  services. So a substance-misuse mention in an ICB board pack is **context
+  for a person to weigh, not a figure**: it may be dual-diagnosis or
+  mental-health commissioning that overlaps the treatment population, a
+  Combating Drugs Partnership update, or a provider that also holds an NHS
+  contract.
+- **No spend, no headcount, no attribution.** This module extracts no money
+  and no workforce numbers from the documents, and it never maps an ICB to a
+  local authority or adds anything across the two. The 42 ICB areas do not
+  align to LA boundaries and this pipeline does not pretend they do.
+- **`subject_hits` is a finding aid, not a relevance score.** It counts
+  substance-misuse and workforce-pressure terms in the extracted text so the
+  review worklist can be ranked. A high count is a reason to read the
+  document, never a reason to promote it, and `subject_hits = 0` means "not
+  surfaced this run", not "checked and irrelevant" — the document is still
+  captured and queryable.
+- **Capture is not evidence.** Every Board and committee document is archived,
+  text-extracted and indexed regardless of subject. "Collected" and
+  "citable" are different states and the gap between them is a person, the
+  same as Modules 9, 10 and 32.
+- **Coverage is whichever ICBs resolved a governance page.** A board_url is a
+  hand-verified entry in `pipeline/icb_boards.py` or the directory link with
+  `MEETING_PATHS` probed against it; an ICB with neither is an
+  `icb_board_url_unknown` review item. An absent ICB is absence of a
+  resolved page, not evidence it published nothing.
+- **The live-fetch path has not been validated against the real sites.** The
+  directory and crawl parsers are written to the observed structure and
+  exercised by fixtures; the first real run should be watched by a person,
+  per the reduced-testing policy for a new source.
+
 ---
 
 ## Personal data
@@ -709,3 +1068,145 @@ Two things this required beyond the obvious:
 
 Coroners' own names are public: they are public officials named on the face of
 a published report.
+
+## The analyst assistant (experimental, off by default)
+
+`pipeline/assistant/` (BETA-107–113) is an optional natural-language finding
+aid for the operator. It is disabled by default, never installed on Railway,
+and gated behind `pipeline nlp assistant-eval` — `gate.may_enable` is the only
+thing that authorises turning it on, and it stays closed until every check
+passes.
+
+**Inference runs on OpenRouter (BETA-114).** BETA-107–113 required both model
+legs to run locally and forbade any cloud fallback; a CPU-only VPS could not
+meet the routing bars, so BETA-114 moved routing and grounding to OpenRouter —
+the same third party `nlp suggest-decisions` already uses. What is sent is
+only already-public committee text and non-sensitive aggregates: the router
+gets the question plus the tool catalogue, the answerer gets one validated
+tool result. No `restricted_` data, no cross-layer figures. It is a
+terms/cost dependency (metered per token; check the routed model's training
+terms), not a disclosure of anything the portal does not already publish.
+
+If it is ever enabled, treat its output as a **reading aid, not evidence**:
+
+- An assistant answer is one model's summary of **one** read-only query. It is
+  not a figure, not a claim, and not a review decision. Nothing it says has
+  been through the review queue.
+- Every displayed sentence carries a `[[identifier]]` citation that resolves
+  to stored provenance (a chunk with a source URL and an archived-payload
+  hash, or a named aggregate). Open the citation. An answer with an
+  unresolved citation is suppressed by design; if you see prose without a
+  citation, do not use it.
+- It cannot compute anything `Things you must not compute` forbids: it has no
+  arithmetic tool, no cross-layer tool, and no headline-total tool. Do not
+  ask it to work around that in prose.
+- It never sees `restricted_` data, and the router never sees document text,
+  so a prompt injected into a collected document cannot change what it does.
+- Every run is recorded immutably in `assistant_runs` (migration 0079):
+  question, model identities (OpenRouter slugs), the OpenRouter base URL with
+  no credentials, prompt-template hashes, retrieved chunk ids, citations,
+  timings and outcome. That row is an audit record, not evidence.
+
+Operator documentation: [`docs/assistant.md`](assistant.md).
+
+## Model-assisted review triage (opt-in, off by default)
+
+`pipeline/nlp/review_batch.py` exports a decision sheet for the 034F claim
+queue. A `screen_reason` column flags structurally broken extractions by
+deterministic rule and pre-fills `suggested_decision='rejected'`. By explicit
+owner decision (BETA-047), a language model — small or free models via
+OpenRouter — may fill the `suggested_*` columns instead
+(`pipeline/nlp/review_suggest.py`), so a reviewer starts from a triaged sheet
+rather than a raw one.
+
+This is a deliberate, fenced exception to "nothing without a person"
+(`CLAUDE.md` settled decision 4) and to 034H's gating of LLM steps. The bounds
+that keep it defensible, all enforced in code:
+
+- **A suggestion is never a decision.** The model writes the `suggested_*`
+  columns only. `apply_sheet` records what is in the `decision` column, which
+  a person fills. Nothing the model writes reaches `claim_candidate_decisions`
+  on its own.
+- **It triages into reject / approve / correct / keep.** A `correct` verdict
+  also names a replacement predicate, which is checked against `relations.yml`
+  and dropped to `keep` if it is not a real id — the model proposes, it does
+  not get to invent an ontology term. The proposed id lands in
+  `suggested_corrected_predicate`, never in `corrected_predicate`.
+- **With more than one `--model`, verdicts must agree** (same verdict, and for
+  `correct` the same predicate) before anything is written. A split writes no
+  suggestion, only `suggested_by='ensemble:split'` and a note of who said
+  what, so the reviewer sees the row is contested.
+- **Reject only, in bulk.** `--accept-suggested` takes exactly one value,
+  `rejected`. A wrong bulk reject costs recall; a wrong bulk approve would
+  poison the precision the 034G gate is built to favour. `approved` and
+  `corrected` suggestions are reading aids the reviewer confirms row by row,
+  by filling `decision` — there is no bulk path for either, and
+  `--accept-suggested approved` is refused in code.
+- **Taking a suggested correction is opt-in and still the reviewer's.**
+  `--take-suggested-corrections` fills a *blank* `corrected_predicate` from
+  `suggested_corrected_predicate` only on rows where the reviewer has already
+  typed `decision=corrected`. The id is still ontology-checked by
+  `decisions.decide`, and the row records
+  `note='corrected predicate via model:<id>'`.
+- **Every lifted row is marked.** A decision taken from a suggestion records
+  `note='via model:<name>'` (or `via screen:<rule>`), so "how was this
+  labelled?" is answerable per row: a person confirmed a model's triage, not a
+  person deciding cold.
+- **The model is not reviewer 2.** The gate's inter-reviewer-agreement
+  condition (`MIN_DOUBLE_REVIEWED`, `pipeline/nlp/gate.py`) counts distinct
+  human `decided_by` values only. That condition is **set to 0 by owner
+  decision (2026-08-31)** — a one-person review team — so the agreement figure
+  is computed and shown in `advisory` but no longer blocks `gate-034g`. The
+  034G corpus is single-reviewer: **any figure a 034G head supports carries
+  "labelled by a single reviewer, no inter-reviewer check"**, on top of the
+  model-triage caveat below. Restore `MIN_DOUBLE_REVIEWED` to a positive value
+  if a second reviewer becomes available.
+- **Agreement is watched.** Report human-vs-suggestion agreement per category
+  after each batch; near-total agreement is the signal that the review has
+  gone through the motions, and that batch is redone with suggestions hidden.
+- **Off by default and fenced.** One explicit command
+  (`nlp suggest-decisions`), gated on `OPENROUTER_API_KEY` being set; never
+  called by anything automatically, never in CI, never on the offline path.
+  Evidence spans are public-domain committee text, so sending them to a third
+  party is not a disclosure of anything restricted — but it is an external
+  dependency the rest of the pipeline does not have. Anything unexpected from
+  the API fails safe to `keep`, so a network problem never auto-rejects a row.
+
+If you train an 034G classifier on a corpus built this way, the provenance of
+the labels is "a model triaged, a person confirmed each one" — weaker than "a
+person read every sentence cold", and the caveat travels with any figure the
+classifier later supports. Watch the per-batch agreement number
+(`decide-claims-batch` reports it): if the reviewer's calls almost never
+diverge from the model's, the confirmation has stopped being a review.
+
+## Claim predictions (034G, experimental)
+
+`document_claim_predictions` (migration `0082`) holds one row per (chunk,
+category) scored by a trained classifier head. **A prediction is a finding
+aid, never a claim** — the same status as an 034C topic. It is not evidence,
+it is excluded from every export and every portal response, no `graph_claims`
+row is written from it, and **no figure is ever computed across it** (the
+"Things you must not compute" rule at the top of this file applies unchanged).
+`split` on each row says whether the chunk was in the head's fit
+(`train` / `heldout`) or not (`unlabelled`); a reader tallying anything must
+drop the fitted rows.
+
+Any figure a head's predictions ever support carries **all** of:
+
+1. **Single reviewer.** The training corpus was labelled by one person, no
+   inter-reviewer check (see the model-assisted-triage section above).
+2. **Thin.** `MIN_PER_CLASS = 25` — a classifier on 25 positives is few-shot
+   by necessity, not by choice.
+3. **Model-assisted labels.** "A model triaged, a person confirmed each one",
+   not "a person read every sentence cold".
+4. **Beta-box corpus (until the source retrain).** The first heads were
+   trained on the beta box, which is a copy of the source warehouse and is
+   not authoritative. Every such head carries `corpus_status = 'experimental'`
+   on its `claim_head_versions` row. A retrain on the source deployment
+   (`corpus = 'source'`, `corpus_status = 'authoritative'`) is required before
+   a head's predictions support anything public-facing.
+
+A head whose held-out precision is below `MIN_HEAD_PRECISION` (0.80) is
+`quarantined`: it is trained and its metrics recorded, but it never writes a
+prediction. Changing that bar is a tracked commit, argued for — not a knob to
+turn to make more heads pass.

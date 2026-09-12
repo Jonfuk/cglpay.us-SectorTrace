@@ -1,10 +1,10 @@
-# Local document-analysis worker for Unraid/Docker hosts.  This is deliberately
-# separate from the Railway image, which serves persisted results and does not
-# need heavyweight parser or OCR system dependencies.
+# Local document-analysis and analysis worker image for Unraid/Docker hosts.
+# This is deliberately separate from the Railway image, which serves persisted
+# results and does not need heavyweight parser, OCR, or local NLP dependencies.
 # Bookworm's Ghostscript is 10.0.0, a release that OCRmyPDF rejects for
 # --skip-text/--redo-ocr due to PDF-corruption regressions.  Trixie supplies
-# Ghostscript 10.05.x while retaining the same Python 3.12 worker runtime.
-FROM ghcr.io/astral-sh/uv:python3.12-trixie-slim
+# Ghostscript 10.05.x while retaining the same Python 3.13 worker runtime.
+FROM ghcr.io/astral-sh/uv:python3.13-trixie-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -20,12 +20,42 @@ WORKDIR /app
 # code changes retain Docker's dependency-layer cache. Docling is deliberately
 # omitted: the Unraid batch uses PyMuPDF plus standard-library DOCX/PPTX parsers,
 # and Docling pulls PyTorch plus CUDA libraries for no benefit here.
+#
+# The `nlp` extra (sentence-transformers + gliner, and the torch they share)
+# rides along here and NOT in the always-on app image — the same split as the
+# parser/OCR toolchain: heavy, local-only, first-use model download, no place
+# in an image whose job is to serve already-persisted results. It is what lets
+# `sectortrace-mirror nlp embed` (034A) and the zero-shot span extractor (034D)
+# run in this worker instead of failing in the app container. CPU torch is
+# fine; it is Docling's CUDA tree that is kept out, above.
+# The local analyst assistant (BETA-107) rides along here too, not in the
+# always-on app image, for the same reason `nlp` does: `nlp assistant` and
+# `nlp assistant-eval` route to this worker (sectortrace[-mirror] wrapper),
+# and the retrieval tool they lean on needs the `nlp` extra that only this
+# image carries. Off unless the deploy asks for it — the Ansible roles pass
+# --build-arg INSTALL_ASSISTANT=true, keyed on assistant_app_enabled (the
+# OpenRouter path, BETA-114) or assistant_runtime_enabled (self-hosted
+# Ollama); Railway builds neither this file nor that arg. See
+# docs/assistant.md.
+ARG INSTALL_ASSISTANT=false
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project \
-    --extra postgres --extra storage --extra graph
+    --extra storage --extra graph --extra nlp \
+    $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 COPY pipeline ./pipeline
-RUN uv sync --frozen --no-dev --extra postgres --extra storage --extra graph
+# The committed eval query / gold sets, so `nlp eval-retrieval`, `eval-spans`
+# and `eval-context` work on their defaults in this worker — the paths in
+# pipeline/nlp/eval.py resolve to /app/tests/fixtures/nlp. Pass --queries /
+# --gold to point at an operator-marked set instead. The assistant's frozen
+# routing/grounding suites (pipeline/assistant/evaluation.py) resolve the
+# same way, so `nlp assistant-eval` — the release gate — works here on its
+# defaults.
+COPY tests/fixtures/nlp ./tests/fixtures/nlp
+COPY tests/fixtures/assistant ./tests/fixtures/assistant
+RUN uv sync --frozen --no-dev --extra storage --extra graph --extra nlp \
+    $([ "$INSTALL_ASSISTANT" = "true" ] && echo "--extra assistant")
 
 # These are the two document packages the PyMuPDF/OCRmyPDF batch actually
 # invokes. Keep them separate from the rich `documents` extra above so this
@@ -43,6 +73,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 RUN mkdir -p "$UV_CACHE_DIR" && chown 99:100 "$UV_CACHE_DIR"
 
 # `docker run … documents status` is therefore equivalent to
-# `uv run pipeline documents status` in a checkout.
+# `uv run pipeline documents status` in a checkout. The same image also runs
+# the long-lived queue consumer with `analysis worker`.
 ENTRYPOINT ["pipeline"]
 CMD ["--help"]

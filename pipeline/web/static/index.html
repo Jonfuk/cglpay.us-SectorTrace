@@ -37,17 +37,36 @@
     <strong>Evidence pipeline</strong>
     <span class="muted" id="db-path" title="Warehouse being read"></span>
   </div>
-  <nav class="tabs" role="tablist">
+  <button class="navtoggle iconbtn" id="nav-toggle" type="button"
+          aria-expanded="false" aria-controls="admin-nav" title="Menu">☰</button>
+  <!-- BETA-085: the twelve tabs, grouped. Still `.tab[data-tab]` buttons so
+       every deep link (`#review`, `#sql`, …) and `showTab()` are unchanged;
+       only the presentation is a grouped rail with a narrow-screen drawer. -->
+  <nav class="tabs" id="admin-nav" role="tablist" aria-label="Sections">
     <button class="tab" data-tab="overview" role="tab">Overview</button>
-    <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
-    <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
-    <button class="tab" data-tab="health" role="tab">Health</button>
-    <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
-    <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
-    <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
-    <button class="tab" data-tab="exports" role="tab">Exports</button>
-    <button class="tab" data-tab="database" role="tab">Database</button>
-    <button class="tab" data-tab="sql" role="tab">SQL</button>
+    <div class="tabgroup" data-group="Review">
+      <span class="tabgroup-label" aria-hidden="true">Review</span>
+      <button class="tab" data-tab="review" role="tab">Review queue <span class="pill" id="pending-pill">—</span></button>
+      <button class="tab" data-tab="candidates" role="tab">Candidates <span class="pill" id="candidate-pill" hidden></span></button>
+      <button class="tab" data-tab="census" role="tab">Census <span class="pill" id="census-pill" hidden></span></button>
+      <button class="tab" data-tab="claims" role="tab">Claims <span class="pill" id="claim-pill" hidden></span></button>
+      <button class="tab" data-tab="claimreview" role="tab">Claim review</button>
+    </div>
+    <div class="tabgroup" data-group="Evidence">
+      <span class="tabgroup-label" aria-hidden="true">Evidence</span>
+      <button class="tab" data-tab="search" role="tab">Search</button>
+      <button class="tab" data-tab="exports" role="tab">Exports</button>
+    </div>
+    <div class="tabgroup" data-group="Operations">
+      <span class="tabgroup-label" aria-hidden="true">Operations</span>
+      <button class="tab" data-tab="pipeline" role="tab">Pipeline <span class="pill" id="job-pill" hidden></span></button>
+      <button class="tab" data-tab="health" role="tab">Health</button>
+    </div>
+    <div class="tabgroup" data-group="Data">
+      <span class="tabgroup-label" aria-hidden="true">Data</span>
+      <button class="tab" data-tab="database" role="tab">Database</button>
+      <button class="tab" data-tab="sql" role="tab">SQL</button>
+    </div>
   </nav>
   <label class="reviewer">
     <span>Reviewer</span>
@@ -58,6 +77,7 @@
          deliberately: a link inside role="tablist" is announced as a tab and
          answers the arrow keys, and it is neither. -->
     <a class="iconbtn portallink" href="/" title="Public evidence portal">&larr; Portal</a>
+    <a class="iconbtn" href="/admin/analysis" title="Analysis control plane">Analysis</a>
     <button class="iconbtn" id="palette-open" type="button"
             title="Jump to a tab, table or worklist (Ctrl+K)">Ctrl K</button>
     <button class="iconbtn" id="theme-toggle" type="button" title="Theme">◐</button>
@@ -71,6 +91,12 @@
 
   <!-- Overview ------------------------------------------------------------->
   <section id="tab-overview" class="tabpanel">
+    <!-- BETA-086: the operator action cockpit — what needs attention now,
+         each card a link to a pre-filtered workflow. -->
+    <h2>What needs attention</h2>
+    <div class="cockpit" id="cockpit"></div>
+
+    <h2>Warehouse counts</h2>
     <div class="cards" id="overview-cards"></div>
 
     <div class="split">
@@ -122,7 +148,15 @@
       </label>
       <label>Oldest first <input id="f-oldest" type="checkbox" checked></label>
       <label>Dense rows <input id="f-dense" type="checkbox"></label>
+      <label title="Group pending items by module, type and a shared organisation/source token">Cluster view <input id="f-clusters" type="checkbox"></label>
+      <label title="Load a saved filter + note preset">Preset
+        <select id="review-preset"><option value="">—</option></select>
+      </label>
+      <button class="btn ghost" id="review-preset-save" type="button" title="Save current filters + note as a preset">Save preset</button>
+      <button class="btn ghost" id="review-preset-delete" type="button" title="Delete the selected preset" hidden>Delete</button>
     </div>
+
+    <div id="review-clusters" hidden></div>
 
     <div class="matchbar" id="matchbar" hidden>
       <span id="match-summary"></span>
@@ -143,19 +177,49 @@
     <div class="listhead">
       <label class="selectall"><input type="checkbox" id="select-page"> Select page</label>
       <span id="review-count" class="muted"></span>
+      <span id="review-session" class="muted small" aria-live="polite"></span>
       <span class="spacer"></span>
       <span class="muted small">
         Deciding records a judgement. It does not promote anything into a canonical table.
       </span>
     </div>
 
-    <div id="review-list"></div>
-    <div class="pager" id="review-pager"></div>
+    <!-- BETA-087: split-pane review. On wide screens the queue is a compact
+         list on the left and the focused item's full context, source
+         preview, alternatives, history and decision controls are on the
+         right. The single-item APIs, the named reviewer, the explicit
+         decision and one-candidate-at-a-time are unchanged; this is layout.
+         Below 1000px it stacks: the familiar card list, no separate pane. -->
+    <div class="review-split">
+      <div id="review-list-wrap">
+        <div id="review-list"></div>
+        <div class="pager" id="review-pager"></div>
+      </div>
+      <aside id="review-detail" class="review-detail" aria-label="Focused review item"></aside>
+    </div>
     <p class="muted small keys">
       Keys: <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>a</kbd> approve · <kbd>r</kbd> reject ·
-      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>/</kbd> search ·
-      <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
+      <kbd>u</kbd> reset to pending · <kbd>x</kbd> select · <kbd>o</kbd> open primary source ·
+      <kbd>/</kbd> search · <kbd>Ctrl</kbd>+<kbd>K</kbd> jump anywhere
     </p>
+
+    <details class="panel" style="margin-top: 12px">
+      <summary><strong>Alias resolution</strong> <span class="muted small">— resolve unmatched names to a canonical authority / provider</span></summary>
+      <p class="muted small">Every resolution is a named, append-only decision.
+        A fuzzy match is never applied automatically; a correction is a new
+        decision that supersedes the old one.</p>
+      <div class="runbar">
+        <label>Scheme
+          <select id="alias-scheme">
+            <option value="buyer">Buyer name → authority</option>
+            <option value="provider">Company name → provider</option>
+          </select>
+        </label>
+        <button class="btn" id="alias-reload" type="button">Reload</button>
+        <span id="alias-status" class="muted small" aria-live="polite"></span>
+      </div>
+      <div id="alias-list"></div>
+    </details>
   </section>
 
   <!-- Pipeline --------------------------------------------------------------->
@@ -177,6 +241,89 @@
       One at a time — the warehouse has a single write slot.
     </p>
 
+    <!-- BETA-082: one read model over the module registry, the active job
+         and the run ledger — dependency waves, each module's last-run
+         status, and a failure summary. Read-only. -->
+    <div class="panel" id="mission-control-panel">
+      <h2>Mission control</h2>
+      <div id="mission-control"></div>
+    </div>
+
+    <!-- BETA-101: compare two runs from the immutable ledger — per module,
+         what changed in status, rows, review items, failures, duration and
+         freshness effect. Read-only; no payloads are duplicated. -->
+    <div class="panel" id="run-comparison-panel">
+      <h2>Compare two runs</h2>
+      <div class="rc-pickers">
+        <label>Baseline (A)<select id="rc-a"></select></label>
+        <label>Later (B)<select id="rc-b"></select></label>
+      </div>
+      <div id="run-comparison"></div>
+    </div>
+
+    <!-- BETA-102: one typed graph over the module registry, the dataset
+         catalogue, the live foreign keys and the export tab registry —
+         source -> module -> table -> table -> export. Every edge is derived;
+         none is hand-maintained. Read-only. -->
+    <!-- BETA-106: reproducible random / stratified samples of previously
+         decided records, with append-only second-look findings. -->
+    <details class="panel" id="qc-panel">
+      <summary><h2 style="display:inline">QC sampling workspace</h2></summary>
+      <p class="muted small">A deterministic draw — the same seed + source +
+        method + filter reproduce the same sample. Findings are append-only and
+        change no review decision.</p>
+      <div class="qc-controls">
+        <label>Seed <input id="qc-seed" type="text" value="audit"></label>
+        <label>Source
+          <select id="qc-source">
+            <option value="review_queue">review_queue (resolved)</option>
+            <option value="alias_decisions">alias_decisions</option>
+          </select></label>
+        <label>Method
+          <select id="qc-method">
+            <option value="random">random</option>
+            <option value="stratified">stratified</option>
+          </select></label>
+        <label>Stratify by <input id="qc-stratify" type="text" placeholder="module / item_type"></label>
+        <label>Size <input id="qc-size" type="number" min="1" max="500" value="25"></label>
+        <button class="btn primary" id="qc-draw" type="button">Draw sample</button>
+      </div>
+      <div id="qc-sample"></div>
+    </details>
+
+    <!-- BETA-103: replay a stdlib parser against one archived object in
+         memory and diff its proposed output against the stored active
+         version. Read-only -- nothing is written. -->
+    <details class="panel" id="replay-panel">
+      <summary><h2 style="display:inline">Parser replay sandbox</h2></summary>
+      <p class="muted small">A test run against the archived bytes — the parse
+        happens in memory and nothing is written. Covers the stdlib parsers
+        (html, docx, pptx) only.</p>
+      <div class="rp-controls">
+        <input id="rp-doc" type="text" placeholder="document_id">
+        <select id="rp-parser">
+          <option value="">auto (by mime type)</option>
+          <option value="html">html</option>
+          <option value="docx">docx</option>
+          <option value="pptx">pptx</option>
+        </select>
+        <button class="btn" id="rp-run" type="button">Replay</button>
+      </div>
+      <div id="parser-replay"></div>
+    </details>
+
+    <details class="panel" id="lineage-panel">
+      <summary><h2>Data lineage</h2></summary>
+      <div class="lin-controls">
+        <input id="lin-search" type="search" placeholder="search nodes…">
+        <span id="lin-kinds" class="lin-kinds"></span>
+      </div>
+      <div class="lin-split">
+        <div id="lineage-list"></div>
+        <div id="lineage-detail" class="muted small">Pick a node to see what feeds it and what it feeds.</div>
+      </div>
+    </details>
+
     <div class="split">
       <div class="panel">
         <h2>Modules</h2>
@@ -188,6 +335,11 @@
         <pre id="job-log" class="joblog" aria-live="polite" aria-label="Job log"></pre>
         <h2>Recent jobs</h2>
         <div id="job-history"></div>
+        <h2 title="Every module-run, whatever started it — CLI, this UI, or a cron wrapper">Run ledger</h2>
+        <p class="muted small">One durable row per run of the shared module
+          runner. Unlike "Recent jobs" above, this includes runs started from
+          the command line or a scheduled task, not just this UI.</p>
+        <div id="run-ledger"></div>
       </div>
     </div>
   </section>
@@ -207,6 +359,12 @@
         card existed the only measurement was a one-off audit.
       </p>
       <div id="health-storage"></div>
+      <h2 style="margin-top: 12px">Archive audits</h2>
+      <p class="muted small">Append-only snapshots from
+        <code>pipeline archive-audit</code>: object count, size, unarchived
+        evidence references, duplicated hashes. A trend, not a live check —
+        recording one is a CLI action, never done from here.</p>
+      <div id="archive-audits"></div>
     </div>
 
     <div class="panel" style="margin-top: 12px">
@@ -224,6 +382,60 @@
       <p class="muted small" id="coverage-note"></p>
       <div class="matrixwrap"><table id="coverage-table"></table></div>
     </div>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>Coverage actions</h2>
+      <p class="muted small">One reason each catalogued dataset is not further
+        along, and the one permitted next step. Nothing here runs a module or
+        decides anything — the actions are links.</p>
+      <div id="completeness-summary" class="chips"></div>
+      <div id="completeness-board"></div>
+    </div>
+
+    <!-- BETA-104: the warehouse's validation rules — promotion/decision
+         triggers, CHECK and provenance constraints, and the observed
+         parse_failures / review_queue gates. Failure examples are reduced to
+         their shape; the raw fragment never leaves the server. -->
+    <!-- BETA-105: review decisions over time by source, item type, reason and
+         evidence age. Aggregates only; small groups suppressed; no reviewer is
+         named, scored or ranked. -->
+    <details class="panel" id="review-analytics-panel" style="margin-top: 12px">
+      <summary><h2 style="display:inline">Review-outcome analytics</h2></summary>
+      <p class="muted small">Aggregates only. Groups below the minimum are
+        suppressed so no single reviewer's pattern can be reconstructed, and no
+        reviewer is named.</p>
+      <div id="review-analytics"></div>
+    </details>
+
+    <details class="panel" id="validation-panel" style="margin-top: 12px">
+      <summary><h2 style="display:inline">Validation rules</h2></summary>
+      <p class="muted small" id="validation-note"></p>
+      <div class="vr-controls">
+        <input id="vr-search" type="search" placeholder="search rules…">
+        <span id="vr-kinds" class="vr-kinds"></span>
+      </div>
+      <div id="validation-rules"></div>
+    </details>
+
+    <div class="panel" style="margin-top: 12px">
+      <h2>PostgreSQL capabilities</h2>
+      <p class="muted small">Which optional extensions are installed, whether
+        the indexes they back exist and were built the right way, and the
+        query paths currently running on a fallback because one is missing.
+        Empty on SQLite — the gate does not apply. Also
+        <code>pipeline pg-capabilities [--strict]</code>.</p>
+      <div id="pg-capabilities"></div>
+    </div>
+
+    <details class="panel" style="margin-top: 12px">
+      <summary><strong>URL overlaps</strong> <span class="muted small">— one canonical URL in more than one source table</span></summary>
+      <p class="muted small">A lead, not proof: it can mean the same document
+        was discovered twice, or two rows about the same page. Nothing here
+        merges, discards or reprioritises anything. The canonicaliser drops
+        only the fragment and known tracking parameters and never follows a
+        redirect.</p>
+      <div id="url-overlaps"></div>
+    </details>
 
     <div class="split">
       <div class="panel">
@@ -291,6 +503,10 @@
       <span class="spacer"></span>
       <span id="candidate-status" class="muted small"></span>
     </div>
+
+    <!-- What this session has decided, the way the review queue carries its
+         own count. A nudge that work is moving, not a target and not a gate. -->
+    <p id="candidate-session" class="muted small" aria-live="polite"></p>
 
     <!--
       Bulk mechanics, one judgement at a time.
@@ -462,6 +678,98 @@
     </div>
   </section>
 
+  <!-- Semantic-search workbench ------------------------------------------------->
+  <!-- Rendered by /admin/js/search.js. A diagnostic view over the existing
+       /api/admin/search finding aid (BETA-034A): keyword / semantic / hybrid
+       retrieval of parsed committee papers and CDP documents. Relevance order
+       and similarity are search behaviour, not evidence confidence, and this
+       tool never promotes or attributes anything. -->
+  <section id="tab-search" class="tabpanel">
+    <p class="muted small">
+      A workbench over <code>/api/admin/search</code> — the retrieval finding
+      aid from the semantic-analysis layer (BETA-034A). It searches
+      paragraph-level chunks of parsed committee papers and community drug
+      partnership documents, in three modes, so a reviewer can see how each
+      one behaves before trusting it.
+    </p>
+    <p class="muted small">
+      A result is a passage that matched the query — by wording, by embedding
+      similarity, or both. The order is a retrieval score, <strong>not</strong>
+      a measure of evidential weight, and nothing here promotes, attributes or
+      exports anything.
+    </p>
+
+    <form id="search-form" class="runbar" role="search">
+      <input id="search-q" type="search" name="q" placeholder="Search parsed documents"
+             aria-label="Search query" autocomplete="off" style="min-width: 18rem">
+      <select id="search-mode" aria-label="Search mode">
+        <option value="hybrid">Hybrid (keyword + semantic)</option>
+        <option value="keyword">Keyword only</option>
+        <option value="semantic">Semantic only</option>
+      </select>
+      <select id="search-source" aria-label="Source system">
+        <option value="">All sources</option>
+        <option value="committee_paper_promotion">Committee papers</option>
+        <option value="cdp_document_promotion">Partnership documents</option>
+      </select>
+      <label class="small muted">From <input id="search-from" type="date" aria-label="Published from"></label>
+      <label class="small muted">To <input id="search-to" type="date" aria-label="Published to"></label>
+      <select id="search-limit" aria-label="Result limit">
+        <option value="20">20 results</option>
+        <option value="50">50 results</option>
+        <option value="100">100 results</option>
+      </select>
+      <button class="btn primary" type="submit">Search</button>
+    </form>
+
+    <div id="search-meta" class="batchnote" hidden></div>
+    <div id="search-status" class="muted small" aria-live="polite"></div>
+    <div id="search-results"></div>
+  </section>
+
+  <!-- Semantic claim-candidate review -------------------------------------------->
+  <!-- Rendered by /admin/js/claimreview.js. The human-review labour BETA-034
+       is blocked on: a person reads one machine-extracted (subject, predicate,
+       object) triple at a time and records approve / reject / corrected, with
+       their name. Nothing here writes graph_claims, trains a model, or
+       approves in bulk. The gate strip shows how far the corpus is from
+       letting the 034G classifiers be trained. -->
+  <section id="tab-claimreview" class="tabpanel">
+    <p class="muted small">
+      One machine-extracted <code>(subject, predicate, object)</code> triple at
+      a time, from a single sentence of a parsed committee paper or partnership
+      document. A candidate is a lead for a reviewer, <strong>not</strong> a
+      claim. Deciding one records a named judgement in
+      <code>claim_candidate_decisions</code>; it does not write a graph claim,
+      train a classifier, or produce any public output. Use the
+      <em>Reviewer</em> box above — a decision without a name is refused.
+    </p>
+
+    <div id="claimreview-gate" class="batchnote" hidden></div>
+
+    <form id="claimreview-filters" class="runbar" role="search">
+      <input id="cr-q" type="search" placeholder="Search the sentence text" aria-label="Search sentence text" autocomplete="off">
+      <select id="cr-status" aria-label="Candidate status">
+        <option value="queued">Queued for review</option>
+        <option value="new">New (not queued)</option>
+        <option value="accepted">Accepted</option>
+        <option value="dismissed">Dismissed</option>
+        <option value="">Any status</option>
+      </select>
+      <select id="cr-predicate" aria-label="Predicate"><option value="">Any predicate</option></select>
+      <select id="cr-source" aria-label="Source system">
+        <option value="">All sources</option>
+        <option value="committee_paper_promotion">Committee papers</option>
+        <option value="cdp_document_promotion">Partnership documents</option>
+      </select>
+      <button class="btn" type="submit">Apply</button>
+    </form>
+
+    <div id="claimreview-status" class="muted small" aria-live="polite"></div>
+    <div id="claimreview-list"></div>
+    <div class="pager" id="claimreview-pager"></div>
+  </section>
+
   <section id="tab-exports" class="tabpanel">
     <div class="runbar">
       <span class="muted small">Write</span>
@@ -469,6 +777,7 @@
       <button class="btn" data-export="geojson">GeoJSON</button>
       <button class="btn" data-export="echarts">Charts</button>
       <button class="btn" data-export="docs">Data dictionary</button>
+      <button class="btn" data-export="ndtms">NDTMS history</button>
       <button class="btn" data-export="bundle">Bundle</button>
       <button class="btn primary" data-export="all">Everything</button>
       <span class="spacer"></span>
@@ -515,6 +824,9 @@
       </aside>
       <div class="tablearea">
         <div class="tablehead" id="table-head"></div>
+        <!-- BETA-083: the selected table's description, columns and
+             foreign keys, from the read-only schema graph. -->
+        <details class="schema-panel" id="table-schema"></details>
         <div class="tablewrap"><table id="data-table"></table></div>
         <div class="pager" id="table-pager"></div>
       </div>
@@ -540,8 +852,12 @@
         <button class="btn primary" id="sql-run">Run <kbd>Ctrl</kbd>+<kbd>Enter</kbd></button>
         <button class="btn" id="sql-explain" title="How SQLite would answer this: which indexes it uses, and where it scans">Explain</button>
         <button class="btn" id="sql-csv" title="Download these results as CSV">CSV</button>
+        <button class="btn" id="sql-save" title="Save this query under a name (this browser only)">Save</button>
         <span id="sql-status" class="muted"></span>
         <span class="spacer"></span>
+        <label class="small muted">Saved
+          <select id="sql-saved"><option value="">—</option></select>
+        </label>
         <label class="small muted">History
           <select id="sql-history"><option value="">—</option></select>
         </label>

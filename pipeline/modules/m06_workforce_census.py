@@ -300,19 +300,20 @@ def run(ctx: ModuleContext) -> None:
                 **provenance,
             }, natural_key=["census_year"])
 
-            year_metrics: list[dict] = []
+            page_text_rows: list[dict] = []
+            metric_rows: list[dict] = []
             for page_number, page_text in pages:
                 if not page_text.strip():
                     continue
-                db.upsert(conn, "workforce_census_page_text", {
+                page_text_rows.append({
                     "census_year": year,
                     "page_number": page_number,
                     "page_text": page_text,
                     **provenance,
-                }, natural_key=["census_year", "page_number"])
+                })
 
                 for metric in extract_metrics_from_text(page_text, page_number):
-                    db.upsert(conn, "workforce_census_metrics", {
+                    metric_rows.append({
                         "census_year": year,
                         **metric,
                         # Preserved: a figure somebody has checked against its
@@ -322,19 +323,27 @@ def run(ctx: ModuleContext) -> None:
                         # covers all three rather than one by accident.
                         "verified": 0,
                         **provenance,
-                    }, natural_key=["census_year", "metric", "workforce_segment", "raw_text"],
-                        preserve=db.DECISION_COLUMNS)
-                    year_metrics.append(metric)
-                    metrics_written += 1
+                    })
 
-            if not year_metrics:
+            db.upsert_many(
+                conn, "workforce_census_page_text", page_text_rows,
+                natural_key=["census_year", "page_number"],
+            )
+            db.upsert_many(
+                conn, "workforce_census_metrics", metric_rows,
+                natural_key=["census_year", "metric", "workforce_segment", "raw_text"],
+                preserve=db.DECISION_COLUMNS,
+            )
+            metrics_written += len(metric_rows)
+
+            if not metric_rows:
                 db.record_parse_failure(
                     conn, module_name, "metrics", f"census {year}",
                     "no metrics matched any known phrasing in this report",
                     source_url=document_url)
 
             log.info("census.year_processed", year=year, pages=len(pages),
-                      metrics=len(year_metrics))
+                      metrics=len(metric_rows))
 
             if not ctx.dry_run:
                 conn.commit()

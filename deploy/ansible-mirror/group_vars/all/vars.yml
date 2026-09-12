@@ -44,6 +44,16 @@ state_dir: /opt/sectortrace-mirror/state
 admin_ui_enabled: true
 expose_admin_publicly: false
 
+# Generated public frontends are the normal mirror entry points. Existing local
+# overrides remain explicit. --enable-frontend upgrades an older saved false
+# setting, and --legacy-frontend persists the rollback without reseeding data.
+serve_nuxt: true
+# The operator workspace is served from the generated Nuxt bundle on mirror
+# hosts. This is independent of `serve_nuxt`, which controls the public portal.
+# set `admin_ui_variant: legacy` in zz-local.yml for an emergency rollback.
+admin_ui_variant: "nuxt"
+
+
 # Source addresses allowed through to /admin and /api/admin/*. CIDR ranges
 # are accepted too (198.51.100.0/24). The allowlist IS the authentication —
 # the app has no login of any kind (settled decision 8) — so the self-host
@@ -52,6 +62,46 @@ expose_admin_publicly: false
 # address. An empty list leaves admin reachable only over an SSH tunnel.
 admin_allowed_ips:
   - "154.61.155.48"
+
+# --- Direct PostgreSQL access ---------------------------------------------------
+# Source addresses allowed to open a PostgreSQL connection to this box on
+# 5432. Empty (the default the self-host build has) keeps PostgreSQL bound to
+# 127.0.0.1 in docker-compose.yml — reachable only from on the box or through
+# an SSH tunnel. Listing an address here, on the next playbook run:
+#
+#   * publishes the container's 5432 on all IPv4 interfaces
+#     (docker-compose.mirror.yml.j2), and
+#   * writes an accept rule for that address into the DOCKER-USER iptables
+#     chain, with a default-drop for every other off-box source on the public
+#     interface. It has to be iptables, not ufw: a published Docker port does
+#     not pass through ufw at all (deploy/ansible/README.md, "What ufw doesn't
+#     cover"). sectortrace-mirror-pg-firewall(.service) owns those rules and
+#     re-applies them at boot.
+#
+# CIDR ranges are accepted (198.51.100.0/24). This is a genuine exposure and
+# a weaker boundary than the SSH tunnel the sync modes use:
+#
+#   * a home broadband address changes without warning — when it does, the
+#     rule points at whoever holds it next;
+#   * the connection is a straight TCP session to PostgreSQL. The password is
+#     not sent in clear (scram-sha-256 on the postgres:18 image), but nothing
+#     here terminates TLS in front of 5432, so the traffic itself is not
+#     encrypted. Use an SSH tunnel or a VPN if that matters.
+#
+# The role still authenticates every session with a role password; this list
+# only decides which source addresses may attempt one. Prefer the read-only
+# role (sectortrace_reader / DATABASE_RO_URL) for any external client that
+# only reads.
+postgres_external_allowed_ips:
+  - "154.61.155.48"
+
+# The interface the default-drop above matches on — genuinely external
+# inbound traffic, so on-box and container-to-container connections to 5432
+# (the sync container runs network_mode: host and dials 127.0.0.1:5432) are
+# never caught by it. Defaults to this box's primary interface; override in
+# zz-local.yml only on a multi-homed host where the default route is not the
+# interface the listed clients arrive on.
+postgres_public_interface: "{{ ansible_default_ipv4.interface | default('') }}"
 
 # --- Resource sizing -------------------------------------------------------------
 # Derived from the host's actual RAM and CPU count, exactly as in the
@@ -70,7 +120,14 @@ postgres_effective_cache_mb: "{{ (ansible_memtotal_mb | int * 0.5) | int }}"
 postgres_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.00125) | int, 4] | max, 32] | min }}"
 postgres_maintenance_work_mem_mb: "{{ [[(ansible_memtotal_mb | int * 0.05) | int, 64] | max, 1024] | min }}"
 postgres_max_connections: 100
-postgres_shm_size_mb: 256
+# /dev/shm for parallel workers. Kept at least maintenance_work_mem with
+# headroom: a parallel index build reserves a /dev/shm segment that size up
+# front (pgvector's HNSW build did exactly this and a flat 256MB
+# under-provisioned it against a tuned maintenance_work_mem, crash-looping the
+# app during `pipeline migrate` — see migrations/postgres/0071). The migrations
+# now build serially so they no longer depend on this, but a manual REINDEX
+# still would.
+postgres_shm_size_mb: "{{ (postgres_maintenance_work_mem_mb | int) + 256 }}"
 
 neo4j_heap_mb: "{{ [[(ansible_memtotal_mb | int * 0.12) | int, 512] | max, 4096] | min }}"
 neo4j_pagecache_mb: "{{ [(neo4j_heap_mb | int * 0.5) | int, 256] | max }}"
@@ -179,6 +236,14 @@ enable_fail2ban: true
 enable_unattended_upgrades: true
 ssh_port: 22
 harden_ssh: true
+
+# Differs from the self-host build (which keeps `yes`). A mirror is only ever
+# reached by an operator who already has a key on it — there is no scenario
+# where someone needs a root PASSWORD login to this box — so root is
+# key-only here. Non-root password login is untouched (PasswordAuthentication
+# stays `yes`), so a locked-out operator still has that way back in. `sshd -t`
+# validates the drop-in before it is written.
+sshd_permit_root_login: "prohibit-password"
 fail2ban_bantime: "24h"
 fail2ban_findtime: "10m"
 fail2ban_maxretry: 4
@@ -201,6 +266,60 @@ unattended_upgrades_reboot_time: "04:00"
 # Set it to the source deployment's domain so a log line says which box a
 # warehouse came from.
 mirror_source_label: ""
+
+# --- What this box is for -----------------------------------------------------
+# "dr_mirror" (default) is everything below this point as originally
+# written: a disaster-recovery copy, wiped and replaced wholesale on every
+# sync, tracking whatever branch happens to be checked out.
+#
+# "beta" is the other thing this role can build: a box that pins a git
+# branch (deploy_git_branch below) and re-fetches/resets to its tip on every
+# playbook run, seeds its database from a source ONCE using the same three
+# sync paths as a dr_mirror, and then — unlike a dr_mirror — is left alone.
+# mirror_recurring_sync_enabled defaults to false in that case specifically
+# so that testing writes on this box survive until you choose to reseed by
+# hand (`sectortrace-mirror sync`), not until 04:30 the next morning.
+# ansible-mirror.sh asks which of the two this box is; see its "What is this
+# box for?" question.
+mirror_role: "dr_mirror"   # "dr_mirror" or "beta"
+
+# The branch this box builds and runs. Empty (the dr_mirror default) means
+# "whatever is checked out here" — the historical behaviour, unchanged: a
+# human runs `git pull` before re-running the playbook, as the README's
+# "Redeploying" section describes. A beta deployment sets this so the
+# playbook itself keeps the box's checkout pinned to the branch's tip on
+# every run, discarding any local modifications on the box on purpose — see
+# the "Pin this box's checkout" task in site.yml.
+deploy_git_branch: ""
+
+# Whether the sync timer fires nightly (dr_mirror's historical default,
+# true) or the source is seeded once, by hand, and left alone (beta's
+# default, set by the wizard). A database testing writes can't survive
+# without vanishing at the next timer firing is not a testing database.
+mirror_recurring_sync_enabled: "{{ mirror_role != 'beta' }}"
+
+# --- Extra environment this role does not render ----------------------------
+# env.j2 writes no module API keys, by design: a dr_mirror collects nothing
+# and "a key that cannot be used is a key that should not be on the box"
+# (see env.j2's closing note and the README's "What this box does not
+# have"). A `beta` box is the exception the design already anticipates — a
+# writable checkout you test a branch against, where a queue item may need
+# to exercise one real collection module (`sectortrace-mirror run mNN_...`),
+# and that needs the module's key.
+#
+# Those keys do not belong in the vault (it holds the SOURCE deployment's
+# credentials, not this box's own) and cannot live in env.j2 (rendered from
+# tracked files, overwritten every run). This is the third place: an
+# operator-managed file beside the rendered .env, merged onto the end of it
+# on every playbook run. Later definitions win — for Docker Compose's
+# env_file and for pipeline/config.py's dotenv load alike — so a key here
+# overrides the same key from env.j2. Absent, nothing changes.
+#
+# It sits in state_dir, NOT the checkout: the beta pre-task resets this
+# box's tree to origin/<branch> every run, so the checkout is no place for a
+# persistent local secret. state_dir is 0750 root-owned — the same privacy
+# boundary .env itself relies on. See deploy/ansible-mirror/.env.merge.example.
+mirror_env_merge_file: "{{ state_dir }}/.env.merge"
 
 # How the warehouse gets here. All paths are built; this chooses which one
 # the timer runs, and ansible-mirror.sh asks for it.
@@ -265,6 +384,31 @@ mirror_archive_sync: true
 # mirror only needs to serve the portal.
 mirror_graph_rebuild: true
 
+# Rebuild the semantic-analysis layer (034*: document_chunks ->
+# document_embeddings) from the freshly synced warehouse, in the on-demand
+# documents worker — the only image on this box carrying the `nlp` extra.
+#
+# Off by default, and only worth turning on where the SOURCE deployment
+# cannot embed: a managed source such as Railway does not ship the `nlp`
+# extra, so document_embeddings arrives from every sync empty and semantic /
+# hybrid search on this box has nothing to work with until something fills
+# it. With this true the sync does, straight after the graph rebuild.
+#
+# The cost is real: `nlp embed` is resume-safe (it only touches chunks with
+# no vector for the model) but the warehouse is replaced wholesale every
+# sync, so on a box with recurring sync this re-embeds the whole corpus
+# nightly. On a `beta` box (mirror_recurring_sync_enabled: false, seeded by
+# hand) it is a one-off after each deliberate reseed, which is the case this
+# was added for.
+mirror_nlp_rebuild: false
+
+# The embedder `mirror_nlp_rebuild` passes to `pipeline nlp embed --model`.
+# A sentence-transformers id (downloaded on first use into
+# {{ state_dir }}/nlp-cache and kept there), or "stub" for the deterministic
+# dependency-free stand-in — which needs no weights but is not a real
+# retriever, so it is only useful for proving the path end to end.
+mirror_nlp_embed_model: "sentence-transformers/all-MiniLM-L6-v2"
+
 # How old the newest snapshot in the source's bucket may be before this box
 # calls it stale. This is the check that catches a source whose backup timer
 # has quietly stopped — without it the mirror finds the same file it restored
@@ -319,7 +463,11 @@ mirror_metrics_dir: ""
 #           worth the I/O.
 #
 # Both fail loudly, which means both alert.
-mirror_verify_enabled: true
+# Ties to whether recurring sync runs at all: "does this box still match the
+# source" is a meaningless question to keep asking about a beta box whose
+# whole point is to be written to and diverge from the source between
+# deliberate reseeds. A dr_mirror keeps its historical default (true).
+mirror_verify_enabled: "{{ mirror_recurring_sync_enabled }}"
 mirror_verify_time: "Mon *-*-* 05:30:00"
 mirror_verify_deep_time: "*-*-01 05:30:00"
 
@@ -352,6 +500,17 @@ mirror_docker_subnet: "172.29.0.0/16"
 # are worse to run out of space part way through than to not start.
 mirror_min_free_gb: 10
 
+# Open Jobs is an operator-only shadow collector. Keep its gate off in the
+# generated environment; a beta operator can enable a test run in the
+# gitignored .env.merge file after verifying the source contract.
+open_jobs_enabled: false
+# The timer is a separate switch so installing the collector never schedules
+# live source traffic by accident. Set both this and open_jobs_enabled in the
+# beta box's gitignored zz-local.yml after the source contract is verified.
+open_jobs_schedule_enabled: false
+open_jobs_schedule_time: "05:30"
+open_jobs_max_releases_per_run: 2
+
 # --- snapshot mode: the source's offsite backup bucket -------------------------
 # Where the source deployment's sectortrace-backup-offsite script puts its
 # verified snapshots. Its own vars.yml calls this backup_s3_prefix, and
@@ -382,3 +541,99 @@ mirror_source_pg_host: "127.0.0.1"
 mirror_source_pg_port: 5432
 mirror_source_pg_database: "sectortrace"
 mirror_source_pg_user: "sectortrace_reader"
+
+# =============================================================================
+#  Local analyst assistant (BETA-107)
+# =============================================================================
+# The optional natural-language operator finding aid, off by default and
+# never on Railway (docs/assistant.md). It reads only warehouse content, so
+# a mirror is a legitimate place to run it — with the mirror's usual
+# caveat: anything it retrieves over (document_embeddings) is replaced on
+# the next sync, so on a beta box turn mirror_nlp_rebuild on, or embed by
+# hand after each deliberate reseed, or the retrieval tool has nothing.
+#
+# Two switches, because configuring inference and authorising the feature
+# are different decisions:
+#
+#   assistant_app_enabled      builds the `openai` extra into the image,
+#                              writes the OpenRouter key + model slugs, and
+#                              sets ASSISTANT_ENABLED=true in the rendered
+#                              .env. Do NOT set it until `pipeline nlp
+#                              assistant-eval` reports gate.may_enable: true.
+#                              On a beta box you can instead put
+#                              ASSISTANT_ENABLED=true in .env.merge, which
+#                              overrides the rendered value and survives the
+#                              checkout reset — see .env.merge.example.
+#   assistant_runtime_enabled  the self-host escape hatch: stands up a
+#                              single Ollama (its own compose file, on the
+#                              mirror network) and swings
+#                              ASSISTANT_OLLAMA_URL / ASSISTANT_NEEDLE_URL to
+#                              it instead of OpenRouter. All the Ollama /
+#                              GGUF / CPU-timeout notes below apply only on
+#                              this path.
+assistant_runtime_enabled: false
+assistant_app_enabled: false
+
+# OpenRouter (BETA-114). The base URL both legs use unless the self-host
+# hatch is on, and the bearer token. Put the real key in the vault or in
+# .env.merge, not here. Blank key is valid only for a self-hosted endpoint.
+assistant_api_base: "{{ 'http://ollama:11434/v1' if assistant_runtime_enabled else 'https://openrouter.ai/api/v1' }}"
+assistant_api_key: "{{ vault_assistant_api_key | default('') }}"
+
+# One Ollama serves both roles the assistant calls (synthesis and the
+# router). It `ollama pull`s this reference once, and the app is told to
+# send exactly this string as the model name — no `ollama cp` alias, so the
+# name the code sends is the name Ollama has, and the run ledger records
+# what actually answered.
+#
+# Default: `LiquidAI/LFM2.5-2.6B-GGUF` at Q4_K_M (3B params, 1.59 GB),
+# pulled from Hugging Face via Ollama's `hf.co/` syntax. The eval on a
+# CPU-only VPS ruled the smaller ones out: 350M cannot emit the routing
+# JSON (~0.01 precision), and 1.2B emits it but with parroted confidence
+# and routes adversarial prompts to tools (0.06 precision, 13 wrong
+# executions including injection/forbidden). 2.6B is the smallest with a
+# real shot at the router's precision + no-wrong-execution bars; it needs
+# the relaxed timeouts below to fit CPU inference. On a very small box
+# `hf.co/LiquidAI/LFM2.5-350M-GGUF:Q4_K_M` or
+# `LiquidAI/lfm2.5-1.2b-instruct:q4_k_m` run but will not pass the gate.
+# NOT `ollama.com/library/lfm2`, a 24B model.
+assistant_lfm_ollama_ref: "hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M"
+
+# Routing and whole-turn ceilings, seconds. The code defaults (8 / 30)
+# assume a capable host; CPU inference of the 2.6B does not meet them, so
+# the deploy relaxes them hard and interactive latency rises to match
+# (tens of seconds per question — a finding aid, not a chat). Set 0 to fall
+# back to the code defaults.
+assistant_router_timeout: 60
+assistant_overall_timeout: 120
+
+# Ollama's context window. The code is designed around 32K synthesis, but a
+# 32K KV cache for a multi-billion-parameter model is ~2-3 GB on top of the
+# weights — enough to push this box into swap. 8192 fits the router prompt
+# and ~5 retrieved passages while keeping the cache small. Raise it toward
+# 32768 on a host with the RAM (and the speed) for it.
+assistant_ollama_context_length: 8192
+
+# The model slugs the adapters send and the ledger records
+# (ASSISTANT_LFM_MODEL / _QUANT / ASSISTANT_NEEDLE_MODEL). No pinned default
+# (BETA-114): name an OpenRouter slug for each leg — a cheap/fast model for
+# the router, a stronger one for the answerer. An unset slug fails closed.
+# On the self-host path set both to `assistant_lfm_ollama_ref`.
+# `assistant_lfm_quant` is a free-text ledger annotation only.
+assistant_lfm_model: ""
+assistant_lfm_quant: ""
+assistant_needle_model: ""
+
+# Pinned like every other image here (neo4j:5-community, caddy:2-alpine).
+# Bump deliberately — but not below a 2026 build: LFM2.5 is a hybrid
+# architecture whose `attention.head_count_kv` is a per-layer array, and
+# Ollama < ~0.9 panics parsing that GGUF (`interface conversion: *ggml.array,
+# not uint32`) on model load, not on pull, so it looks healthy until the
+# first request. A wrong tag fails cleanly at `docker compose pull`.
+assistant_ollama_image: "ollama/ollama:0.33.2"
+
+# A ceiling, not a reservation — the same blast-radius reasoning as
+# documents_mem_limit_mb. A 2.6B Q4 model plus a 32K KV cache sits inside
+# this. NOT part of the preflight role's RAM budget: leave headroom yourself
+# on a box that also runs a document worker.
+assistant_ollama_mem_limit_mb: "{{ [[(ansible_memtotal_mb | int * 0.25) | int, 3072] | max, 6144] | min }}"

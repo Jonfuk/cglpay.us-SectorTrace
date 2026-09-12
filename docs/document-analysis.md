@@ -84,6 +84,16 @@ document ID.  `benchmark` accepts a CSV with an `evidence_id` column and uses
 a bounded default of 25 records.  Neither command enumerates or processes the
 full archive without an explicit selection and limit.
 
+`process` also names each document: `document_records.display_title` is
+derived by a fixed precedence — the collecting module's own label, then the
+PDF `/Title`, then the first usable heading, then a de-slugified filename —
+and `title_basis` records which rung was used (`unknown` when none reads as a
+name). `pipeline documents backfill-titles` fills the pair for rows written
+before the feature; `--recompute` re-derives every row. It has no PDF
+metadata to work from, so that rung is only reachable through `process` /
+`reprocess`. See `docs/CAVEATS.md` — only `source_label` is the document's
+own words.
+
 For existing promoted documents, use the bounded registration bridge before
 processing. It supports `committee_papers`, `cdp_documents`, and
 `annual_reports`, and registers a row only when its legacy table has a direct

@@ -256,6 +256,12 @@ change are therefore deliberately left alone, both marked as such in
 - `PasswordAuthentication yes` — see above.
 - `AllowTcpForwarding yes` — the admin-UI tunnel below depends on it.
 
+`PermitRootLogin` follows the same logic as password auth and defaults to
+`yes` here. Set `sshd_permit_root_login: prohibit-password` if every box that
+needs root has a key on it — that leaves root reachable by key only while
+non-root password login is unchanged. The mirror playbook ships with that
+value set.
+
 What hardens SSH here instead: `MaxAuthTries 3`, a 30-second
 `LoginGraceTime`, modern ciphers/KEX/MACs only, no X11 or agent forwarding,
 ufw's rate-limited SSH rule, and a fail2ban jail that bans for 24h after 4
@@ -437,6 +443,17 @@ cd /opt/sectortrace/state
 docker compose -f docker-compose.documents.yml run --rm documents documents status
 docker compose -f docker-compose.documents.yml run --rm documents documents process \
   --source-system committee_papers --limit 25
+docker compose -f docker-compose.documents.yml ps analysis-worker
+docker compose -f docker-compose.documents.yml logs -f --tail=200 analysis-worker
+```
+
+The same documents image also runs the persistent `analysis-worker` service.
+It consumes runs started from `/admin/analysis` and must use the same
+`DATABASE_URL` as the always-on app. Ansible starts it after the app health
+gate; a manual host can start it with:
+
+```bash
+docker compose -f docker-compose.documents.yml up -d analysis-worker
 ```
 
 It shares the `sectortrace_net` Docker network with the always-on stack, so
@@ -458,6 +475,45 @@ docker compose exec app python -m pipeline graph status
 docker compose exec app python -m pipeline graph backfill   # once, after your first collection
 docker compose exec app python -m pipeline graph rebuild --clear
 ```
+
+## The analyst assistant (optional, off)
+
+Off by default. Since BETA-114 both inference legs run on **OpenRouter** (a
+CPU-only VPS could not meet the routing bars locally — see
+[`docs/assistant.md`](../../docs/assistant.md)).
+
+Set `assistant_app_enabled: true` and the roles build the `assistant` extra
+(`openai`) into the `app` and documents-worker images and write, into `.env`:
+`ASSISTANT_OLLAMA_URL` / `ASSISTANT_NEEDLE_URL` = `https://openrouter.ai/api/v1`,
+`ASSISTANT_API_KEY` (from `vault_assistant_api_key`), and
+`ASSISTANT_NEEDLE_MODEL` / `ASSISTANT_LFM_MODEL` — the router and answerer
+slugs, which you must set (`assistant_needle_model` / `assistant_lfm_model`
+in group_vars; there is no pinned default and an unset slug fails closed).
+
+The CLI and the release gate run in the **documents worker** (it has the
+`nlp` extra the retrieval tool needs and the frozen eval fixtures); the
+`app` container gets `openai` for the `POST /api/admin/assistant` HTTP path
+only. Building the images does **not** turn the feature on.
+`ASSISTANT_ENABLED` stays false until you run
+
+```bash
+sectortrace nlp assistant-eval
+```
+
+and it reports `gate.may_enable: true`. Re-score `FROZEN_ROUTING_THRESHOLD`
+against your router model first if its confidence calibration differs from
+the retired Needle 2's.
+
+**Self-host escape hatch.** `assistant_runtime_enabled: true` instead adds an
+Ollama container from `docker-compose.assistant.yml` that `ollama pull`s
+`assistant_lfm_ollama_ref` (`hf.co/LiquidAI/LFM2.5-2.6B-GGUF:Q4_K_M`,
+1.59 GB), swings the two URLs to `http://ollama:11434`, and relaxes the
+timeouts (`assistant_router_timeout` / `_overall_timeout`) since CPU
+inference does not route in 8 s. On this path set `assistant_lfm_model` /
+`assistant_needle_model` to the pulled reference. Weights live in the
+`sectortrace-assistant_ollama-models` volume; its `mem_limit` is **not** in
+the preflight RAM budget, so leave headroom on a box that also runs a
+document worker.
 
 ## What ufw doesn't cover
 
@@ -497,4 +553,57 @@ doing once, deliberately, onto a scratch database.
 ```bash
 systemctl status sectortrace-backup.timer
 journalctl -u sectortrace-backup.service
+```
+
+## Archive audits
+
+Two timers, both `pipeline archive_audit.py` (BETA-060; performance.md's
+Phase 5 archive-audit gap): `sectortrace-archive-audit.timer` runs
+`pipeline archive-audit` daily (default 02:30) — a deterministic sample, at
+least 100 objects or 1% of the archive if larger, re-hashed against the
+archive itself. `sectortrace-archive-audit-full.timer` runs
+`pipeline archive-audit-full` quarterly (default the 1st of Jan/Apr/Jul/Oct
+at 02:00, `RandomizedDelaySec=1h`) — every archived object, not a sample,
+which is why it is quarterly rather than daily.
+
+Neither ever deletes anything. A mismatch — the bytes on disk no longer
+hash to what `archive_objects` recorded — is quarantined
+(`quarantine_items`, visible in `/admin`), the same wiring `archive-verify`
+already has. Both timers' schedules are `archive_audit_time` /
+`archive_audit_full_time` in `vars.yml`.
+
+```bash
+systemctl status sectortrace-archive-audit.timer sectortrace-archive-audit-full.timer
+journalctl -u sectortrace-archive-audit.service
+journalctl -u sectortrace-archive-audit-full.service
+```
+
+## PostgreSQL maintenance telemetry
+
+`sectortrace-pg-telemetry.timer` runs `pipeline pg-telemetry-snapshot` daily
+(`pg_telemetry_snapshot_time` in `vars.yml`, default 03:35) inside the `app`
+container. It captures `pg_stat_user_tables` / `pg_stat_user_indexes` (and
+`pg_stat_statements`, if installed — see below) into `pg_telemetry_*`
+(migration 0113; see `pipeline/pg_telemetry.py`). This is capture only: it
+accumulates the evidence performance.md's "PostgreSQL maintenance" section
+requires before any autovacuum/analyze threshold, index, or planner/memory
+change — it does not itself change any of those.
+
+`pg_stat_statements` needs `shared_preload_libraries` set at server *start*,
+which this playbook does not set and the running application cannot arrange
+for itself. Until an operator does the following on the PostgreSQL box, the
+snapshot still captures table/index telemetry and logs
+`pg_telemetry.pg_stat_statements_unavailable` rather than failing:
+
+```bash
+# postgresql.conf (or ALTER SYSTEM), then restart the server:
+shared_preload_libraries = 'pg_stat_statements'
+```
+```sql
+CREATE EXTENSION pg_stat_statements;
+```
+
+```bash
+systemctl status sectortrace-pg-telemetry.timer
+journalctl -u sectortrace-pg-telemetry.service
 ```

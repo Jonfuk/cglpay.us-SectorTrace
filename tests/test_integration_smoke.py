@@ -443,6 +443,108 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "when a document does not state its board plainly, not a sign "
               "the source changed shape.",
     ),
+    Smoke(
+        module="m29_rough_sleeping",
+        produces=("rough_sleeping_snapshot",),
+        signal=(("rough_sleeping_snapshot", "snapshot_year"),
+                ("rough_sleeping_snapshot", "count_text")),
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="One evergreen page whose single ODS republishes the whole "
+              "2010-to-current series every edition, so a single fetch (not "
+              "a paginated or --limit-bounded one) always writes every "
+              "published year for every matched authority. count_text is the "
+              "signal, not count: MHCLG's own [x]/[z]/[n] placeholders are "
+              "common and legitimate, and a run finding only placeholders "
+              "for a real authority would still leave count NULL correctly "
+              "while count_text proves the sheet was actually read.",
+    ),
+    Smoke(
+        module="m30_statutory_homelessness",
+        produces=("statutory_homelessness_snapshot",),
+        signal=(("statutory_homelessness_snapshot", "quarter_label"),
+                ("statutory_homelessness_snapshot", "total_initial_assessments_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="One evergreen page attaches one file per quarter (unlike m29's "
+              "single ever-replaced file); --limit bounds how many recent "
+              "quarters are fetched, not how much of the attachment list is "
+              "read. total_initial_assessments_text is the signal, not the "
+              "numeric column: MHCLG's own [x]/[z]/[n]/[c] placeholders are "
+              "common and legitimate, so a run writing only placeholders for "
+              "a real authority would still leave the numeric column NULL "
+              "correctly while the _text column proves the sheet was "
+              "actually read and the column locator resolved. Not every "
+              "quarter carries every optional column (withdrew_no_duty and "
+              "not_eligible_no_duty did not exist as separate columns in "
+              "older editions of this table) -- see docs/CAVEATS.md.",
+    ),
+    Smoke(
+        module="m31_temporary_accommodation",
+        produces=("temporary_accommodation_snapshot",),
+        signal=(("temporary_accommodation_snapshot", "quarter_label"),
+                ("temporary_accommodation_snapshot", "total_households_ta_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="Reads Table TA1 from the same quarterly workbook m30 reads "
+              "Table A1 from -- discovery is shared code (imported from "
+              "m30_statutory_homelessness), not a separate implementation, "
+              "so this smoke test also indirectly exercises that sharing. "
+              "total_households_ta_text is the signal, not the numeric "
+              "column, for the same placeholder reason as m30's own smoke "
+              "spec above.",
+    ),
+    Smoke(
+        module="m32_sab_site_reviews",
+        produces=("sab_site_crawls", "review_queue"),
+        signal=(("sab_site_crawls", "status"), ("sab_site_crawls", "pages_fetched")),
+        limit=3,
+        precondition="SELECT COUNT(*) FROM safeguarding_adults_boards WHERE nation = 'England'",
+        precondition_note="m28_sar_reports wrote no board directory, so there are "
+                           "no board sites to crawl",
+        note="A discovery module (the m09/m24 shape): it crawls each England "
+              "board's own site for SARs not in the National SAR Library. "
+              "sar_documents is not a signal table -- the hybrid gate "
+              "auto-ingests only a document whose link is unambiguous AND "
+              "whose text names that board, so a --limit 3 run legitimately "
+              "writes only sab_site_crawls rows and review_queue candidates. "
+              "sab_name is always set here (it is the board whose site it "
+              "is), so it is not a signal column either.",
+    ),
+    Smoke(
+        module="m33_hse_notices",
+        produces=("hse_enforcement_notices", "review_queue"),
+        signal=(("hse_enforcement_notices", "notice_type"),
+                ("hse_enforcement_notices", "result")),
+        limit=None,
+        note="The provider-name shape (m18): one HSE notices-register search "
+              "per tracked-provider name variant. A --limit run does not make "
+              "sense -- the register returns the whole match set per name -- "
+              "so this ignores it, like m18. Whether it writes any "
+              "hse_enforcement_notices row at all depends on whether any "
+              "tracked provider has ever been served an HSE notice, so a run "
+              "that only produces review_queue near-miss items is still a "
+              "working run. The live-fetch parser has not yet been validated "
+              "against real HSE HTML -- see the module docstring.",
+    ),
+    Smoke(
+        module="m34_icb_board_papers",
+        produces=("integrated_care_boards", "icb_site_crawls", "review_queue"),
+        signal=(("integrated_care_boards", "name"),
+                ("icb_site_crawls", "status")),
+        limit=3,
+        note="A discovery module (the m09/m24/m32 shape): it seeds the 42 ICBs "
+              "from the NHS England directory and crawls each one's own "
+              "meetings/governance pages for Board and committee documents. "
+              "icb_board_papers is not a signal table -- nothing reaches it "
+              "without a person promoting a candidate, so a --limit 3 run "
+              "legitimately writes only integrated_care_boards, "
+              "icb_board_paper_candidates and icb_site_crawls rows. The "
+              "directory and crawl parsers have not yet been validated against "
+              "the real sites -- see the module docstring.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`
@@ -455,8 +557,8 @@ SMOKE_ORDER: list[Smoke] = [SMOKE_SPECS[name] for name in resolve_run_order(list
 def _count(conn: sqlite3.Connection, table: str, module: str) -> int:
     if table in _SHARED_TABLES:
         return conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE module = ?", (module,)).fetchone()[0]
-    return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+            f"SELECT COUNT(*) FROM {table} WHERE module = %s", (module,)).fetchone().values().__iter__().__next__()
+    return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone().values().__iter__().__next__()
 
 
 def _columns(conn, table: str) -> set[str]:
@@ -578,7 +680,7 @@ def test_module_still_reads_its_source(spec: Smoke, warehouse: Warehouse) -> Non
         pytest.skip(f"{spec.requires_key.upper()} is not set — {spec.module} cannot run")
 
     if spec.precondition:
-        if conn.execute(spec.precondition).fetchone()[0] == 0:
+        if conn.execute(spec.precondition).fetchone().values().__iter__().__next__() == 0:
             pytest.skip(f"{spec.module}: {spec.precondition_note}")
 
     before = {table: _count(conn, table, spec.module) for table in spec.produces}
@@ -602,7 +704,7 @@ def test_module_still_reads_its_source(spec: Smoke, warehouse: Warehouse) -> Non
         if table not in gained:
             continue
         populated = conn.execute(
-            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL").fetchone()[0]
+            f"SELECT COUNT(*) FROM {table} WHERE {column} IS NOT NULL").fetchone().values().__iter__().__next__()
         assert populated > 0, (
             f"{spec.module} wrote {after[table]} rows to {table} but "
             f"{column} is NULL in every one of them — the classic shape-change "
@@ -667,7 +769,9 @@ def test_every_registered_module_has_a_smoke_test() -> None:
     """Otherwise a new module joins the pipeline with no live coverage and
     nothing says so.
     """
-    real = {n for n in MODULE_REGISTRY if n.startswith("m") and n[1:3].isdigit()}
+    from pipeline.registry import module_meta
+    real = {n for n in MODULE_REGISTRY
+            if n.startswith("m") and n[1:3].isdigit() and not module_meta(n).operator_only}
     assert sorted(real - set(SMOKE_SPECS)) == []
 
 

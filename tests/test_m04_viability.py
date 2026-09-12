@@ -26,7 +26,7 @@ from pathlib import Path
 
 import pytest
 
-from pipeline import providers
+from pipeline import catalog, providers
 from pipeline.modules import m04_companies as ch
 from pipeline.registry import ModuleContext
 
@@ -52,6 +52,24 @@ def test_the_lifeline_fixture_is_the_event_this_is_built_for():
 def _run(conn, settings, limit=None):
     ch.run(ModuleContext(conn=conn, settings=settings, since=None,
                           dry_run=False, limit=limit))
+
+
+_SEEDED_FOR_TEST: list[tuple[str, str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _walk_only_test_seeded_companies(monkeypatch):
+    """VERIFIED_IDENTIFIERS now seeds a company number for every tracked
+    provider, and m04 fetches and fully walks every one. Each test here
+    arranges a single company through `_seed(...)`; restrict the walk to
+    the numbers `_seed` recorded so the run does not reach for the other
+    eight. `_seed` often re-asserts CGL's own 03861209, which is already
+    a config-seeded verified row, so filtering the table by status or
+    discovered_by would miss it — track the intent explicitly instead.
+    """
+    _SEEDED_FOR_TEST.clear()
+    monkeypatch.setattr(ch, "_seed_company_numbers",
+                         lambda conn: list(_SEEDED_FOR_TEST))
 
 
 def _allow_all_robots(httpx_mock):
@@ -99,6 +117,8 @@ def _seed(conn, number="01842240", provider_key="change_grow_live"):
     providers.seed_providers(conn)
     providers.record_discovered_identifier(
         conn, provider_key, "company_number", number, discovered_by="test")
+    _SEEDED_FOR_TEST.append(
+        (provider_key, providers.normalise_identifier("company_number", number)))
 
 
 def test_an_insolvency_history_is_recorded_case_by_case(httpx_mock, settings, conn):
@@ -148,7 +168,7 @@ def test_practitioners_go_only_to_the_restricted_table(httpx_mock, settings, con
         "SELECT practitioner_name FROM restricted_company_insolvency_practitioners")]
     assert names, "the fixture names practitioners on both cases"
 
-    columns = {r["name"] for r in conn.execute("PRAGMA table_info(company_insolvency_cases)")}
+    columns = {r["name"] for r in catalog.columns_of(conn, "company_insolvency_cases")}
     assert not {"practitioner_name", "practitioners"} & columns
 
 
@@ -163,8 +183,8 @@ def test_a_practitioners_firm_address_is_not_stored_at_all(httpx_mock, settings,
 
     _run(conn, settings)
 
-    columns = {r["name"] for r in conn.execute(
-        "PRAGMA table_info(restricted_company_insolvency_practitioners)")}
+    columns = {r["name"] for r in catalog.columns_of(
+        conn, "restricted_company_insolvency_practitioners")}
     assert not any("address" in column for column in columns)
 
 
@@ -263,7 +283,7 @@ def test_the_viability_view_names_nobody(conn):
     """It joins tables that hold practitioners and officers. It must not carry
     either into something exportable.
     """
-    columns = [r[1] for r in conn.execute("PRAGMA table_info(v_provider_viability)")]
+    columns = [r["name"] for r in catalog.columns_of(conn, "v_provider_viability")]
     for column in columns:
         assert "name" not in column or column in ("company_name",), column
 

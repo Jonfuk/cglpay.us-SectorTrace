@@ -50,7 +50,7 @@ TABS: list[TabSpec] = [
         sql="""
             SELECT a.ons_code, a.name, a.type, a.region, a.parent_code,
                    a.active_from, a.active_to,
-                   (SELECT GROUP_CONCAT(s.successor_code, ', ')
+                   (SELECT string_agg(s.successor_code, ', ')
                       FROM authority_successors s
                      WHERE s.predecessor_code = a.ons_code) AS successor_codes
               FROM authorities a
@@ -122,7 +122,7 @@ TABS: list[TabSpec] = [
                    c.company_number, c.company_name, c.company_status, c.company_type,
                    c.date_of_creation, c.match_basis,
                    v.officers_total, v.officers_active, v.officers_resigned,
-                   (SELECT GROUP_CONCAT(n.previous_name, ' | ')
+                   (SELECT string_agg(n.previous_name, ' | ')
                       FROM company_previous_names n
                      WHERE n.company_number = c.company_number) AS previous_names
               FROM providers p
@@ -226,11 +226,11 @@ TABS: list[TabSpec] = [
         sql="""
             SELECT r.report_ref, r.report_date, r.coroner_name, r.coroner_area,
                    r.categories, r.report_url,
-                   (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
+                   (SELECT string_agg(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM pfd_concern_terms t WHERE t.report_ref = r.report_ref) AS concern_terms,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM pfd_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM pfd_provider_mentions m
                      WHERE m.report_ref = r.report_ref AND m.mention_type = 'recipient') AS provider_recipients,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM pfd_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM pfd_provider_mentions m
                      WHERE m.report_ref = r.report_ref AND m.mention_type = 'body_text') AS provider_mentions,
                    r.matters_of_concern
               FROM pfd_reports r
@@ -281,22 +281,24 @@ TABS: list[TabSpec] = [
     ),
     TabSpec(
         name="11_SAR_Reports",
-        description="Safeguarding Adult Reviews read from the National SAR Library, with the board name each document states for itself and workforce concern flags.",
-        columns=["document_url", "document_ext", "library_year", "sab_name",
-                  "has_body_text", "concern_terms", "provider_mentions"],
+        description="Safeguarding Adult Reviews from the National SAR Library and, where found, each board's own website, with the board name and workforce concern flags.",
+        columns=["document_url", "document_ext", "discovered_via", "library_year",
+                  "sab_name", "sab_name_source", "has_body_text", "concern_terms",
+                  "provider_mentions"],
         caveats=[
             "The subject of a review is never named in this export; documents are keyed on their own URL and the title as submitted to the library lives only in a restricted table.",
-            "sab_name is read from the words the document itself uses to name its board, not validated against a fixed list of the ~150 Safeguarding Adults Boards. NULL means no board was named plainly, not that none was involved.",
-            "library_year is the year the National SAR Library filed the document under, not a publication date.",
+            "discovered_via says where the document was found: 'national_library' or 'scie_library' — the National SAR Library's main index or its SCIE 2015-2018 collection; 'sab_website' — the board's own site, crawled by Module 32.",
+            "sab_name_source says how sab_name was obtained: 'document_text' — the document names its board and the name matches the Ann Craft Trust directory; 'document_text_unverified' — the document names a board not in that directory; 'sab_directory' — the document did not name one, but its library title carries a place that resolves to exactly one directory board; 'sab_website' — the document was found on that board's own site. NULL source with a NULL name means none of these found a board.",
+            "library_year is the year the National SAR Library filed a document under; for a 'sab_website' row it is a best-effort year read from the filename, or the crawl year. Neither is a publication date.",
             "Concern terms indicate a word appears anywhere in the document text. They are a finding aid, not a characterisation of what the review found.",
-            "The library's coverage is whatever boards chose to submit; an absent board or year is a gap in the library, not evidence that no review took place.",
+            "Coverage is whatever boards submitted to the library plus what a bounded crawl of each England board's site could find; an absent board or year is a gap in that, not evidence that no review took place.",
         ],
         sql="""
-            SELECT d.document_url, d.document_ext, d.library_year, d.sab_name,
-                   d.has_body_text,
-                   (SELECT GROUP_CONCAT(t.term || ' (' || t.occurrences || ')', ', ')
+            SELECT d.document_url, d.document_ext, d.discovered_via, d.library_year,
+                   d.sab_name, d.sab_name_source, d.has_body_text,
+                   (SELECT string_agg(t.term || ' (' || t.occurrences || ')', ', ')
                       FROM sar_concern_terms t WHERE t.document_url = d.document_url) AS concern_terms,
-                   (SELECT GROUP_CONCAT(m.provider_key, ', ') FROM sar_provider_mentions m
+                   (SELECT string_agg(m.provider_key, ', ') FROM sar_provider_mentions m
                      WHERE m.document_url = d.document_url) AS provider_mentions
               FROM sar_documents d
              ORDER BY d.library_year DESC NULLS LAST

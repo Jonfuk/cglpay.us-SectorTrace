@@ -1,0 +1,279 @@
+"""An in-process read cache for the public API's derived responses.
+
+Optional and in-process by deliberate choice (CLAUDE.md settled decision 6):
+no external store, nothing to run, nothing to unplug. It is a pure accelerator
+-- every entry is recomputable from the warehouse, so a cold cache, a warm
+cache and a disabled cache all return identical bytes. `NullCache` is that last
+case made explicit, and is the default: turning the cache on is opt-in
+(`CACHE_ENABLED`), for the same reason the rate limiter is (settled decision 8)
+-- a mechanism that changes what the server returns should be a reviewable
+setting, not an accident of what happened to be installed.
+
+Invalidation is by data version, not by key. The warehouse only changes when a
+pipeline run commits -- rare and coarse. Rather than track which query each
+write touches, every cached response is stamped with a global version token,
+and a completed run bumps it (`bump_version`, wired from the job registry).
+Every prior key becomes unreachable in one integer increment and ages out of
+the LRU on its own. The per-entry TTL is only a backstop for anything that
+mutates the warehouse without going through that path.
+
+Only the public read path (`/api/v1/*`) is cached, and only responses that
+have already been through `guard_columns()` in `public_queries` -- nothing
+keyed off a `restricted_` table ever reaches here (settled decision 3).
+
+This is the same design the optional Valkey backend would take: the protocol
+below, `get_or_compute` and a version token, with the state in a network store
+instead of a local dict. A `ValkeyCache` implementing `Cache` would swap in
+without a caller learning which it got.
+"""
+from __future__ import annotations
+
+import threading
+import time
+from collections import OrderedDict
+from concurrent.futures import Future
+from typing import Callable, Protocol, TypeVar
+
+import structlog
+
+log = structlog.get_logger()
+
+T = TypeVar("T")
+R = TypeVar("R")
+
+
+class Cache(Protocol):
+    """The seam. Everything talks to this, so an in-process LRU today and a
+    shared store later swap without a call site changing."""
+
+    def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
+        ...
+
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        """Like `get_or_compute`, but for a caller that must serialize its
+        result before it is reusable (JSON + gzip bytes). `compute` and
+        `encode` are timed separately so the cache's metrics can tell a slow
+        query apart from slow serialization, and the *encoded* value is what
+        gets cached -- a hit never reruns either step."""
+        ...
+
+    def bump_version(self) -> None:
+        ...
+
+    def stats(self) -> dict[str, int]:
+        ...
+
+
+class NullCache:
+    """The disabled case, made explicit. Every call recomputes -- which is what
+    guarantees the cache can only ever change the time to an answer, never the
+    answer. This is the default, and what the offline suite runs against unless
+    a test asks for the real one."""
+
+    def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
+        return compute()
+
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        return encode(compute())
+
+    def bump_version(self) -> None:
+        pass
+
+    def stats(self) -> dict[str, int]:
+        return {"enabled": 0}
+
+
+class InProcessCache:
+    """A bounded, thread-safe, TTL'd LRU shared by every request thread.
+
+    `ThreadingHTTPServer` runs one thread per connection and they all share one
+    instance (see `server.build_server`), exactly as the rate limiter does, so
+    every path here holds `_lock`. Kept small and synchronous on purpose: the
+    win is skipping a multi-table aggregate over ~100k rows, which dwarfs any
+    contention on an OrderedDict.
+    """
+
+    def __init__(self, *, max_entries: int = 512,
+                 clock: Callable[[], float] = time.monotonic) -> None:
+        if max_entries < 1:
+            raise ValueError("max_entries must be positive")
+        self._max = max_entries
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._version = 0
+        self._inflight: dict[str, Future[object]] = {}
+        self._metrics = {
+            "hits": 0, "misses": 0, "waiters": 0, "computes": 0,
+            "failures": 0, "evictions": 0,
+            # Seconds, summed across every call in this process's lifetime --
+            # not an average, since the number of hits/computes to divide by is
+            # already in the dict above. queue_delay is what a *waiter* spent
+            # blocked on someone else's compute; compute/serialize are the
+            # owner's own time, split so a slow query and slow JSON+gzip show
+            # up as different problems rather than one blended number.
+            "queue_delay_seconds": 0.0, "compute_seconds": 0.0,
+            "serialize_seconds": 0.0,
+        }
+        # versioned key -> (value, expiry). OrderedDict gives the LRU ordering:
+        # move_to_end on use, popitem(last=False) drops the coldest.
+        self._store: "OrderedDict[str, tuple[object, float]]" = OrderedDict()
+
+    def get_or_compute(self, key: str, ttl: float, compute: Callable[[], T]) -> T:
+        now = self._clock()
+        owner = False
+        with self._lock:
+            version = self._version
+            vkey = f"{version}:{key}"
+            hit = self._store.get(vkey)
+            if hit is not None and hit[1] > now:
+                self._store.move_to_end(vkey)
+                self._metrics["hits"] += 1
+                return hit[0]  # type: ignore[return-value]
+            # Present-but-expired is dropped here and rewritten below.
+            self._store.pop(vkey, None)
+
+            # A cache miss is allowed to run outside the lock, but only once
+            # per key.  Public pages commonly issue the same request from
+            # several components during startup; single-flight turns that
+            # burst into one database read instead of N identical reads.
+            future = self._inflight.get(vkey)
+            if future is None:
+                future = Future()
+                self._inflight[vkey] = future
+                owner = True
+                self._metrics["misses"] += 1
+                self._metrics["computes"] += 1
+            else:
+                self._metrics["waiters"] += 1
+
+        if not owner:
+            return future.result()  # type: ignore[return-value]
+
+        try:
+            # Compute OUTSIDE the lock: the query can take hundreds of
+            # milliseconds and must not block unrelated cache keys.
+            value = compute()
+            with self._lock:
+                # Only store if the version has not moved under us. If a run
+                # finished during the compute, this response is already stale.
+                if version == self._version:
+                    self._store[vkey] = (value, self._clock() + max(0.0, ttl))
+                    self._store.move_to_end(vkey)
+                    while len(self._store) > self._max:
+                        self._store.popitem(last=False)
+                        self._metrics["evictions"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_result(value)
+            return value
+        except BaseException as exc:
+            with self._lock:
+                self._metrics["failures"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_exception(exc)
+            raise
+
+    def get_or_compute_response(self, key: str, ttl: float,
+                                 compute: Callable[[], T],
+                                 encode: Callable[[T], R]) -> R:
+        """`get_or_compute`, but the thing cached is `encode(compute())`.
+
+        A public API response is JSON-serialized and (sometimes) gzipped on
+        every request today, hit or miss -- pure waste on a hit, since the
+        bytes are identical every time the underlying payload is. Caching the
+        encoded bytes instead of the raw payload removes that: `encode` never
+        runs again until the version bumps or the TTL lapses, same as
+        `compute`. Kept as a second method rather than folding into
+        `get_or_compute` because the two steps are timed separately (see the
+        metrics comment on `_metrics`), which only makes sense when the caller
+        hands over both a compute and an encode step explicitly.
+        """
+        now = self._clock()
+        owner = False
+        wait_start = now
+        with self._lock:
+            version = self._version
+            vkey = f"{version}:{key}"
+            hit = self._store.get(vkey)
+            if hit is not None and hit[1] > now:
+                self._store.move_to_end(vkey)
+                self._metrics["hits"] += 1
+                return hit[0]  # type: ignore[return-value]
+            self._store.pop(vkey, None)
+
+            future = self._inflight.get(vkey)
+            if future is None:
+                future = Future()
+                self._inflight[vkey] = future
+                owner = True
+                self._metrics["misses"] += 1
+                self._metrics["computes"] += 1
+            else:
+                self._metrics["waiters"] += 1
+
+        if not owner:
+            result = future.result()  # type: ignore[assignment]
+            with self._lock:
+                self._metrics["queue_delay_seconds"] += max(0.0, self._clock() - wait_start)
+            return result  # type: ignore[return-value]
+
+        try:
+            compute_start = self._clock()
+            payload = compute()
+            compute_elapsed = self._clock() - compute_start
+            serialize_start = self._clock()
+            encoded = encode(payload)
+            serialize_elapsed = self._clock() - serialize_start
+            with self._lock:
+                self._metrics["compute_seconds"] += compute_elapsed
+                self._metrics["serialize_seconds"] += serialize_elapsed
+                if version == self._version:
+                    self._store[vkey] = (encoded, self._clock() + max(0.0, ttl))
+                    self._store.move_to_end(vkey)
+                    while len(self._store) > self._max:
+                        self._store.popitem(last=False)
+                        self._metrics["evictions"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_result(encoded)
+            return encoded
+        except BaseException as exc:
+            with self._lock:
+                self._metrics["failures"] += 1
+                self._inflight.pop(vkey, None)
+                future.set_exception(exc)
+            raise
+
+    def stats(self) -> dict[str, int]:
+        """Return aggregated counters without exposing cached payloads."""
+        with self._lock:
+            return {**self._metrics, "entries": len(self._store),
+                    "inflight": len(self._inflight), "version": self._version}
+
+    def bump_version(self) -> None:
+        """A pipeline write happened: make every cached response unreachable.
+
+        Incrementing the version rather than clearing the dict means an
+        in-flight `get_or_compute` on the old version cannot write into the new
+        one (see the guard above), and the orphaned entries evict themselves as
+        the LRU fills. One integer under the lock.
+        """
+        with self._lock:
+            self._version += 1
+        log.info("web.cache_invalidated")
+
+
+def get_cache(settings) -> Cache:
+    """The configured cache, or the null one.
+
+    Byte-identical to the pre-cache server unless `CACHE_ENABLED` is set, so a
+    checkout, the offline suite and a LAN-only run behave exactly as they did
+    before this module existed. `getattr` with defaults so a Settings object
+    predating these fields (or a test double) still works.
+    """
+    if getattr(settings, "cache_enabled", False):
+        log.info("web.cache_enabled", backend="in_process")
+        return InProcessCache(max_entries=getattr(settings, "cache_max_entries", 512))
+    return NullCache()

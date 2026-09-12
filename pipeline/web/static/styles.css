@@ -18,6 +18,11 @@
   --pending-bg: #fdf3d8;
   --restricted: #8c2b21;
   --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+  /* Shared primitive with the portal (BETA-080): one focus-ring declaration,
+     this front end's own accent. Consolidating the *shape* of the ring, not
+     the identity — the two stylesheets stay distinct. */
+  --focus-ring: 2px solid var(--accent);
+  --focus-ring-offset: 1px;
 }
 
 /* Dark, written twice. Once for "follow the OS", which is the default and was
@@ -99,15 +104,32 @@ a { color: var(--accent); }
 }
 .brand { display: flex; flex-direction: column; line-height: 1.25; }
 .brand .muted { font-size: 11.5px; font-family: var(--mono); }
-.tabs { display: flex; gap: 4px; }
+
+/* BETA-085: the sections are a grouped left rail, not twelve tabs in a row.
+   `.tab[data-tab]` buttons and `showTab()` are unchanged — this is layout. */
+.navtoggle { display: none; }
+.tabs {
+  position: fixed; left: 0; top: var(--topbar-h, 53px); bottom: 0;
+  width: 208px; overflow-y: auto; z-index: 15;
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 10px 8px; background: var(--panel);
+  border-right: 1px solid var(--line);
+}
+.tabgroup { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
+.tabgroup-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); padding: 2px 8px 0;
+}
 .tab {
   border: 1px solid transparent; background: none; color: var(--muted);
-  padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 14px;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 13.5px;
+  text-align: left;
 }
 .tab:hover { background: var(--bg); color: var(--ink); }
 .tab[aria-selected="true"] {
   background: var(--bg); color: var(--ink); border-color: var(--line); font-weight: 600;
 }
+@media (prefers-reduced-motion: reduce) { .tabs { transition: none; } }
 .pill {
   background: var(--pending-bg); color: var(--pending);
   border-radius: 999px; padding: 1px 7px; font-size: 11.5px; font-weight: 600;
@@ -121,17 +143,59 @@ input[type="text"], input[type="search"], select, textarea {
   border-radius: 6px; padding: 5px 8px;
 }
 input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible {
-  outline: 2px solid var(--accent); outline-offset: 1px;
+  outline: var(--focus-ring); outline-offset: var(--focus-ring-offset);
 }
 textarea { width: 100%; font-family: var(--mono); resize: vertical; }
 
-main { padding: 16px; max-width: 1500px; margin: 0 auto; }
+main { padding: 16px 16px 16px 224px; max-width: 1720px; margin: 0 auto; }  /* BETA-085: room for the left rail */
+/* BETA-085: below the rail breakpoint the nav becomes a slide-in drawer.
+   After the base `main` rule so it wins the source-order tie. */
+@media (max-width: 1000px) {
+  .navtoggle { display: inline-flex; }
+  .tabs {
+    transform: translateX(-100%); transition: transform .16s ease;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .35);
+  }
+  .tabs.open { transform: none; }
+  main { padding: 16px; }
+}
 .tabpanel { display: none; }
 .tabpanel.active { display: block; }
 .panel {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: 8px; padding: 14px;
 }
+
+/* --- analysis control plane --------------------------------------------- */
+.analysis-page { max-width: 1480px; }
+.analysis-page > .panel { margin-bottom: 12px; }
+.analysis-section-head, .run-summary-head { display: flex; gap: 12px; align-items: flex-start; justify-content: space-between; }
+.analysis-section-head h2 { margin-bottom: 2px; }
+.analysis-section-head p { margin: 0; }
+.analysis-run-form { display: flex; gap: 12px; align-items: end; flex-wrap: wrap; margin-top: 12px; }
+.analysis-run-form label, .analysis-domain-picker { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.analysis-run-form select, .analysis-run-form input { min-width: 180px; }
+.analysis-domain-picker { min-width: min(100%, 560px); flex: 1; }
+.form-label { display: block; }
+.checkgrid { display: flex; flex-wrap: wrap; gap: 5px 10px; }
+.checkitem { display: inline-flex !important; flex-direction: row !important; align-items: center; gap: 4px !important; font-size: 12px; color: var(--ink) !important; }
+.analysis-form-actions { margin: 0; }
+.run-summary { display: flex; flex-direction: column; gap: 10px; }
+.progress-track { height: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; overflow: hidden; }
+.progress-track span { display: block; height: 100%; background: var(--accent); transition: width .2s ease; }
+.run-metrics { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); font-size: 12.5px; }
+.run-metrics strong { color: var(--ink); font-variant-numeric: tabular-nums; }
+.run-domains { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 6px; }
+.analysis-page details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; }
+.analysis-page .densewrap { max-height: 360px; overflow: auto; }
+.analysis-page #analysis-action-message { min-height: 1.5em; margin: 10px 0 0; }
+.analysis-page .dense td:last-child { min-width: 280px; }
+.proposal-filter { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.proposal-summary { color: var(--muted); margin: 10px 0 6px; }
+.proposal-table td:nth-child(4) { min-width: 260px; }
+.proposal-table td:nth-child(6) { min-width: 230px; }
+.proposal-table .context { margin-top: 8px; }
+.model-call-table td:last-child { min-width: 360px; max-width: 720px; overflow-wrap: anywhere; }
 
 /* --- overview ------------------------------------------------------------ */
 
@@ -201,6 +265,25 @@ tr.clickable { cursor: pointer; }
 }
 details.history summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin-top: 6px; }
 .history table { margin-top: 6px; }
+
+/* BETA-052: the review item's context, as typed sections. */
+.ctx-typed { margin: 6px 0 0; }
+.ctx-section { margin-top: 6px; }
+.ctx-section h4 { margin: 0 0 2px; font-size: 11px; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--muted); }
+dl.ctx-kv { display: grid; grid-template-columns: max-content 1fr; gap: 1px 10px;
+  margin: 0; font-size: 12.5px; }
+dl.ctx-kv dt { font-family: var(--mono); color: var(--muted); }
+dl.ctx-kv dd { margin: 0; overflow-wrap: anywhere; }
+.ctx-evidence { margin: 2px 0 0; padding: 6px 8px; border-left: 3px solid var(--line);
+  background: var(--bg); font-size: 12.5px; }
+.ctx-nav { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
+details.ctx-raw summary { cursor: pointer; font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* BETA-053: the review cluster view. */
+details.cluster { border: 1px solid var(--line); border-radius: 6px; margin: 4px 0; }
+details.cluster > summary { cursor: pointer; padding: 8px 10px; font-size: 13px; }
+details.cluster .cluster-body { padding: 0 10px 10px; }
 
 .actions { display: flex; gap: 6px; align-items: center; margin-top: 8px; flex-wrap: wrap; }
 .actions input[type="text"] { flex: 1; min-width: 160px; }
@@ -525,6 +608,13 @@ a.jump:hover { border-bottom-style: solid; }
    the batch is not going to move on until it answers. */
 .candidate.working { border-color: var(--accent); opacity: 0.75; }
 
+/* The triage preview: the warehouse row we already hold, rendered typed. Set
+   in from the row so it reads as detail, not another candidate. */
+.candidate-preview {
+  margin: 6px 0 2px; padding-left: 10px;
+  border-left: 2px solid var(--line);
+}
+
 /* "Opened" is not a decision, so it is not coloured like one -- it is the
    statement that this row is eligible to be promoted in a batch at all. */
 .pill.opened { background: transparent; color: var(--muted); border: 1px solid var(--line); }
@@ -572,3 +662,117 @@ a.jump:hover { border-bottom-style: solid; }
   max-height: 380px; overflow: auto; margin: 4px 0 0;
   white-space: pre-wrap; word-break: break-word;
 }
+
+/* BETA-082: mission control — dependency waves, per-module last-run status. */
+.mc-status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 6px 0; }
+.mc-waves { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 8px 0; }
+.mc-wave { border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+.mc-wave h3 { margin: 0 0 6px; }
+.mc-modules { list-style: none; margin: 0; padding: 0; }
+.mc-modules li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px 0; }
+
+/* BETA-083: schema panel on the Database tab. */
+.schema-panel { margin: 6px 0; border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; }
+.schema-panel > summary { cursor: pointer; color: var(--accent); }
+.schema-panel p { margin: 4px 0; }
+.schema-cols { margin-top: 6px; }
+.schema-cols th { font-size: 11.5px; }
+
+/* BETA-086: operator action cockpit. */
+.cockpit-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(220px, 100%), 1fr)); gap: 10px; }
+.cockpit-card {
+  display: grid; grid-template-columns: auto 1fr auto; grid-template-areas: "badge title metric" "reason reason reason";
+  gap: 4px 8px; align-items: center; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--line);
+  border-radius: 8px; padding: 10px 12px;
+}
+.cockpit-card:hover { border-color: var(--accent); }
+.cockpit-card.p3 { border-left-color: var(--reject); }
+.cockpit-card.p2 { border-left-color: var(--pending); }
+.cockpit-card.p1 { border-left-color: var(--accent); }
+.cockpit-badge { grid-area: badge; font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
+.cockpit-title { grid-area: title; font-weight: 600; }
+.cockpit-metric { grid-area: metric; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.cockpit-reason { grid-area: reason; color: var(--muted); }
+
+/* BETA-087: split-pane review. Compact queue left, focused item right. */
+.review-split { display: block; }
+.review-detail { display: none; }
+@media (min-width: 1000px) {
+  .review-split {
+    display: grid; grid-template-columns: minmax(300px, 380px) 1fr;
+    gap: 12px; align-items: start;
+  }
+  #review-list-wrap { max-height: 78vh; overflow-y: auto; }
+  .review-detail {
+    display: block; position: sticky; top: 60px; max-height: 82vh; overflow-y: auto;
+  }
+  .review-detail .item { margin-bottom: 0; }
+  /* the left list is the dense table on a wide screen; keep its rows tight */
+  .review-split .dense td.raw { max-width: 220px; }
+}
+
+/* BETA-101: run-to-run comparison. Two run pickers, a totals strip, and a
+ * per-module diff table. Read-only — the numbers come straight from the
+ * immutable ledger. */
+.rc-pickers { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 6px 0 10px; }
+.rc-pickers label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.rc-pickers select { min-width: 260px; }
+.rc-totals { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.rc-change-added { color: var(--accent); }
+.rc-change-removed, .rc-change-regressed { color: var(--bad, #d9534f); }
+.rc-delta-pos::before { content: "+"; }
+td.rc-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* BETA-102: data-lineage explorer. A DOM list and a detail pane — no canvas,
+ * no vendored graph library. The graph is fetched once and filtered here. */
+#lineage-panel > summary { cursor: pointer; }
+#lineage-panel > summary h2 { display: inline; }
+.lin-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; }
+.lin-controls #lin-search { min-width: 220px; }
+.lin-kinds { display: flex; flex-wrap: wrap; gap: 10px; }
+.lin-kinds label { display: inline-flex; align-items: center; gap: 3px; }
+.lin-split { display: grid; grid-template-columns: 1fr; gap: 12px; }
+@media (min-width: 1000px) { .lin-split { grid-template-columns: minmax(240px, 320px) 1fr; align-items: start; } }
+.lin-nodes { list-style: none; margin: 0; padding: 0; max-height: 60vh; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+.lin-nodes li { padding: 3px 8px; cursor: pointer; border-bottom: 1px solid var(--line); }
+.lin-nodes li:hover { background: var(--bg-elevated, rgba(127,127,127,0.08)); }
+.lin-nodes li.is-focus { background: var(--bg-elevated, rgba(127,127,127,0.14)); font-weight: 600; }
+.lin-detail-head { margin-bottom: 4px; }
+.lin-dir { margin-top: 10px; }
+.lin-dir h4 { margin: 0 0 4px; }
+.lin-rel { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; font-size: 13px; }
+.lin-rel-label { color: var(--muted); min-width: 120px; }
+
+/* BETA-103: parser replay sandbox. */
+#replay-panel > summary { cursor: pointer; }
+.rp-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0; }
+.rp-controls #rp-doc { min-width: 260px; }
+
+/* BETA-105: review-outcome analytics. */
+#review-analytics-panel > summary { cursor: pointer; }
+.ra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.ra-grid h3 { margin: 8px 0 4px; }
+.ra-grid table { width: 100%; }
+
+/* BETA-106: QC sampling workspace. */
+#qc-panel > summary { cursor: pointer; }
+.qc-controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; margin: 8px 0; }
+.qc-controls label { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.qc-controls input, .qc-controls select { padding: 3px 6px; }
+.qc-note { min-width: 160px; margin: 0 6px; }
+tr.qc-done td { opacity: .7; }
+
+/* BETA-104: validation-rule explorer. A flat card list — schema rules and
+ * observed rules together, filtered by kind and text. Failure examples show
+ * shape only. */
+#validation-panel > summary { cursor: pointer; }
+.vr-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 8px 0; }
+.vr-controls #vr-search { min-width: 220px; }
+.vr-kinds { display: flex; flex-wrap: wrap; gap: 10px; }
+.vr-kinds label { display: inline-flex; align-items: center; gap: 3px; }
+.vr-rule { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; }
+.vr-rule-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 2px; }
+.vr-examples { margin-top: 6px; }
+.vr-examples ul { margin: 4px 0 0; padding-left: 18px; }
+.vr-examples li { padding: 1px 0; }

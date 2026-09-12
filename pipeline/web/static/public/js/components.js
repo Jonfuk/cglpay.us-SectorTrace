@@ -113,6 +113,15 @@ const LICENCES = {
     caution: 'A public website, not an open licence. Passages are held as '
       + 'evidence rather than republished wholesale.',
   },
+  hse_notices: {
+    name: 'HSE public register — Crown copyright / OGL v3.0', url: OGL_URL,
+    attribution: 'Enforcement notices from the Health and Safety Executive '
+      + 'public notices register, Crown copyright.',
+    caution: 'A served notice is a point-in-time fact, not a settled '
+      + 'outcome: it can be appealed, affirmed, modified, cancelled '
+      + 'or withdrawn. The register’s own `result` field travels with '
+      + 'every notice; check it, and the register, before republishing.',
+  },
   skills_for_care: {
     name: 'OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)',
     url: OGL_URL,
@@ -122,6 +131,13 @@ const LICENCES = {
       + 'the publisher’s own pages carry a site-wide copyright line. '
       + 'Official statistics under the Code of Practice for Statistics; '
       + 'check the publisher’s terms before republishing.',
+  },
+  open_jobs_cc0: {
+    name: 'CC0 1.0 (Open Jobs publication; third-party advert rights remain)',
+    url: 'https://creativecommons.org/publicdomain/zero/1.0/legalcode.en',
+    attribution: 'Open Jobs public data release.',
+    caution: 'CC0 does not clear third-party employer or ATS rights. Shadow '
+      + 'payloads remain operator-only and are not republished wholesale.',
   },
 };
 
@@ -155,6 +171,13 @@ const MODULE_LICENCES = {
   m26_cqc_directory: 'ogl_v3',
   m27_ndtms_monthly: 'ogl_v3',
   m28_sar_reports: 'authority_varies',
+  m29_rough_sleeping: 'ogl_v3',
+  m30_statutory_homelessness: 'ogl_v3',
+  m31_temporary_accommodation: 'ogl_v3',
+  m32_sab_site_reviews: 'authority_varies',
+  m33_hse_notices: 'hse_notices',
+  m34_icb_board_papers: 'ogl_v3',
+  m35_open_jobs: 'open_jobs_cc0',
 };
 
 export function licenceFor(module) {
@@ -254,11 +277,14 @@ export function provenanceFromRows(rows, { module = null, tables = [] } = {}) {
  * exactly one match for a valid number. One click further and honest about
  * what it is, rather than a details URL built from an id we do not hold.
  *
- * CQC is deliberately absent. The public API publishes no profile URL for a
- * location (checked against 520 archived payloads, which contain no
- * cqc.org.uk address at all), and the shape could not be verified without
- * working around a bot block, which this project does not do. See
- * docs/upgrade-roadmap.md, W-15.
+ * CQC is deliberately absent from this map specifically — not from the
+ * portal. A provider has one company number and one charity number, but
+ * *many* CQC locations, so a single link under the provider's name does not
+ * fit the shape this function and REGISTERS are for. Each CQC location gets
+ * its own link instead, on the provider deep dive's CQC badges
+ * (`cqcLocationHref` in pages/providers.js), built from a URL column CQC's
+ * own bulk export files carry — confirmed live, no bot-block, 2026-08-21 and
+ * reconfirmed 2026-08-25. See docs/upgrade-roadmap.md, W-15.
  */
 const REGISTERS = {
   company_number: {
@@ -399,6 +425,73 @@ export function evidenceMeta(payload) {
   return { sources, retrievedAt };
 }
 
+/* BETA-084: one evidence-health strip at the top of every public evidence
+ * page. It has one job — say, in the same place and the same shape every
+ * time, whether what follows is current and complete. Every field renders an
+ * explicit state: a missing value is "unknown" or "not collected", never a
+ * blank. The page supplies what it knows; anything it does not pass is shown
+ * as unknown rather than hidden.
+ *
+ * props: { scope, retrievedAt, verification, coverage, licence, limitation,
+ *          catalogueSlug }
+ *   scope        one sentence: what population/period this page covers
+ *   retrievedAt  latest retrieval ISO, or null -> "unknown"
+ *   verification 'verified' | 'partly verified' | 'unverified' | 'n/a' | null
+ *   coverage     'complete' | 'partial' | 'thin' | 'unknown' | 'not collected'
+ *   licence      {name, url?} | 'varies' | null
+ *   limitation   the one known limitation to lead with, or null
+ *   catalogueSlug  links the strip to `#/catalogue/<slug>` for the full record
+ */
+export function evidenceHealthStrip(props = {}) {
+  const {
+    scope = null, retrievedAt = null, verification = null, coverage = null,
+    licence = null, limitation = null, catalogueSlug = null,
+  } = props;
+
+  const cell = (label, valueNode, cls = '') =>
+    el('div', { class: `ehs-cell${cls ? ` ${cls}` : ''}` },
+      el('span', { class: 'ehs-label', text: label }),
+      typeof valueNode === 'string'
+        ? el('span', { class: 'ehs-value', text: valueNode })
+        : (valueNode || el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' })));
+
+  const verificationText = {
+    verified: 'verified', 'partly verified': 'partly verified',
+    unverified: 'unverified', 'n/a': 'not applicable',
+  }[verification] || 'unknown';
+
+  const coverageText = coverage || 'unknown';
+
+  let licenceNode = el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' });
+  if (licence === 'varies') {
+    licenceNode = el('span', { class: 'ehs-value', text: 'varies by source' });
+  } else if (licence && licence.name) {
+    licenceNode = licence.url
+      ? el('a', { class: 'ehs-value', href: licence.url, target: '_blank', rel: 'noopener noreferrer' }, licence.name)
+      : el('span', { class: 'ehs-value', text: licence.name });
+  }
+
+  return el('div', { class: 'evidence-health', role: 'note', 'aria-label': 'Evidence health' },
+    el('div', { class: 'ehs-grid' },
+      cell('Scope', scope || el('span', { class: 'ehs-value ehs-unknown', text: 'not stated' })),
+      cell('Latest retrieval', retrievedAt ? isoDate(retrievedAt)
+        : el('span', { class: 'ehs-value ehs-unknown', text: 'unknown' })),
+      cell('Verification', verificationText,
+        verification === 'unverified' || verification === 'partly verified' ? 'ehs-warn' : ''),
+      cell('Coverage', coverageText,
+        coverage === 'partial' || coverage === 'thin' || coverage === 'not collected' ? 'ehs-warn' : ''),
+      cell('Licence', licenceNode)),
+    limitation
+      ? el('p', { class: 'ehs-limitation', text: `Known limitation: ${limitation}` })
+      : null,
+    el('p', { class: 'ehs-links small' },
+      catalogueSlug
+        ? el('a', { href: `#/catalogue/${catalogueSlug}` }, 'Full dataset record')
+        : el('a', { href: '#/catalogue' }, 'Dataset catalogue'),
+      ' · ',
+      el('a', { href: '#/coverage' }, 'Coverage & limitations')));
+}
+
 async function copyText(text) {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const area = el('textarea', { class: 'clipboard-fallback', text });
@@ -486,11 +579,75 @@ export function noData(what, command) {
     command ? el('div', { class: 'small' }, 'Run ', el('code', { text: command })) : null);
 }
 
-export function errorCard(message, retry) {
+export function errorCard(errorOrMessage, retry) {
+  // BETA-068: a caller that passes the caught Error through (rather than only
+  // `error.message`) gets the feature-specific unavailable state whenever the
+  // server attached a structured `error_detail` envelope. A bare string, or
+  // an Error without an envelope, renders the plain card below.
+  if (errorOrMessage && typeof errorOrMessage === 'object' && errorOrMessage.detail) {
+    return unavailableCard(errorOrMessage, retry);
+  }
+  const message = (errorOrMessage && typeof errorOrMessage === 'object')
+    ? (errorOrMessage.message || 'Unknown error')
+    : String(errorOrMessage == null ? 'Unknown error' : errorOrMessage);
   return el('div', { class: 'chart-error' },
     el('strong', { text: 'Could not load this.' }),
     el('span', { class: 'small', text: message }),
     retry ? el('button', { class: 'btn', onclick: retry }, 'Retry') : null);
+}
+
+/* BETA-068: a feature-specific unavailable state.
+ *
+ * Live review of the beta showed raw PostgreSQL tracebacks where a section
+ * should be, when a build was missing a migration or an extension. When the
+ * server sends the structured `error_detail` envelope, render the bounded
+ * state: the feature's own message, a Retry only when a retry could plausibly
+ * help, and a collapsed block of build/schema identity plus the diagnostic
+ * `ref` that is also in the server log — enough for an operator to trace the
+ * cause without ever putting SQL in front of the reader. Falls back to the
+ * plain error card when there is no envelope (a network drop, older build).
+ *
+ * Every value reaches the DOM as a text node (constraint 9). */
+export function unavailableCard(error, retry) {
+  const detail = error && error.detail;
+  if (!detail) {
+    return el('div', { class: 'chart-error' },
+      el('strong', { text: 'Could not load this.' }),
+      el('span', { class: 'small', text: (error && error.message) || 'Unknown error' }),
+      retry ? el('button', { class: 'btn', onclick: retry }, 'Retry') : null);
+  }
+
+  const rows = [];
+  const push = (label, value) => {
+    if (value === null || value === undefined || value === '') return;
+    rows.push(el('div', { class: 'kv-row' },
+      el('span', { class: 'kv-key', text: label }),
+      el('span', { class: 'kv-val', text: String(value) })));
+  };
+  push('Feature', detail.feature);
+  push('Code', detail.code);
+  push('Reference', detail.ref);
+  if (detail.build) {
+    push('Build', detail.build.revision);
+    push('Built', detail.build.build_time);
+    push('Environment', detail.build.environment);
+  }
+  if (detail.schema && detail.schema.available) {
+    push('Schema revision', detail.schema.latest_migration);
+    push('Migrations applied', detail.schema.applied_count);
+  }
+
+  return el('div', { class: 'chart-error unavailable-card', role: 'alert' },
+    el('strong', { text: 'This section is unavailable on this build.' }),
+    el('p', { class: 'small', text: detail.message }),
+    detail.retryable && retry
+      ? el('button', { class: 'btn', onclick: retry }, 'Try again')
+      : null,
+    rows.length
+      ? el('details', { class: 'small unavailable-diag' },
+          el('summary', { text: 'Operator diagnostics' }),
+          el('div', { class: 'kv' }, ...rows))
+      : null);
 }
 
 /* Every chart resizes against its own container, not the window. The filter
@@ -500,16 +657,37 @@ const observers = new Map();
 
 export function mountChart(container, option, { height = null, aria = null,
                                                  caption = null,
-                                                 caveat: caveatText = null } = {}) {
+                                                 caveat: caveatText = null,
+                                                 zoom = false,
+                                                 seriesToggles = 'auto',
+                                                 tableHref = null,
+                                                 missingNote = null } = {}) {
   registerTheme();
   if (!window.echarts) {
     replace(container, errorCard('Charting library did not load.'));
     return null;
   }
 
+  // BETA-074: zoom/reset via the ECharts toolbox, opt-in per chart because a
+  // pie or a single-series bar has nothing to zoom. `saveAsImage` stays off —
+  // the DOM "Save image" button below draws the caption and caveat into the
+  // file, which the toolbox export cannot.
+  if (zoom && !option.toolbox) {
+    option = {
+      ...option,
+      toolbox: {
+        right: 8, top: 0, itemSize: 13,
+        feature: {
+          dataZoom: { yAxisIndex: 'none', title: { zoom: 'Zoom to a range', back: 'Undo zoom' } },
+          restore: { title: 'Reset view' },
+        },
+      },
+    };
+  }
+
   // role="img" sits on the chart itself rather than on the wrapper, because
-  // the wrapper now also holds a button and the children of an img role are
-  // presentational — a save button inside one is a button no screen reader
+  // the wrapper now also holds buttons and the children of an img role are
+  // presentational — a control inside one is a control no screen reader
   // announces.
   const holder = el('div', {
     class: `chart${height ? ` ${height}` : ''}`,
@@ -520,12 +698,59 @@ export function mountChart(container, option, { height = null, aria = null,
     title: 'Download this chart as an image, with its caption and caveat drawn into it',
     onclick: () => saveChartImage(chart, wrap, { caption, caveat: caveatText }, save),
   }, 'Save image');
-  const wrap = el('div', { class: 'chartwrap' }, holder, save);
+
+  // BETA-074: keyboard-operable series toggles. The ECharts legend is a canvas
+  // and mouse-only; these <button>s dispatch the same legend action and carry
+  // the state as `aria-pressed`, so a keyboard or screen-reader user can hide
+  // a series. Auto-shown when the option has 2+ named series and no explicit
+  // opt-out.
+  const seriesNames = (option.series || [])
+    .map((s) => s && s.name).filter((n) => typeof n === 'string' && n);
+  const wantToggles = seriesToggles === true
+    || (seriesToggles === 'auto' && seriesNames.length >= 2 && seriesNames.length <= 12);
+  const toggleBar = wantToggles
+    ? el('div', { class: 'chart-series-toggles', role: 'group', 'aria-label': 'Show or hide data series' })
+    : null;
+  // `legendToggleSelect` only affects a series ECharts is tracking in a
+  // legend. If the chart declared none, add a hidden one so the buttons work
+  // without changing the drawn chart.
+  if (wantToggles && !option.legend) {
+    option = { ...option, legend: { show: false, data: seriesNames } };
+  }
+
+  const controls = el('div', { class: 'chart-controls' },
+    zoom ? el('button', {
+      class: 'btn tiny', type: 'button', title: 'Reset zoom and hidden series',
+      onclick: () => chart.dispatchAction({ type: 'restore' }),
+    }, 'Reset view') : null,
+    tableHref ? el('a', { class: 'btn tiny chart-to-table', href: tableHref },
+      'View as table') : null,
+    save);
+
+  const wrap = el('div', { class: 'chartwrap' },
+    toggleBar, holder, controls,
+    missingNote
+      ? el('p', { class: 'small muted chart-missing-note', text: missingNote })
+      : null);
   replace(container, wrap);
 
   const chart = window.echarts.init(holder,
     document.documentElement.dataset.bsTheme === 'light' ? 'sectorTraceLight' : 'sectorTrace');
   chart.setOption(option);
+
+  if (toggleBar) {
+    for (const name of seriesNames) {
+      const btn = el('button', {
+        class: 'chart-series-toggle', type: 'button', 'aria-pressed': 'true',
+        onclick: () => {
+          chart.dispatchAction({ type: 'legendToggleSelect', name });
+          const selected = chart.getOption().legend?.[0]?.selected || {};
+          btn.setAttribute('aria-pressed', String(selected[name] !== false));
+        },
+      }, name);
+      toggleBar.append(btn);
+    }
+  }
 
   const observer = new ResizeObserver(() => chart.resize());
   observer.observe(holder);
@@ -696,17 +921,43 @@ export function symbolFor(index) {
  * displayed text is a link label rather than the value behind it, where a
  * search box would filter on something the reader cannot see.
  */
-export function table(container, columns, rows, { height = 420, rowClass = null } = {}) {
+/* BETA-071: a column's `priority` is how long it survives as the viewport
+ * narrows — 0 never collapses, higher numbers collapse first. Unset means
+ * "assign by position", so the first column is the identifier and stays.
+ * `sticky: true` (or the first column of a wide table) freezes a column to
+ * the left edge so the row's identity stays in view while the rest scrolls
+ * in full-table mode. None of this touches the data: the collapsed fields
+ * are still in the row (Tabulator's `collapse` layout lists them under a
+ * per-row toggle) and still in the export. */
+function withPriorities(columns) {
+  return columns.map((column, index) => {
+    const out = { ...column };
+    if (out.responsive === undefined) {
+      out.responsive = out.priority !== undefined ? out.priority : index;
+    }
+    if ((out.sticky || (index === 0 && columns.length > 6)) && out.frozen === undefined) {
+      out.frozen = true;
+    }
+    delete out.priority;
+    delete out.sticky;
+    return out;
+  });
+}
+
+export function table(container, columns, rows,
+                       { height = 420, rowClass = null, responsive = true } = {}) {
   if (!window.Tabulator) {
     // Degrade to a plain table rather than showing nothing — and say what was
     // dropped, because a table that silently stops at row 200 is the failure
     // this whole finding is about, in miniature.
-    const head = el('tr', {}, columns.map((c) => el('th', { text: c.title })));
+    const head = el('tr', {}, columns.map((c) => el('th', {
+      text: c.title, 'data-priority': String(c.priority ?? '') })));
     const shown = rows.slice(0, 200);
     const body = shown.map((r) =>
-      el('tr', {}, columns.map((c) => el('td', { text: r[c.field] ?? '' }))));
+      el('tr', {}, columns.map((c) => el('td', {
+        text: r[c.field] ?? '', 'data-priority': String(c.priority ?? '') }))));
     replace(container,
-      el('table', {}, el('thead', {}, head), el('tbody', {}, body)),
+      el('table', { class: 'plain-table' }, el('thead', {}, head), el('tbody', {}, body)),
       rows.length > shown.length
         ? el('p', { class: 'small muted',
             text: `Showing ${num(shown.length)} of ${num(rows.length)} rows: the `
@@ -721,10 +972,17 @@ export function table(container, columns, rows, { height = 420, rowClass = null 
   const perPage = Math.max(8, Math.round((height - 96) / 30));
   return new window.Tabulator(container, {
     data: rows,
-    columns: columns.map((column) => (
+    columns: withPriorities(columns).map((column) => (
       column.headerFilter === undefined && column.field
         ? { ...column, headerFilter: 'input', headerFilterPlaceholder: 'search' }
         : column)),
+    // BETA-071: below the layout breakpoint, columns collapse (lowest
+    // priority first) into a per-row toggle that lists them as label/value
+    // pairs — the "card" reading on a phone — while the data and export stay
+    // whole. `false` (full-table mode) keeps every column and scrolls.
+    responsiveLayout: responsive ? 'collapse' : false,
+    responsiveLayoutCollapseStartOpen: false,
+    responsiveLayoutCollapseUseFormatters: true,
     // `height`, not `maxHeight`: Tabulator's RowManager only sets
     // `fixedHeight = true` when `options.height` is given. Without it, its
     // "fill" renderer resizes the row viewport from the table element's own
@@ -761,7 +1019,66 @@ export function rowCount(shown, total = null) {
 export function tableCard(title, columns, rows, options = {}) {
   const holder = el('div', {});
   const truncated = options.total > rows.length;
-  const card = el('div', { class: 'tablecard' },
+
+  // BETA-071: per-table view controls. A native <details> menu, not a custom
+  // popover — density, a column checklist, and an explicit full-table toggle.
+  // Everything operates on the live Tabulator instance and is a no-op until
+  // it exists (or forever, if the library did not load and the plain-table
+  // fallback rendered instead).
+  let inst = null;
+  // BETA-074: an id lets a chart's "View as table" link land here (and a
+  // "Back to chart" link ride back).
+  const card = el('div', options.anchorId
+    ? { class: 'tablecard', id: options.anchorId } : { class: 'tablecard' });
+
+  const setDensity = (compact) => {
+    card.classList.toggle('density-compact', compact);
+    try { inst?.redraw(true); } catch (e) { /* redraw is best-effort */ }
+  };
+  const setFullTable = (full) => {
+    card.classList.toggle('is-fulltable', full);
+    if (!inst) return;
+    try {
+      inst.options.responsiveLayout = full ? false : 'collapse';
+      if (full) inst.getColumns().forEach((c) => c.show());
+      inst.redraw(true);
+    } catch (e) { /* fall back to whatever state it was in */ }
+  };
+  const toggleColumn = (field, on) => {
+    if (!inst) return;
+    try { on ? inst.showColumn(field) : inst.hideColumn(field); inst.redraw(true); }
+    catch (e) { /* a column that cannot toggle stays as it is */ }
+  };
+
+  const columnChecks = columns.filter((c) => c.field).map((c) => el('label', { class: 'tv-col' },
+    el('input', {
+      type: 'checkbox', checked: true,
+      onchange: (e) => toggleColumn(c.field, e.target.checked),
+    }),
+    el('span', { text: c.title })));
+
+  const viewMenu = el('details', { class: 'table-view' },
+    el('summary', { text: 'Table view' }),
+    el('div', { class: 'table-view-panel' },
+      el('fieldset', {},
+        el('legend', { text: 'Density' }),
+        el('label', {}, el('input', {
+          type: 'radio', name: `${title}-density`, checked: true,
+          onchange: () => setDensity(false),
+        }), ' Comfortable'),
+        el('label', {}, el('input', {
+          type: 'radio', name: `${title}-density`,
+          onchange: () => setDensity(true),
+        }), ' Compact')),
+      el('fieldset', {},
+        el('legend', { text: 'Columns' }),
+        ...columnChecks),
+      el('label', { class: 'tv-full' }, el('input', {
+        type: 'checkbox',
+        onchange: (e) => setFullTable(e.target.checked),
+      }), ' Full table (every column, scroll sideways)')));
+
+  card.append(
     el('div', { class: 'toolbar' },
       el('h3', { text: title }),
       el('span', {
@@ -773,19 +1090,139 @@ export function tableCard(title, columns, rows, options = {}) {
         text: rowCount(rows.length, options.total),
       }),
       el('span', { class: 'spacer' }),
+      rows.length ? viewMenu : null,
       options.exportEndpoint
         ? exportButton(options.exportEndpoint, options.exportParams || {},
                        'Download CSV', { total: options.total ?? rows.length })
         : null),
     holder);
   // Tabulator needs the element in the document before it measures.
-  queueMicrotask(() => table(holder, columns, rows, options));
+  queueMicrotask(() => { inst = table(holder, columns, rows, options); });
   return card;
 }
 
 export function truncate(text, length) {
   const value = String(text ?? '');
   return value.length > length ? `${value.slice(0, length - 1)}…` : value;
+}
+
+/* BETA-076: a sticky index for a long entity workbench.
+ *
+ * `sections` is [{id, label, count}] — `id` matches a section wrapper already
+ * in the page. Builds a sticky nav with a count badge per section, a
+ * scroll-spy that marks the section in view, a "Back to top" control, and
+ * honours a `?section=<id>` deep link (added to the URL as you navigate,
+ * without a re-render). `available: false` greys a row instead of hiding it,
+ * so "no records" is a visible state, not an absence.
+ *
+ * Returns { nav, cleanup } — the caller prepends `nav` and calls `cleanup`
+ * from the page's dispose function.
+ */
+export function workbenchNav(pageRoot, sections, { routePath = null } = {}) {
+  const links = new Map();
+  const nav = el('nav', { class: 'workbench-index', 'aria-label': 'Sections on this page' });
+
+  const scrollTo = (id) => {
+    const target = pageRoot.querySelector(`#${CSS.escape(id)}`);
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+    if (routePath) {
+      const q = new URLSearchParams(location.hash.split('?')[1] || '');
+      q.set('section', id);
+      history.replaceState(null, '', `#${routePath}?${q.toString()}`);
+    }
+  };
+
+  for (const s of sections) {
+    const link = el('a', {
+      href: `#${routePath || ''}`,
+      class: `workbench-index-link${s.available === false ? ' is-empty' : ''}`,
+      onclick: (e) => { e.preventDefault(); scrollTo(s.id); },
+    },
+      el('span', { class: 'workbench-index-label', text: s.label }),
+      el('span', { class: 'workbench-index-count', text: String(s.count ?? '') }));
+    links.set(s.id, link);
+    nav.append(link);
+  }
+
+  const toTop = el('button', {
+    class: 'workbench-totop', type: 'button', hidden: true,
+    onclick: () => window.scrollTo({ top: 0, behavior: 'smooth' }),
+  }, '↑ Top');
+  document.body.append(toTop);
+
+  let spy = null;
+  if ('IntersectionObserver' in window) {
+    spy = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        for (const link of links.values()) link.removeAttribute('aria-current');
+        links.get(entry.target.id)?.setAttribute('aria-current', 'true');
+      }
+    }, { rootMargin: '-20% 0px -70% 0px' });
+    for (const s of sections) {
+      const el2 = pageRoot.querySelector(`#${CSS.escape(s.id)}`);
+      if (el2) spy.observe(el2);
+    }
+  }
+
+  const onScroll = () => { toTop.hidden = window.scrollY < 600; };
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  // Deep link: ?section=<id> scrolls there once the section has painted. A
+  // few sections fill asynchronously (a table via queueMicrotask, a lazy
+  // fetch), so poll briefly for the element rather than assuming it is there
+  // on the next frame.
+  const wanted = new URLSearchParams(location.hash.split('?')[1] || '').get('section');
+  if (wanted && links.has(wanted)) {
+    let tries = 0;
+    const tryScroll = () => {
+      if (pageRoot.querySelector(`#${CSS.escape(wanted)}`)?.offsetParent || tries > 20) {
+        scrollTo(wanted);
+      } else {
+        tries += 1;
+        setTimeout(tryScroll, 60);
+      }
+    };
+    requestAnimationFrame(tryScroll);
+  }
+
+  return {
+    nav,
+    cleanup: () => {
+      spy?.disconnect();
+      window.removeEventListener('scroll', onScroll);
+      toTop.remove();
+    },
+  };
+}
+
+/* BETA-076: a section whose body is collapsed when it holds a lot, with the
+ * full content one click away and the count always visible. The export button
+ * a caller passes stays outside the collapse, so "download everything" never
+ * depends on the section being expanded. */
+export function collapsibleSection(id, title, count, body, {
+  collapsedAbove = 25, extra = null, description = null,
+} = {}) {
+  const collapsed = typeof count === 'number' && count > collapsedAbove;
+  const heading = el('h2', {},
+    el('span', { text: title }),
+    el('span', { class: 'section-count', text: ` (${count ?? 0})` }));
+  const wrap = el('section', { class: 'section', id },
+    el('header', {}, heading,
+      description ? el('p', { class: 'small muted', text: description }) : null),
+    extra || null);
+  if (collapsed) {
+    const det = el('details', { class: 'section-disclosure' },
+      el('summary', { text: `Show all ${count}` }), body);
+    wrap.append(det);
+  } else {
+    wrap.append(body);
+  }
+  return wrap;
 }
 
 /* ECharts tooltip formatters take an HTML string, which is the one place in
@@ -795,6 +1232,30 @@ export function escapeHtml(text) {
   return String(text ?? '').replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
+}
+
+/* Scroll-triggered section reveals. Elements are only ever hidden by a class
+ * this function adds itself, immediately before observing them — if
+ * IntersectionObserver is missing, or a page never calls this, sections
+ * render at full opacity by default rather than staying invisible forever.
+ * One-shot per element (`unobserve` after the first reveal): a reader
+ * scrolling back up should not watch the page replay itself. */
+export function revealOnScroll(root, selector = '.section') {
+  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  if (typeof IntersectionObserver === 'undefined') return;
+  const targets = root.querySelectorAll(selector);
+  if (!targets.length) return;
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      entry.target.classList.add('is-visible');
+      observer.unobserve(entry.target);
+    }
+  }, { threshold: 0.08, rootMargin: '0px 0px -8% 0px' });
+  for (const target of targets) {
+    target.classList.add('reveal');
+    observer.observe(target);
+  }
 }
 
 export { isoDate };

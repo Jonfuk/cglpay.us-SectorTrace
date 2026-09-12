@@ -62,6 +62,58 @@ is the enforcement point for the portal and the SQL box, replacing SQLite's
 `PRAGMA query_only`: a session setting the application asks for can be
 forgotten by a bug, and a role without `INSERT` cannot be talked into one.
 
+### Extensions
+
+The pipeline uses three PostgreSQL extensions where the server provides them,
+and falls back to a pure-Python or SQLite path where it does not:
+
+| Extension | Backs | Without it |
+| --- | --- | --- |
+| `vector` (pgvector) | the ANN index for `pipeline/nlp` semantic search | an exact cosine sweep in Python |
+| `pg_trgm` | operator fuzzy-name ranking and the portal's contract text filter | `LIKE` / `difflib` |
+| `postgis` | a `geometry` column and GiST index on `authorities` | shapely centroids, no spatial join |
+
+They are created three ways, any one of which is enough:
+
+* the custom image in [`deploy/postgres/Dockerfile`](../deploy/postgres/Dockerfile)
+  (`postgres:18` + `postgresql-18-pgvector` + `postgresql-18-postgis-3`), which
+  `deploy/ansible/` and `deploy/ansible-mirror/` build and run — `pg_trgm` is
+  already in the stock image;
+* `CREATE EXTENSION IF NOT EXISTS` in the Ansible `postgres-init` script, run
+  once as the `sectortrace_app` superuser when the data directory is empty;
+* `db.ensure_extensions()`, which re-runs the same `CREATE EXTENSION IF NOT
+  EXISTS` on every `pipeline migrate` and logs `db.extension_unavailable`
+  (without failing) when the role is not allowed to.
+
+The Health tab shows, per extension, whether the server carries it and which
+version is installed. A migration that adds an extension-backed index or
+column guards the DDL so a server without the extension still migrates.
+
+`pipeline pg-capabilities` is the deployment-time and CI check of the same
+thing, and goes further: for every extension it names the indexes and
+operator classes that are meant to back it, verifies they exist and were
+built the right way (`USING gin` + `gin_trgm_ops`, `USING gist`, `USING
+hnsw` + `vector_cosine_ops`), and lists every query path currently running
+on its fallback. Read-only — catalogue lookups only, no `CREATE EXTENSION`.
+`--strict` exits non-zero unless the warehouse is fully ready. On SQLite it
+prints that the gate does not apply and exits 0. The same report is at
+`GET /api/admin/pg-capabilities` and in the Health tab.
+`tests/test_pg_capabilities_live.py` exercises it against a disposable
+server with and without the optional extensions (CI runs it in the
+driver-installed job; it self-skips without `POSTGRES_TEST_URL`).
+
+`authorities.geom` (migration 0070) is a **derived** column: a PostGIS
+MultiPolygon rebuilt from `authorities.geometry_geojson` — which stays the
+source of truth and the only geometry the SQLite mirror carries — by
+`pipeline/geo.py:refresh_authority_geometry`, run after a migration, after a
+bulk load, and after `m00_geography` writes boundaries. `pgverify` does not
+compare it and `pgsync` / `pgload` do not copy it. Installing PostGIS *after*
+migration 0070 has run is handled: the next `pipeline migrate` (which
+re-runs `CREATE EXTENSION` and then `refresh_authority_geometry`) adds the
+column, the GiST index and the data. Postcode → authority lookup is a
+separate decision, gated on the archive cost of an ONS postcode-directory
+source rather than on PostGIS.
+
 ### What the Health tab's integrity check covers
 
 `PRAGMA integrity_check` walks every page of a SQLite file. PostgreSQL has no
@@ -81,6 +133,27 @@ server, and the `amcheck` extension — available here, not installed — needs 
 superuser to add. The panel says so rather than reporting a clean bill for a
 check that did not run; if you want the physical check, run `pg_amcheck` on
 the LAN host.
+
+### PostgreSQL maintenance telemetry
+
+`pipeline pg-telemetry-snapshot` (`pipeline/pg_telemetry.py`, migration 0113)
+captures `pg_stat_user_tables` and `pg_stat_user_indexes` into `pg_telemetry_*`
+every run, scheduled daily by `sectortrace-pg-telemetry.timer` — see
+`deploy/ansible/README.md`, "PostgreSQL maintenance telemetry". It is capture
+only: performance.md's "PostgreSQL maintenance" section wants table-specific
+autovacuum/analyze thresholds and index changes made only after this
+telemetry has accumulated over an observation period, not from this run
+itself, so nothing here writes to autovacuum, index, or planner/memory
+configuration.
+
+The query-fingerprint half (`pg_stat_statements`) needs
+`shared_preload_libraries` set at server start — like `amcheck` above, not
+something `CREATE EXTENSION` alone can do, and not something this repository
+can do to a running server. It is "available here, not installed" (the table
+above), so the snapshot logs `pg_telemetry.pg_stat_statements_unavailable`
+and still records table/index telemetry rather than failing. To populate it:
+add `pg_stat_statements` to `shared_preload_libraries`, restart PostgreSQL,
+then `CREATE EXTENSION pg_stat_statements`.
 
 **TLS is off, and that is the one gap in this setup.** The warehouse holds
 personal data in `restricted_` tables, and connections cross a private network
@@ -217,15 +290,28 @@ reproducible Docker Compose build on a single Debian VPS, run locally on the
 box itself rather than from a separate control machine. See
 [`deploy/ansible/README.md`](../deploy/ansible/README.md).
 
-## A second VPS: mirroring an existing deployment
+## A second VPS: mirroring an existing deployment, or a beta box
 
-`deploy/ansible-mirror/` provisions a box that runs the same stack with
-nothing collecting into it. The warehouse arrives from an existing
-deployment on a nightly timer — either its newest verified backup out of S3,
-a direct verified copy of its PostgreSQL over an SSH tunnel, or a direct
-verified copy from a managed PostgreSQL URL — and that
-deployment's raw archive is pulled out of its bucket onto the mirror's local
-disk, where the mirror's own app reads it with no S3 configuration at all.
+`deploy/ansible-mirror/` provisions a box that runs the same stack, seeded
+from an existing deployment's data — including a managed one such as
+Railway (see below), over the "directly from a PostgreSQL URL" sync path.
+Its wizard asks up front which of two things to build:
+
+- **A disaster-recovery mirror** (the default): nothing collects into it,
+  and the warehouse arrives on a nightly timer — either the source's newest
+  verified backup out of S3, a direct verified copy of its PostgreSQL over an
+  SSH tunnel, or a direct verified copy from a managed PostgreSQL URL — and
+  that deployment's raw archive is pulled out of its bucket onto the
+  mirror's local disk, where the mirror's own app reads it with no S3
+  configuration at all.
+- **A beta deployment**: builds a chosen git branch (the box's own checkout
+  is reset to `origin/<branch>` on every run, not whatever was checked out),
+  seeds from the same sync paths **once** rather than nightly, and is then
+  left as an ordinary writable database — for testing that branch's changes
+  against realistic data without the next nightly sync discarding what
+  testing wrote, and without touching production. The documents-worker image
+  also runs the persistent admin analysis queue consumer in this mode; it is
+  not started on disaster-recovery mirrors.
 
 Six of its seven roles are the self-host build's, used unchanged. The thing
 to know before running it is that the warehouse is replaced wholesale on
@@ -278,6 +364,7 @@ development.
 | --- | --- |
 | **The database** | `DATABASE_URL` from the platform. Nothing else changes; `postgres://` URLs are accepted as well as `postgresql://`, which is what Railway and Heroku hand out. |
 | **The migrations** | applied by any command on startup, from `pipeline/migrations/postgres/`. |
+| **The extensions** | `vector`, `pg_trgm`, `postgis`. Railway's PostgreSQL image carries all three behind an extensions env var — enable them on the database service. `db.ensure_extensions()` also runs `CREATE EXTENSION IF NOT EXISTS` for each on the first `pipeline migrate`; if the managed role is allowed to, that is enough on its own. A service without them still runs — each feature has a fallback (see the Extensions section above) — but semantic search does an in-Python cosine sweep and fuzzy operator search is unavailable. `/admin` and `/api/admin/*` are off on Railway anyway (`ADMIN_UI_ENABLED=false`), so `pg_trgm`'s operator half does not apply there; the public contract filter still uses its index. |
 | **The read role** | `DATABASE_RO_URL`. A managed database usually gives one superuser-ish role; creating a `SELECT`-only role is a `CREATE ROLE` + two `GRANT`s and is worth doing rather than pointing both variables at the same user. |
 | **The raw archive** | An S3-compatible bucket, configured through `ARCHIVE_S3_*`. A container filesystem does not survive a redeploy. |
 

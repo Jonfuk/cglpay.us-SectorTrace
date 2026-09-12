@@ -46,6 +46,7 @@ import csv
 import io
 import json
 import re
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from urllib.parse import urljoin, urlparse
 
@@ -60,7 +61,7 @@ from pipeline.http import RobotsDisallowed
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
 from pipeline.parallel import fetch_in_parallel, worker_count
 from pipeline.registry import ModuleContext, register_module
-from pipeline.xlsx import XlsxError, iter_sheet, sheet_names
+from pipeline.xlsx import XlsxError, iter_sheet_stream, sheet_names
 
 log = structlog.get_logger()
 
@@ -96,6 +97,18 @@ SPEND_WORDS = re.compile(
     r"spend|expenditure|payment|payments|supplier|invoice|transparency|"
     r"over-500|over-500|over500", re.IGNORECASE)
 
+# The Local Government Transparency Code mandates several other datasets a
+# council publishes alongside its £500 spend, and "transparency" in the
+# link is enough for SPEND_WORDS to follow them. They have a different
+# schema — no payee/amount pair — so each is fetched only to fail header
+# detection and land in parse_failures. A link whose URL or text carries
+# one of these is not a payments file. (Every term here was observed doing
+# exactly that in the review queue: fraud returns, senior-salary tables,
+# grants-to-VCS lists, asset and land registers, parking-space inventories.)
+NON_SPEND_WORDS = re.compile(
+    r"\bfraud\b|salar|senior[\s_-]?pay|pay[\s_-]?multiple|"
+    r"\bgrants?\b|\bassets?\b|\bland\b|parking", re.IGNORECASE)
+
 _LINK_RE = re.compile(r'<a\b[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
                       re.IGNORECASE | re.DOTALL)
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -107,10 +120,16 @@ _TAG_RE = re.compile(r"<[^>]+>")
 # variations councils actually use.
 _PAYEE_HEADERS = ("supplier", "payee", "vendor", "beneficiary", "creditor",
                   "organisation", "organization", "company", "supplier name",
-                  "payee name", "name of supplier", "supplier organisation")
+                  "payee name", "name of supplier", "supplier organisation",
+                  "vendor name", "beneficiary name", "creditor name",
+                  "supplier / beneficiary", "merchant", "merchant name",
+                  "body name", "trading name", "recipient", "paid to")
 _AMOUNT_HEADERS = ("amount", "value", "net amount", "gross amount", "total",
                    "amount paid", "payment amount", "amount (£)",
-                   "amount excluding vat", "spend", "expenditure", "cost")
+                   "amount excluding vat", "spend", "expenditure", "cost",
+                   "transaction amount", "invoice amount", "total amount",
+                   "payment value", "amount in sterling", "gross value",
+                   "net value", "amount gbp")
 _PERIOD_HEADERS = ("period", "month", "date", "payment date", "invoice date",
                    "financial year", "financial period", "month/year",
                    "date of payment")
@@ -133,7 +152,15 @@ def _normalise_name(name: str) -> str:
 
 
 def _normalise_header(value: str) -> str:
-    return re.sub(r"\s+", " ", (value or "").lower()).strip()
+    """Lower-case and whitespace-normalise a header cell, and drop a
+    currency/unit qualifier: councils label the money column "Amount (£)",
+    "Value £", "Amount (GBP)", "Amount (net)", and the synonym list should
+    not need a variant for every bracketed form."""
+    text = (value or "").lower().replace("£", " ")
+    text = re.sub(
+        r"[\(\[]\s*(?:gbp|pounds?|sterling|net|gross|excl\.?\s*vat|"
+        r"incl\.?\s*vat|000s?|)\s*[\)\]]", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _match_headers(header: list[str], synonyms: tuple[str, ...]) -> int | None:
@@ -197,18 +224,24 @@ def _file_urls_on_page(page_html: str, page_url: str, host: str) -> list[str]:
         haystack = f"{url} {_link_text(raw_text)}"
         if not SPEND_WORDS.search(haystack):
             continue
+        if NON_SPEND_WORDS.search(haystack):
+            continue
         out.append(url)
     return out
 
 
 def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     """A CSV spend file as line-item rows. Returns (rows, error)."""
-    text = body.decode("utf-8-sig", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    rows = [row for row in reader if any(cell.strip() for cell in row)]
-    if not rows:
+    # Decode incrementally from the archived bytes. A large spend export must
+    # not briefly exist as both its complete byte payload and a second
+    # complete decoded string before parsing starts.
+    stream = io.TextIOWrapper(io.BytesIO(body), encoding="utf-8-sig",
+                              errors="replace", newline="")
+    reader = csv.reader(stream)
+    header = next((row for row in reader if any(cell.strip() for cell in row)), None)
+    if header is None:
         return [], "the file has no rows"
-    header = [cell.strip() for cell in rows[0]]
+    header = [cell.strip() for cell in header]
     payee_idx = _match_headers(header, _PAYEE_HEADERS)
     amount_idx = _match_headers(header, _AMOUNT_HEADERS)
     if payee_idx is None or amount_idx is None:
@@ -218,7 +251,9 @@ def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     desc_idx = _match_headers(header, _DESCRIPTION_HEADERS)
 
     out: list[dict] = []
-    for raw in rows[1:]:
+    for raw in reader:
+        if not any(cell.strip() for cell in raw):
+            continue
         if len(raw) <= max(payee_idx, amount_idx):
             continue
         payee = (raw[payee_idx] or "").strip()
@@ -239,46 +274,87 @@ def _parse_csv(body: bytes, file_url: str) -> tuple[list[dict], str | None]:
     return out, None
 
 
+def _xlsx_header_and_rows(body: bytes) -> tuple[dict[str, str], Iterator[dict[str, str]]] | None:
+    """Return the first non-empty header and a streaming view of the rest.
+
+    Spend workbooks sometimes carry several sheets, but the old parser kept
+    every sheet's rows before it started parsing. Inspecting one header first
+    lets the second pass retain only the four columns this module stores while
+    keeping the XML reader bounded to one sheet at a time.
+    """
+    names = sheet_names(body)
+    first_sheet = None
+    header: dict[str, str] | None = None
+    for name in names:
+        rows = iter_sheet_stream(body, name)
+        try:
+            candidate = next(rows)
+        except StopIteration:
+            rows.close()
+            continue
+        rows.close()
+        first_sheet = name
+        header = candidate
+        break
+    if first_sheet is None or header is None:
+        return None
+
+    wanted = _PAYEE_HEADERS + _AMOUNT_HEADERS + _PERIOD_HEADERS + _DESCRIPTION_HEADERS
+    keep = {letter for letter, value in header.items()
+            if _normalise_header(value) in wanted}
+
+    def data_rows() -> Iterator[dict[str, str]]:
+        skipped_header = False
+        for name in names:
+            for row in iter_sheet_stream(body, name, keep=keep):
+                if name == first_sheet and not skipped_header:
+                    skipped_header = True
+                    continue
+                yield row
+
+    return header, data_rows()
+
+
 def _parse_xlsx_ods(body: bytes, file_url: str, format_hint: str) -> tuple[list[dict], str | None]:
     """An XLSX or ODS spend file as line-item rows."""
     if format_hint == "xlsx":
         try:
-            sheets = {name: iter_sheet(body, name) for name in sheet_names(body)}
+            header_row = _xlsx_header_and_rows(body)
         except (XlsxError, OSError, ValueError) as exc:
             return [], f"could not read the workbook as xlsx: {exc}"
-        rows: list[list[str]] = []
-        for name, sheet in sheets.items():
-            if not sheet:
-                continue
-            rows.extend([list(row.values()) for row in sheet])
-        if not rows:
+        if header_row is None:
             return [], "the workbook has no rows"
-        header = rows[0]
-        payee_idx = _match_headers(header, _PAYEE_HEADERS)
-        amount_idx = _match_headers(header, _AMOUNT_HEADERS)
-        if payee_idx is None or amount_idx is None:
-            return [], (f"no payee column ({payee_idx is None}) or amount column "
-                        f"({amount_idx is None}) in the sheet header")
-        period_idx = _match_headers(header, _PERIOD_HEADERS)
-        desc_idx = _match_headers(header, _DESCRIPTION_HEADERS)
+        header, rows = header_row
+        columns = {_normalise_header(value): letter
+                   for letter, value in header.items()}
+
+        def column(synonyms: tuple[str, ...]) -> str | None:
+            for synonym in synonyms:
+                if _normalise_header(synonym) in columns:
+                    return columns[_normalise_header(synonym)]
+            return None
+
+        payee_col = column(_PAYEE_HEADERS)
+        amount_col = column(_AMOUNT_HEADERS)
+        if payee_col is None or amount_col is None:
+            return [], (f"no payee column ({payee_col is None}) or amount column "
+                        f"({amount_col is None}) in the sheet header")
+        period_col = column(_PERIOD_HEADERS)
+        desc_col = column(_DESCRIPTION_HEADERS)
         out: list[dict] = []
-        for raw in rows[1:]:
-            if len(raw) <= max(payee_idx, amount_idx):
-                continue
-            payee = (raw[payee_idx] or "").strip()
+        for raw in rows:
+            payee = (raw.get(payee_col) or "").strip()
             if not payee:
                 continue
-            amount_text = (raw[amount_idx] or "").strip()
+            amount_text = (raw.get(amount_col) or "").strip()
             out.append({
                 "payee": payee[:500],
                 "amount": _to_number(amount_text),
                 "amount_text": amount_text[:500] or None,
-                "period": (raw[period_idx].strip()[:120]
-                           if period_idx is not None and period_idx < len(raw)
-                           and raw[period_idx].strip() else None),
-                "description": (raw[desc_idx].strip()[:1000]
-                                if desc_idx is not None and desc_idx < len(raw)
-                                and raw[desc_idx].strip() else None),
+                "period": ((raw.get(period_col) or "").strip()[:120]
+                           if period_col is not None and raw.get(period_col) else None),
+                "description": ((raw.get(desc_col) or "").strip()[:1000]
+                                if desc_col is not None and raw.get(desc_col) else None),
             })
         return out, None
 
@@ -517,25 +593,28 @@ def run(ctx: ModuleContext) -> None:
             continue
 
         findings = outcome.value
-        for item_type, raw_value, context in findings.review_items:
-            db.record_review_item(conn, module_name, item_type, raw_value,
-                                  json.dumps(context))
-        for failure_field, raw, reason, source_url in findings.parse_failures:
-            db.record_parse_failure(conn, module_name, failure_field, raw, reason,
-                                    source_url=source_url)
+        db.record_review_items(
+            conn, module_name,
+            [(item_type, raw_value, json.dumps(context))
+             for item_type, raw_value, context in findings.review_items])
+        db.record_parse_failures(
+            conn, module_name,
+            [(source_url, failure_field, raw, reason)
+             for failure_field, raw, reason, source_url in findings.parse_failures])
 
-        for file_row in findings.files:
-            db.upsert(conn, "council_spend_files", file_row,
-                      natural_key=["authority_ons_code", "file_url"])
-            files_written += 1
+        db.upsert_many(
+            conn, "council_spend_files", findings.files,
+            natural_key=["authority_ons_code", "file_url"])
+        files_written += len(findings.files)
 
-        for line in findings.lines:
-            provider_key = by_name.get(_normalise_name(line["payee"]))
-            db.upsert(conn, "council_spend", {
-                **line,
-                "provider_key": provider_key,
-            }, natural_key=["authority_ons_code", "file_url", "row_index"])
-            lines_written += 1
+        line_rows = [{
+            **line,
+            "provider_key": by_name.get(_normalise_name(line["payee"])),
+        } for line in findings.lines]
+        db.upsert_many(
+            conn, "council_spend", line_rows,
+            natural_key=["authority_ons_code", "file_url", "row_index"])
+        lines_written += len(line_rows)
 
         if not ctx.dry_run:
             conn.commit()

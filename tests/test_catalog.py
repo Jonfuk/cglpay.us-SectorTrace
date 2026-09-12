@@ -44,7 +44,7 @@ def test_row_counts_agrees_with_asking_one_table_at_a_time(conn):
 
     one_at_a_time = {
         name: conn.execute(
-            f"SELECT COUNT(*) FROM {catalog.quote(name)}").fetchone()[0]
+            f"SELECT COUNT(*) FROM {catalog.quote(name)}").fetchone().values().__iter__().__next__()
         for name in tables
     }
     assert catalog.row_counts(conn, tables) == one_at_a_time

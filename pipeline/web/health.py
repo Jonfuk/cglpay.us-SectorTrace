@@ -29,7 +29,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipeline import catalog, db
+from pipeline import catalog, db, operational_snapshots
 from pipeline.web import queries
 
 # Authorities responsible for public health, and therefore the ones any
@@ -96,7 +96,7 @@ def coverage(conn: db.Connection, tier: str = "upper") -> dict:
         raise queries.QueryError(f"tier must be 'upper' or 'all', got {tier!r}.")
 
     if tier == "upper":
-        placeholders = ", ".join("?" for _ in UPPER_TIER)
+        placeholders = ", ".join("%s" for _ in UPPER_TIER)
         authorities = conn.execute(
             f"SELECT ons_code, name, type, region FROM authorities "
             f"WHERE type IN ({placeholders}) ORDER BY region, name", UPPER_TIER).fetchall()
@@ -151,16 +151,10 @@ def coverage(conn: db.Connection, tier: str = "upper") -> dict:
 def warehouse(conn: db.Connection, settings) -> dict:
     """Size, shape, and whether the schema on disk is the schema that ran.
 
-    The migration half of this is the part that matters and it is identical on
-    both backends: what the ledger says was applied, what is on disk, and the
-    two ways those can disagree. The size half is where the backends stop
-    resembling each other, and the shape of the answer says which one you are
-    looking at rather than pretending they are the same measurement.
+    The migration half of this is the part that matters: what the ledger says
+    was applied, what is on disk, and the two ways those can disagree. The size
+    half is PostgreSQL's `pg_database_size`.
     """
-    # Applied-vs-on-disk, from the tree matching this connection. Reading
-    # `settings.migrations_dir` here would list SQLite's filenames against a
-    # PostgreSQL ledger — they happen to be the same names today, which is
-    # exactly what would make the bug survive review.
     applied = [row["filename"] for row in conn.execute(
         "SELECT filename FROM schema_migrations ORDER BY filename")]
     on_disk = sorted(p.name for p in db.migrations_dir_for(settings).glob("*.sql"))
@@ -174,48 +168,86 @@ def warehouse(conn: db.Connection, settings) -> dict:
         "applied_without_file": [name for name in applied if name not in on_disk],
     }
 
-    if db.backend_of(conn) == "postgres":
-        # No file, no sidecars, no page count this side of the connection, and
-        # no freelist at all: PostgreSQL's dead-tuple space is per-table and is
-        # reclaimed by autovacuum rather than being a single number about the
-        # database. `pg_database_size` is the honest total; anything finer
-        # belongs in a Phase 4 panel that measures per-relation bloat properly
-        # rather than in a field named after a SQLite pragma.
-        size = conn.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
-        return {
-            "backend": "postgres",
-            "path": settings.redacted_database_url,
-            "files": {},
-            "bytes": size,
-            "page_size": None,
-            "page_count": None,
-            "free_bytes": None,
-            **common,
-        }
-
-    database_path = Path(settings.database_path)
-    files = {}
-    for suffix in ("", "-wal", "-shm"):
-        candidate = Path(str(database_path) + suffix)
-        if candidate.exists():
-            files[candidate.name] = candidate.stat().st_size
-
-    page_size = conn.execute("PRAGMA page_size").fetchone()[0]
-    page_count = conn.execute("PRAGMA page_count").fetchone()[0]
-    freelist = conn.execute("PRAGMA freelist_count").fetchone()[0]
-
+    # No file, no sidecars, no page count, and no freelist: PostgreSQL's
+    # dead-tuple space is per-table and reclaimed by autovacuum rather than a
+    # single database number. `pg_database_size` is the honest total; anything
+    # finer belongs in a panel that measures per-relation bloat properly.
+    size = conn.execute("SELECT pg_database_size(current_database()) AS n").fetchone()["n"]
     return {
-        "backend": "sqlite",
-        "path": str(database_path),
-        "files": files,
-        "bytes": sum(files.values()),
-        "page_size": page_size,
-        "page_count": page_count,
-        # Free pages are space the file is holding but not using. Worth seeing
-        # before wondering why a 230 MB warehouse holds 200 MB of evidence.
-        "free_bytes": freelist * page_size,
+        "backend": "postgres",
+        "path": settings.redacted_database_url,
+        "files": {},
+        "bytes": size,
+        "page_size": None,
+        "page_count": None,
+        "free_bytes": None,
         **common,
     }
+
+
+# What each extension buys, for the operator reading the panel. The feature
+# still works without it — this names the fallback so "slow" or "missing" has
+# an explanation rather than a shrug.
+_EXTENSION_BACKS = {
+    "vector": "semantic-search ANN index",
+    "pg_trgm": "fuzzy-name ranking and the portal contract text filter",
+    "postgis": "geometry column and spatial index on authorities",
+}
+
+
+def extensions(conn: db.Connection) -> list[dict]:
+    """The extensions the warehouse uses where the server provides them.
+
+    One row per name in `db.WAREHOUSE_EXTENSIONS`: whether the server carries it at all
+    (`available`), whether it is installed in this database (`installed`), and
+    the installed version. `pg_available_extensions` is readable by any role,
+    so this needs none of the privilege `_postgres_integrity` goes without.
+    """
+    names = db.WAREHOUSE_EXTENSIONS
+    placeholders = ",".join("%s" for _ in names)
+    seen = {
+        row["name"]: row for row in conn.execute(
+            f"SELECT e.name, e.default_version, i.extversion AS installed_version "
+            f"FROM pg_available_extensions e "
+            f"LEFT JOIN pg_extension i ON i.extname = e.name "
+            f"WHERE e.name IN ({placeholders})", list(names))
+    }
+    out = []
+    for name in names:
+        row = seen.get(name)
+        out.append({
+            "name": name,
+            "available": row is not None,
+            "installed": bool(row and row["installed_version"]),
+            "version": (row["installed_version"] if row else None)
+                        or (row["default_version"] if row else None),
+            "backs": _EXTENSION_BACKS.get(name, ""),
+        })
+    return out
+
+
+def geometry_status(conn: db.Connection) -> dict | None:
+    """Whether the derived PostGIS geometry kept up with its source.
+
+    `authorities.geom` (migration 0070) is built from `geometry_geojson` by
+    `pipeline/geo.py`. `with_geom` should equal `with_geojson`, and `invalid`
+    should be zero — `ST_MakeValid` runs in the derivation, so a non-zero
+    count is a boundary PostGIS still cannot repair. Returns None before
+    migration 0070's column exists.
+    """
+    has_column = conn.execute(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_schema = current_schema() "
+        "  AND table_name = 'authorities' AND column_name = 'geom'").fetchone()
+    if not has_column:
+        return None
+    row = conn.execute(
+        "SELECT COUNT(*) FILTER (WHERE geometry_geojson IS NOT NULL) AS with_geojson, "
+        "       COUNT(*) FILTER (WHERE geom IS NOT NULL) AS with_geom, "
+        "       COUNT(*) FILTER (WHERE geom IS NOT NULL AND NOT public.ST_IsValid(geom)) AS invalid "
+        "FROM authorities").fetchone()
+    return {"with_geojson": row["with_geojson"], "with_geom": row["with_geom"],
+            "invalid": row["invalid"]}
 
 
 def hosts(conn: db.Connection) -> list[dict]:
@@ -230,6 +262,69 @@ def hosts(conn: db.Connection) -> list[dict]:
         "SELECT host, COUNT(*) AS urls, MAX(updated_at) AS newest, "
         "       MIN(updated_at) AS oldest "
         "FROM http_cache GROUP BY host ORDER BY urls DESC")]
+
+
+def graph_status(conn: db.Connection) -> dict:
+    """The evidence graph's own operational state — not its content.
+
+    `docs/evidence-graph.md` documents a whole subsystem (migration `0050`:
+    entities, relationships, claims, a Neo4j projection, NetworkX metrics)
+    that until now had no answer anywhere in the UI to "has this ever been
+    run, and how stale is it" — a CLI-only `pipeline graph status` was the
+    only way to know. Cheap, unlike `storage()` and `freshness()`: one row
+    from `graph_projection_runs` (indexed, tiny) and one count from
+    `graph_projection_queue`, so unlike those two this belongs in the cheap
+    half of the tab.
+
+    `_table_exists` first because the graph tables are optional-extra
+    territory (`uv sync --extra graph`) applied by migration `0050` like any
+    other — a warehouse that predates it, or one where nobody has ever
+    touched the graph, must not fail the whole Health tab over it.
+    """
+    if not _table_exists(conn, "graph_projection_runs"):
+        return {"last_run": None, "pending_queue": 0}
+
+    last_run = conn.execute(
+        "SELECT run_id, started_at, completed_at, status, entity_count, "
+        "relationship_count, claim_count, error_detail "
+        "FROM graph_projection_runs ORDER BY started_at DESC LIMIT 1").fetchone()
+    pending = conn.execute(
+        "SELECT COUNT(*) AS count FROM graph_projection_queue "
+        "WHERE processed_at IS NULL").fetchone()["count"]
+    return {
+        "last_run": dict(last_run) if last_run else None,
+        "pending_queue": int(pending),
+    }
+
+
+def document_status(conn: db.Connection) -> dict:
+    """The document-analysis layer's own operational state — registered,
+    parsed and searchable documents, not their content.
+
+    `docs/document-analysis.md` documents a whole subsystem (migration
+    `0053`: inspection, OCR, parsing, classification, quality) that until
+    now had no answer anywhere in the UI to "how much has been processed" —
+    `pipeline documents stats` on the CLI was the only way to know, the same
+    shape `graph_status` closed for the evidence graph.
+
+    Cheap: a handful of `COUNT(*)` over tables that only grow as documents
+    are processed, not a per-document or per-page scan — so, like
+    `graph_status`, this belongs in the cheap `health()` bundle.
+    """
+    if not _table_exists(conn, "document_processing_states"):
+        return {"registered": 0, "parsed": 0, "failed": 0, "documents": 0}
+
+    registered = conn.execute(
+        "SELECT COUNT(*) AS count FROM document_processing_states").fetchone()["count"]
+    parsed = conn.execute(
+        "SELECT COUNT(*) AS count FROM document_processing_states "
+        "WHERE parse_status = 'SUCCESS'").fetchone()["count"]
+    failed = conn.execute(
+        "SELECT COUNT(*) AS count FROM document_processing_states "
+        "WHERE parse_status = 'FAILED'").fetchone()["count"]
+    documents = conn.execute("SELECT COUNT(*) AS count FROM document_records").fetchone()["count"]
+    return {"registered": int(registered), "parsed": int(parsed),
+            "failed": int(failed), "documents": int(documents)}
 
 
 def freshness(conn: db.Connection) -> list[dict]:
@@ -376,8 +471,49 @@ def health(conn: db.Connection, settings) -> dict:
     """
     return {
         "warehouse": warehouse(conn, settings),
+        "extensions": extensions(conn),
+        "geometry": geometry_status(conn),
         "hosts": hosts(conn),
+        "graph": graph_status(conn),
+        "documents": document_status(conn),
     }
+
+
+def cached_operational(conn: db.Connection, settings, key: str, compute) -> dict:
+    """Serve the latest successful expensive value, refreshing when stale.
+
+    A failed refresh never erases the last useful answer; it marks that answer
+    stale and exposes the refresh error for the operator UI.
+    """
+    max_age = getattr(settings, "operational_snapshot_max_age_seconds", 900)
+    current = operational_snapshots.load(conn, key, max_age_seconds=max_age)
+    if current is not None and not current["stale"]:
+        return {"value": current["payload"], "snapshot": current}
+    started = __import__("time").perf_counter()
+    try:
+        value = compute()
+        try:
+            operational_snapshots.save(
+                conn, key, value,
+                duration_ms=(__import__("time").perf_counter() - started) * 1000)
+            conn.commit()
+            snapshot = operational_snapshots.load(conn, key, max_age_seconds=max_age)
+        except db.Error:
+            # The current web read connection may be enforced query-only. The
+            # calculated value is still valid; persistence is an optimisation
+            # and cannot turn an otherwise healthy route into a 500.
+            conn.rollback()
+            snapshot = None
+        return {"value": value, "snapshot": snapshot}
+    except Exception as exc:
+        conn.rollback()
+        if current is not None:
+            operational_snapshots.record_refresh_failure(conn, key, str(exc))
+            conn.commit()
+            current["stale"] = True
+            current["refresh_error"] = str(exc)[:2000]
+            return {"value": current["payload"], "snapshot": current}
+        raise
 
 
 # --- parse failures ---------------------------------------------------------------
@@ -395,18 +531,18 @@ def failures(conn: db.Connection, module: str | None = None,
     where = []
     params: list = []
     if module:
-        where.append("module = ?")
+        where.append("module = %s")
         params.append(module)
     if search:
-        where.append("(reason LIKE ? ESCAPE '\\' OR raw_fragment LIKE ? ESCAPE '\\' "
-                      "OR field_name LIKE ? ESCAPE '\\' OR source_url LIKE ? ESCAPE '\\')")
+        where.append("(reason LIKE %s ESCAPE '\\' OR raw_fragment LIKE %s ESCAPE '\\' "
+                      "OR field_name LIKE %s ESCAPE '\\' OR source_url LIKE %s ESCAPE '\\')")
         params.extend([f"%{queries.escape_like(search)}%"] * 4)
 
     clause = f"WHERE {' AND '.join(where)}" if where else ""
     limit = max(1, min(limit, queries.MAX_PAGE_SIZE))
 
     total = conn.execute(
-        f"SELECT COUNT(*) FROM parse_failures {clause}", params).fetchone()[0]
+        f"SELECT COUNT(*) AS count FROM parse_failures {clause}", params).fetchone()["count"]
 
     groups = [dict(row) for row in conn.execute(
         f"SELECT module, field_name, reason, COUNT(*) AS n, "
@@ -417,7 +553,7 @@ def failures(conn: db.Connection, module: str | None = None,
     rows = [dict(row) for row in conn.execute(
         f"SELECT id, module, field_name, reason, raw_fragment, source_url, created_at "
         f"FROM parse_failures {clause} ORDER BY created_at DESC, id DESC "
-        f"LIMIT ? OFFSET ?", [*params, limit, offset])]
+        f"LIMIT %s OFFSET %s", [*params, limit, offset])]
 
     modules = [row["module"] for row in conn.execute(
         "SELECT module, COUNT(*) AS n FROM parse_failures "
@@ -431,7 +567,7 @@ def failures(conn: db.Connection, module: str | None = None,
 
 
 def integrity_check(settings) -> list[dict]:
-    """`PRAGMA integrity_check` plus a foreign-key sweep.
+    """Run the PostgreSQL constraint and foreign-key integrity sweep.
 
     Run as a job rather than inline: it walks every page of a 230 MB file and
     an HTTP request that takes forty seconds looks like a hung UI. Opened
@@ -439,39 +575,22 @@ def integrity_check(settings) -> list[dict]:
     """
     conn = queries.readonly_connection(settings)
     try:
-        if db.backend_of(conn) == "postgres":
-            return _postgres_integrity(conn)
-        integrity = [row[0] for row in conn.execute("PRAGMA integrity_check")]
-        foreign_keys = [dict(zip(("table", "rowid", "parent", "fkid"), row))
-                         for row in conn.execute("PRAGMA foreign_key_check")]
+        return _postgres_integrity(conn)
     finally:
         conn.close()
 
-    return [{
-        "integrity": integrity,
-        "ok": integrity == ["ok"] and not foreign_keys,
-        "foreign_key_violations": foreign_keys[:200],
-        "foreign_key_violation_count": len(foreign_keys),
-        "checked": "every page of the file and every foreign key",
-        "not_checked": "",
-    }]
-
 
 def _postgres_integrity(conn) -> list[dict]:
-    """The half of `PRAGMA integrity_check` that PostgreSQL can answer.
+    """The PostgreSQL integrity sweep exposed by the health job.
 
-    Phase 1 refused this outright rather than return an ok nobody could
-    distinguish from a check, and left the work to the phase doing backup and
-    restore, on the grounds that both answer "is this warehouse intact?". This
-    is that work, and it is deliberately two thirds of it:
+    This deliberately reports exactly what it checks:
 
       * **Every foreign key is swept**, one generated anti-join per constraint
         — the analogue of `PRAGMA foreign_key_check`, and the check that would
         notice a restore or a load having produced orphans.
       * **Every constraint is asked whether it is validated.** A `NOT VALID`
         constraint is enforced for new rows and never checked against the old
-        ones, so it is a guarantee the schema claims and does not have. SQLite
-        cannot express that state and therefore cannot have it.
+        ones, so it is a guarantee the schema claims and does not have.
       * **Pages are not checked.** There is no in-database equivalent of
         walking the file: `pg_amcheck` is a separate binary, and the `amcheck`
         extension is not installed on this server — installing it needs
@@ -497,8 +616,8 @@ def _postgres_integrity(conn) -> list[dict]:
     def columns_of(table: str, numbers) -> list[str]:
         rows = conn.execute(
             "SELECT a.attname AS name FROM pg_attribute a "
-            "WHERE a.attrelid = to_regclass(?) AND a.attnum = ANY(?) "
-            "ORDER BY array_position(?, a.attnum)",
+            "WHERE a.attrelid = to_regclass(%s) AND a.attnum = ANY(%s) "
+            "ORDER BY array_position(%s, a.attnum)",
             (table, list(numbers), list(numbers))).fetchall()
         return [r["name"] for r in rows]
 
@@ -527,10 +646,10 @@ def _postgres_integrity(conn) -> list[dict]:
             f"p.{catalog.quote(p)} = c.{catalog.quote(c)}"
             for p, c in zip(parent_columns, child_columns))
         count = conn.execute(
-            f"SELECT COUNT(*) FROM {catalog.quote(row['child'])} c "
+            f"SELECT COUNT(*) AS count FROM {catalog.quote(row['child'])} c "
             f"WHERE {present} AND NOT EXISTS ("
             f"  SELECT 1 FROM {catalog.quote(row['parent'])} p WHERE {joined})"
-        ).fetchone()[0]
+        ).fetchone()["count"]
         swept += 1
         if count:
             violations.append({"table": row["child"], "parent": row["parent"],

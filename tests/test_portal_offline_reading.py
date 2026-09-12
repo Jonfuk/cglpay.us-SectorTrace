@@ -47,8 +47,10 @@ def test_every_route_it_names_actually_exists(index):
     named = set(re.findall(r"/api/v1/([a-z0-9_]+)", noscript.group(1)))
     assert named, "the block should tell a reader where the evidence is"
 
-    # `export` is a real route and is not in the frozen data-route list.
-    unknown = named - PUBLIC_API_ROUTES - {"export"}
+    # `export` and `feed` (/api/v1/feed/changes.atom) are real routes served
+    # outside the `route == "..."` dispatch, so they are EXTRA, not in the
+    # frozen data-route list.
+    unknown = named - PUBLIC_API_ROUTES - {"export", "feed"}
     assert not unknown, f"advertised routes that do not exist: {sorted(unknown)}"
 
 

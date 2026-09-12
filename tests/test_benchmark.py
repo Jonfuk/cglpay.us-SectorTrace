@@ -12,7 +12,7 @@ import json
 
 import pytest
 
-from pipeline import benchmark, db
+from pipeline import benchmark
 
 
 class TestTheCasesItMeasures:
@@ -61,8 +61,8 @@ class TestItRunsAgainstARealWarehouse:
     def test_a_report_has_every_section(self, conn, settings):
         conn.commit()
         report = benchmark.benchmark(settings)
-        assert report["environment"]["backend"] == "sqlite"
-        assert report["environment"]["server"].startswith("sqlite ")
+        assert report["environment"]["backend"] == "postgres"
+        assert report["environment"]["server"]
         assert "reads" in report and report["reads"]
         assert "write_throughput" in report
         assert "write_contention" in report
@@ -117,13 +117,13 @@ class TestItRunsAgainstARealWarehouse:
         written = json.loads(
             (tmp_path / "benchmarks" / report["written_to"].split("\\")[-1].split("/")[-1])
             .read_text(encoding="utf-8"))
-        assert written["environment"]["backend"] == "sqlite"
+        assert written["environment"]["backend"] == "postgres"
 
     def test_the_filename_carries_the_backend_and_the_time(self, conn, settings,
                                                             tmp_path):
         conn.commit()
         report = benchmark.benchmark(settings, writes=False, output_dir=tmp_path)
-        assert report["written_to"].endswith("-sqlite.json")
+        assert report["written_to"].endswith("-postgres.json")
 
 
 class TestItCannotDamageWhatItMeasures:
@@ -135,18 +135,18 @@ class TestItCannotDamageWhatItMeasures:
         every comparison here rests on.
         """
         conn.commit()
-        before = conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone()[0]
+        before = conn.execute("SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__()
         benchmark.benchmark(settings, reads=False)
         assert conn.execute(
-            "SELECT COUNT(*) FROM parse_failures").fetchone()[0] == before
+            "SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__() == before
 
     def test_the_scratch_warehouse_is_not_the_real_one(self, settings):
         with benchmark.scratch_warehouse(settings) as scratch:
-            assert scratch.settings.database_path != settings.database_path
-            assert db.backend_of(scratch.conn) == "sqlite"
-            path = scratch.settings.database_path
-            assert path.is_file()
-        assert not path.is_file(), "the scratch warehouse outlived its context"
+            assert scratch.settings.database_url != settings.database_url
+            assert scratch.conn.raw.info.server_version is not None
+            scratch_schema = scratch.conn.execute("SELECT current_schema()").fetchone().values().__iter__().__next__()
+            assert scratch_schema != "public"
+        assert scratch_schema.startswith("bench_")
 
     def test_the_throughput_run_tidies_up(self, settings):
         with benchmark.scratch_warehouse(settings) as scratch:
@@ -154,7 +154,7 @@ class TestItCannotDamageWhatItMeasures:
             assert measured["rows"] == 20
             assert measured["rows_per_second"] > 0
             assert scratch.conn.execute(
-                "SELECT COUNT(*) FROM parse_failures").fetchone()[0] == 0
+                "SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__() == 0
 
     def test_the_contention_run_tidies_up(self, settings):
         with benchmark.scratch_warehouse(settings) as scratch:
@@ -163,7 +163,7 @@ class TestItCannotDamageWhatItMeasures:
             assert measured["errors"] == []
             assert [e["writers"] for e in measured["by_writers"]] == [1, 2]
             assert scratch.conn.execute(
-                "SELECT COUNT(*) FROM parse_failures").fetchone()[0] == 0
+                "SELECT COUNT(*) FROM parse_failures").fetchone().values().__iter__().__next__() == 0
 
     def test_scaling_is_measured_against_one_writer(self, settings):
         """Not against thread lifetimes. Serialised writers are all still

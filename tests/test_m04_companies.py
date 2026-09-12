@@ -15,6 +15,24 @@ def _allow_all_robots(httpx_mock) -> None:
         status_code=200, text="", is_reusable=True)
 
 
+@pytest.fixture
+def seed_companies():
+    """The (provider_key, company_number) pairs m04.run() should walk.
+
+    VERIFIED_IDENTIFIERS now seeds a company number for all nine tracked
+    entities, and m04 fetches and fully walks every one. These tests each
+    arrange a single company and mock only that one, so the default here
+    is CGL alone; a test that is specifically about the name-search path
+    clears it.
+    """
+    return [("change_grow_live", "03861209")]
+
+
+@pytest.fixture(autouse=True)
+def _only_walk_seed_companies(monkeypatch, seed_companies):
+    monkeypatch.setattr(ch, "_seed_company_numbers", lambda conn: list(seed_companies))
+
+
 # --- company number normalisation ---------------------------------------------
 
 @pytest.mark.parametrize("raw,expected", [
@@ -207,7 +225,7 @@ def test_officers_go_only_to_the_restricted_table(httpx_mock, settings, conn):
 
     # the public companies row must not contain any officer name
     company_blob = " ".join(
-        str(v) for v in tuple(conn.execute("SELECT * FROM companies").fetchone()) if v is not None)
+        str(v) for v in conn.execute("SELECT * FROM companies").fetchone().values() if v is not None)
     assert "A Person" not in company_blob
     assert "B Person" not in company_blob
 
@@ -231,9 +249,10 @@ def test_officer_changes_view_is_name_free(httpx_mock, settings, conn):
     assert not any("name" in c for c in columns)
 
 
-def test_fuzzy_search_hits_go_to_review_not_companies(httpx_mock, settings, conn):
+def test_fuzzy_search_hits_go_to_review_not_companies(httpx_mock, settings, conn, seed_companies):
     _allow_all_robots(httpx_mock)
     providers.seed_providers(conn)
+    seed_companies.clear()  # this test is only about the search path
     httpx_mock.add_response(
         url=re.compile(r".*/search/companies.*"),
         json={"items": [
@@ -250,7 +269,7 @@ def test_fuzzy_search_hits_go_to_review_not_companies(httpx_mock, settings, conn
     assert len(review) >= 1
 
 
-def test_exact_name_hit_is_captured_but_not_linked(httpx_mock, settings, conn):
+def test_exact_name_hit_is_captured_but_not_linked(httpx_mock, settings, conn, seed_companies):
     """A shared name is not a shared identity. Live Companies House data has
     a dissolved "FORWARD TRUST LIMITED" (formerly Bradford & Bingley Personal
     Finance) and a 2025-incorporated "HUMANKIND LTD" — neither is the charity
@@ -259,6 +278,7 @@ def test_exact_name_hit_is_captured_but_not_linked(httpx_mock, settings, conn):
     """
     _allow_all_robots(httpx_mock)
     providers.seed_providers(conn)
+    seed_companies.clear()  # only the exact-name-hit path is under test
     httpx_mock.add_response(
         url=re.compile(r".*/search/companies.*"),
         json={"items": [{"company_number": "06228752",
@@ -278,12 +298,13 @@ def test_exact_name_hit_is_captured_but_not_linked(httpx_mock, settings, conn):
     ).fetchone()["c"] == 1
 
 
-def test_name_only_match_never_writes_a_provider_identifier(httpx_mock, settings, conn):
+def test_name_only_match_never_writes_a_provider_identifier(httpx_mock, settings, conn, seed_companies):
     """Otherwise an unrelated same-named company would silently become a
     permanent part of the provider's group.
     """
     _allow_all_robots(httpx_mock)
     providers.seed_providers(conn)
+    seed_companies.clear()  # only the name-only-hit path is under test
     httpx_mock.add_response(
         url=re.compile(r".*/search/companies.*"),
         json={"items": [{"company_number": "01865768", "title": "FORWARD TRUST LIMITED"}]},
@@ -376,7 +397,7 @@ def test_psc_edges_are_stored_with_names_only_in_the_restricted_table(
         "right-to-appoint-and-remove-directors"
     assert individual["notifiable"] == 1
     # the public row carries no name, no date of birth, no nationality
-    public_blob = " ".join(str(v) for v in tuple(individual) if v is not None)
+    public_blob = " ".join(str(v) for v in individual.values() if v is not None)
     assert "SOMEONE" not in public_blob and "1980" not in public_blob
 
     restricted = conn.execute(

@@ -30,7 +30,7 @@ export async function render(main) {
   try {
     data = await fetchJSON('claims');
   } catch (error) {
-    replace(main, errorCard(error.message, () => render(main)));
+    replace(main, errorCard(error, () => render(main)));
     return () => {};
   }
 

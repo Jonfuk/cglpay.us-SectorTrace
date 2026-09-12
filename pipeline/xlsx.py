@@ -38,6 +38,7 @@ from __future__ import annotations
 import io
 import re
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
@@ -170,8 +171,8 @@ def read_sheet(path_or_bytes: Path | str | bytes, name: str) -> list[list[str]]:
         return out
 
 
-def iter_sheet(path_or_bytes: Path | str | bytes, name: str,
-               keep: set[str] | None = None) -> list[dict[str, str]]:
+def iter_sheet_stream(path_or_bytes: Path | str | bytes, name: str,
+                      keep: set[str] | None = None) -> Iterator[dict[str, str]]:
     """One sheet as row dicts holding only the requested column letters.
 
     `keep` names the columns to return by letter (e.g. {"A", "B", "DX"}).
@@ -179,11 +180,10 @@ def iter_sheet(path_or_bytes: Path | str | bytes, name: str,
     element tree is dropped as it is walked — so a 500 MB sheet costs a few
     seconds of XML parsing rather than a full in-memory tree.
 
-    Returns a list (the caller usually iterates it once and writes rows; a
-    list keeps the call site free of iterator-lifetime surprises with the
-    archive). Each row is {column_letter: value}.
+    Each row is {column_letter: value}. The archive and XML parser stay open
+    only for the lifetime of the iterator, so callers must consume it before
+    leaving the owning operation. Only one row dictionary is retained.
     """
-    out: list[dict[str, str]] = []
     with _open(path_or_bytes) as archive:
         target = _sheet_paths(archive).get(name)
         if target is None:
@@ -212,9 +212,19 @@ def iter_sheet(path_or_bytes: Path | str | bytes, name: str,
                 elem.clear()
             elif elem.tag == f"{{{_SPREADSHEET_NS}}}row":
                 if row_cells:
-                    out.append(dict(row_cells))
+                    yield dict(row_cells)
                     row_cells.clear()
                 elem.clear()
             elif elem.tag == f"{{{_SPREADSHEET_NS}}}sheetData":
                 elem.clear()
-    return out
+
+
+def iter_sheet(path_or_bytes: Path | str | bytes, name: str,
+               keep: set[str] | None = None) -> list[dict[str, str]]:
+    """Compatibility wrapper returning the historical materialised list.
+
+    New large-workbook callers should use :func:`iter_sheet_stream`; retaining
+    this wrapper avoids changing the public parser contract for small callers
+    and existing tests.
+    """
+    return list(iter_sheet_stream(path_or_bytes, name, keep))

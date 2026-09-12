@@ -15,10 +15,11 @@
  */
 'use strict';
 
-import { el, replace, fetchJSON, num, gbp } from '/app.js';
+import { el, replace, fetchJSON, num, gbp, isoDate, sourceLink,
+          typeaheadKeyboard } from '/app.js';
 import { section, pinnedCaveat, noData, errorCard, mountChart, disposeCharts,
           provenanceFromRows, provenance, symbolFor, escapeHtml,
-          shareButton, findingBlock } from '/js/components.js';
+          shareButton, findingBlock, tableCard } from '/js/components.js';
 
 export async function render(main, { params = null } = {}) {
   const charts = [];
@@ -64,7 +65,7 @@ export async function render(main, { params = null } = {}) {
         provider_key: state.providers.length ? state.providers : undefined,
       });
     } catch (error) {
-      replace(content, errorCard(error.message, () => render(main, { params })));
+      replace(content, errorCard(error, () => render(main, { params })));
       return () => {};
     }
   }
@@ -152,7 +153,81 @@ export async function render(main, { params = null } = {}) {
       });
   }
 
+  // BETA-045: when the selection is providers only (2-4), the pay-evidence
+  // layers that have no authority counterpart and no shared time axis are
+  // laid out side by side — as tables, because "unlike measures must not be
+  // collapsed" and a chart would invite exactly that.
+  if (state.providers.length >= 2 && !state.ons.length) {
+    await renderProviderPayLayers(contentHolder, state.providers);
+  }
+
   return () => disposeCharts(charts);
+}
+
+async function renderProviderPayLayers(container, providerKeys) {
+  const keys = providerKeys.slice(0, 4);
+  const truncated = providerKeys.length > 4;
+  let data;
+  try {
+    data = await fetchJSON('provider_compare', { provider_key: keys });
+  } catch (error) {
+    container.append(section('Pay evidence side by side', null,
+      errorCard(error, () => {})));
+    return;
+  }
+  const order = data.providers.map((p) => p.provider_key);
+  const name = new Map(data.providers.map((p) => [p.provider_key, p.canonical_name]));
+
+  const layerBlock = (title, layer, rowsFor) => {
+    const parts = [pinnedCaveat(layer.caveat, `${title} — read before comparing`),
+      el('p', { class: 'small muted', text: `Unit: ${layer.unit}` })];
+    for (const key of order) {
+      const rows = (layer.by_provider && layer.by_provider[key]) || [];
+      parts.push(el('div', { class: 'panel' },
+        el('h4', { text: name.get(key) || key }),
+        rows.length
+          ? el('ul', { class: 'small' }, ...rows.slice(0, 8).map(rowsFor))
+          : el('p', { class: 'small muted', text: 'No rows in this layer for this provider — not evidence of a better or worse position.' }),
+        rows.length > 8
+          ? el('p', { class: 'small muted', text: `…and ${num(rows.length - 8)} more` })
+          : null));
+    }
+    return section(title, null, ...parts);
+  };
+
+  container.append(el('div', { class: 'section' },
+    el('h2', { text: 'Pay evidence side by side' }),
+    pinnedCaveat(data.caveat, 'What this side-by-side may and may not do'),
+    truncated
+      ? el('p', { class: 'small muted', text: `Showing the first four providers you picked; the endpoint accepts at most four.` })
+      : null));
+
+  container.append(layerBlock('Living Wage accreditation', data.layers.living_wage,
+    (r) => el('li', { text: `${r.accredited ? 'Accredited' : 'Not accredited'}`
+      + `${r.employer_name ? ` — matched to "${r.employer_name}" (${r.match_basis || 'match'})` : ''}`
+      + `${r.retrieved_at ? `, checked ${isoDate(r.retrieved_at)}` : ''}` })));
+
+  container.append(layerBlock('Latest gender pay gap filing', data.layers.gender_pay_gap,
+    (r) => el('li', {}, `${r.reporting_year_label || r.reporting_year}: `
+      + `mean hourly gap ${fmtPct(r.diff_mean_hourly_percent)}, `
+      + `median ${fmtPct(r.diff_median_hourly_percent)}`
+      + `${r.employer_size ? ` (${r.employer_size})` : ''} `,
+      r.written_statement_url ? sourceLink(r.written_statement_url, 'statement') : null)));
+
+  container.append(layerBlock('Pay published on the provider’s own site', data.layers.provider_pay,
+    (r) => el('li', {}, `${(r.mention_text || r.salary_raw || '').trim()}`
+      + `${r.salary_period ? ` — per ${r.salary_period}` : ''}`
+      + `${r.salary_basis ? `, ${r.salary_basis}` : ''} `,
+      r.source_url ? sourceLink(r.source_url, 'page') : null)));
+
+  container.append(layerBlock('Recent NHS Jobs adverts', data.layers.nhs_jobs,
+    (r) => el('li', {}, `${r.job_title || 'role'}: ${r.salary_raw || '—'}`
+      + `${r.posted_date ? ` (posted ${isoDate(r.posted_date)})` : ''} `,
+      r.advert_url ? sourceLink(r.advert_url, 'advert') : null)));
+}
+
+function fmtPct(value) {
+  return value === null || value === undefined ? '—' : `${value}%`;
 }
 
 /* The pickers and the selection chips. The URL is the state: every add and
@@ -221,17 +296,22 @@ async function renderPicker(holder, chips, state, data) {
  * Picking navigates: the hash is rewritten with the new selection and the
  * router re-renders, so there is no local state to fall out of step. */
 function authorityPicker(state, authorities) {
-  const input = el('input', { type: 'search', placeholder: 'Add an authority',
-    'aria-label': 'Add an authority to compare', autocomplete: 'off' });
-  const list = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const input = el('input', { type: 'search', id: 'compare-add-authority',
+    placeholder: 'Add an authority', 'aria-label': 'Add an authority to compare',
+    autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false',
+    'aria-controls': 'compare-add-authority-list' });
+  const list = el('ul', { id: 'compare-add-authority-list', class: 'typeahead-list',
+    hidden: true, role: 'listbox' });
   const fuse = window.Fuse
     ? new window.Fuse(authorities, { keys: ['name', 'ons_code'], threshold: 0.4 })
     : null;
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const pick = (code) => {
     if (state.ons.includes(code)) return;
     input.value = '';
     list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
     appendToUrl('ons_code', code);
   };
   const show = () => {
@@ -244,32 +324,34 @@ function authorityPicker(state, authorities) {
     replace(list, matches.map((a) => el('li', {
       role: 'option', onmousedown: () => pick(a.ons_code),
     }, `${a.name} · ${a.ons_code}`)));
+    resetKeyboard();
     list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
   input.addEventListener('focus', show);
   input.addEventListener('input', show);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
   return el('div', { class: 'typeahead' }, input, list);
 }
 
 function providerPicker(state, providers) {
-  const input = el('input', { type: 'search', placeholder: 'Add a provider',
-    'aria-label': 'Add a provider to compare', autocomplete: 'off' });
-  const list = el('ul', { class: 'typeahead-list', hidden: true, role: 'listbox' });
+  const input = el('input', { type: 'search', id: 'compare-add-provider',
+    placeholder: 'Add a provider', 'aria-label': 'Add a provider to compare',
+    autocomplete: 'off', role: 'combobox', 'aria-expanded': 'false',
+    'aria-controls': 'compare-add-provider-list' });
+  const list = el('ul', { id: 'compare-add-provider-list', class: 'typeahead-list',
+    hidden: true, role: 'listbox' });
   const fuse = window.Fuse
     ? new window.Fuse(providers, { keys: ['canonical_name', 'provider_key'],
       threshold: 0.4 })
     : null;
+  const resetKeyboard = typeaheadKeyboard(input, list);
 
   const pick = (key) => {
     if (state.providers.includes(key)) return;
     input.value = '';
     list.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
     appendToUrl('provider_key', key);
   };
   const show = () => {
@@ -282,16 +364,13 @@ function providerPicker(state, providers) {
     replace(list, matches.map((p) => el('li', {
       role: 'option', onmousedown: () => pick(p.provider_key),
     }, p.canonical_name)));
+    resetKeyboard();
     list.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
   };
   input.addEventListener('focus', show);
   input.addEventListener('input', show);
   input.addEventListener('blur', () => setTimeout(() => { list.hidden = true; }, 120));
-  input.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || list.hidden) return;
-    const first = list.querySelector('li');
-    if (first) first.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
-  });
   return el('div', { class: 'typeahead' }, input, list);
 }
 
@@ -308,6 +387,7 @@ function appendToUrl(param, value) {
  * wherever else it is drawn. */
 function renderYearsChart(container, title, description, series, charts, opts) {
   const holder = el('div', {});
+  const tableHolder = el('div', {});
   const rows = series.rows || [];
   const entities = [...new Set(rows.map((r) => r[opts.entity]))];
   const years = [...new Set(rows.map((r) => r.year))].sort();
@@ -319,12 +399,16 @@ function renderYearsChart(container, title, description, series, charts, opts) {
         .map((text) => pinnedCaveat(text, 'Read this with the chart')),
       indicativeNote(opts, rows),
       holder,
+      tableHolder,
       provenanceMeta(opts, rows) || el('span', {}))));
 
   if (!entities.length || !years.length) {
     replace(holder, noData(`${title.toLowerCase()} series`, null));
     return;
   }
+
+  replace(tableHolder, tableCard('Values behind the chart',
+    yearsTableColumns(opts, rows), rows, { height: 280 }));
 
   const byEntityYear = new Map(rows.map((r) =>
     [`${r[opts.entity]}\u0000${r.year}`, r]));
@@ -380,6 +464,30 @@ function indicativeNote(opts, rows) {
     `Allocations for ${year} are published as indicative and are revised `
     + 'later. Do not compare an indicative year with a confirmed one.',
     'Indicative allocation');
+}
+
+/* The same rows the chart draws, as a table — every chart-bearing page but
+ * this one already pairs a chart with its rows (BETA-018's frontend audit
+ * flagged the gap). Columns are derived from `opts`/the rows themselves
+ * rather than hard-coded per series, since `renderYearsChart` is shared by
+ * five differently-shaped series (grant, budget, contracts, provider
+ * contracts). */
+function yearsTableColumns(opts, rows) {
+  const columns = [
+    { title: opts.entity === 'provider_name' ? 'Provider' : 'Authority', field: opts.entity },
+    { title: 'Year', field: 'year', width: 90 },
+    {
+      title: opts.value === 'value_gbp' ? 'Value' : 'Amount', field: opts.value,
+      width: 130, formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+  ];
+  if (rows.some((r) => r.count !== undefined)) {
+    columns.push({ title: 'Notices', field: 'count', width: 90 });
+  }
+  if (rows.some((r) => r.allocation_status)) {
+    columns.push({ title: 'Status', field: 'allocation_status', width: 130 });
+  }
+  return columns;
 }
 
 function provenanceMeta(opts, rows) {
@@ -482,7 +590,7 @@ function renderTreatment(container, data, charts) {
     charts.push(mountChart(chartHolder, {
       title: {
         text: indicator.indicator_name, subtext: indicator.unit || '',
-        left: 0, top: 0, textStyle: { fontSize: 15, color: '#e6edf3' },
+        left: 0, top: 0, textStyle: { fontSize: 15 },
         subtextStyle: { color: '#8b949e' },
       },
       grid: { top: 76 },
@@ -497,6 +605,19 @@ function renderTreatment(container, data, charts) {
         + `${authorities.join(', ')} with the confidence intervals the source `
         + 'published, compared with the England figure.',
     }));
+
+    const tableRows = [
+      ...indicatorRows,
+      ...englandRows.map((r) => ({ ...r, authority_name: 'England' })),
+    ];
+    holder.append(tableCard(`${indicator.indicator_name} — values behind the chart`, [
+      { title: 'Authority', field: 'authority_name' },
+      { title: 'Period', field: 'time_period', width: 110 },
+      { title: 'Value', field: 'value', width: 100 },
+      { title: 'Lower 95%', field: 'lower_ci_95', width: 110 },
+      { title: 'Upper 95%', field: 'upper_ci_95', width: 110 },
+      { title: 'Note', field: 'value_note' },
+    ], tableRows, { height: 260 }));
   }
 }
 
@@ -510,6 +631,7 @@ function ciRgb(hex) {
  * figures. */
 function renderCharity(container, data, charts) {
   const holder = el('div', {});
+  const tableHolder = el('div', {});
   const rows = data.rows || [];
   const providers = [...new Set(rows.map((r) => r.provider_key))];
   const years = [...new Set(rows.map((r) => r.financial_year_end))].sort();
@@ -519,6 +641,7 @@ function renderCharity(container, data, charts) {
     el('div', { class: 'panel' },
       pinnedCaveat(data.caveat, 'Read this with the chart'),
       holder,
+      tableHolder,
       provenanceFromRows(rows, {
         module: 'm03_charity_finance', tables: ['charity_financials'],
       }) || el('span', {}))));
@@ -527,6 +650,19 @@ function renderCharity(container, data, charts) {
     replace(holder, noData('charity accounts', './start.sh run m03_charity_finance'));
     return;
   }
+
+  replace(tableHolder, tableCard('Values behind the chart', [
+    { title: 'Provider', field: 'canonical_name' },
+    { title: 'Year end', field: 'financial_year_end', width: 110 },
+    {
+      title: 'Income', field: 'total_income', width: 130,
+      formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+    {
+      title: 'Expenditure', field: 'total_expenditure', width: 130,
+      formatter: (c) => gbp(c.getValue(), { compact: false }),
+    },
+  ], rows, { height: 260 }));
 
   const byKey = new Map(rows.map((r) =>
     [`${r.provider_key}\u0000${r.financial_year_end}`, r]));

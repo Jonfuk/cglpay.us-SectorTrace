@@ -123,6 +123,17 @@ LICENCES: dict[str, Licence] = {
         caution="A public website, not an open licence. Passages are held as "
                 "evidence rather than republished wholesale.",
     ),
+    "hse_notices": Licence(
+        id="hse_notices",
+        name="HSE public register — Crown copyright / OGL v3.0",
+        url=OGL_URL,
+        attribution="Enforcement notices from the Health and Safety Executive "
+                    "public notices register, Crown copyright.",
+        caution="A served notice is a point-in-time fact, not a settled "
+                "outcome: it can be appealed, affirmed, modified, cancelled "
+                "or withdrawn. The register's own `result` field travels with "
+                "every notice; check it, and the register, before republishing.",
+    ),
     "skills_for_care": Licence(
         id="skills_for_care",
         name="OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)",
@@ -133,6 +144,14 @@ LICENCES: dict[str, Licence] = {
                 "the publisher's own pages carry a site-wide copyright line. "
                 "Official statistics under the Code of Practice for "
                 "Statistics; check the publisher's terms before republishing.",
+    ),
+    "open_jobs_cc0": Licence(
+        id="open_jobs_cc0",
+        name="CC0 1.0 (Open Jobs publication; third-party advert rights remain)",
+        url="https://creativecommons.org/publicdomain/zero/1.0/legalcode.en",
+        attribution="Open Jobs public data release.",
+        caution="CC0 does not clear third-party employer or ATS rights. Shadow "
+                "payloads remain operator-only and are not republished wholesale.",
     ),
 }
 
@@ -170,6 +189,13 @@ MODULE_LICENCES: dict[str, str] = {
     "m26_cqc_directory": "ogl_v3",
     "m27_ndtms_monthly": "ogl_v3",
     "m28_sar_reports": "authority_varies",
+    "m29_rough_sleeping": "ogl_v3",
+    "m30_statutory_homelessness": "ogl_v3",
+    "m31_temporary_accommodation": "ogl_v3",
+    "m32_sab_site_reviews": "authority_varies",
+    "m33_hse_notices": "hse_notices",
+    "m34_icb_board_papers": "ogl_v3",
+    "m35_open_jobs": "open_jobs_cc0",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
@@ -188,6 +214,11 @@ ENDPOINT_MODULES: dict[str, tuple[str, ...]] = {
                    "m12_fingertips", "m13_la_budgets"),
     "fingertips": ("m12_fingertips",),
     "ndtms": ("m07_ndtms",),
+    # PFD reports only -- the export's `recent` key is the report corpus,
+    # not the SAR half of the same page's payload (m28_sar_reports, a
+    # different licence -- "authority_varies" -- and not exported here).
+    "pfd": ("m08_pfd_reports",),
+    "safety": ("m33_hse_notices",),
 }
 
 

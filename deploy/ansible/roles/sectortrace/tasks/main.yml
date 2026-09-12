@@ -71,6 +71,15 @@
     dest: "{{ state_dir }}/docker-compose.documents.yml"
     mode: "0644"
 
+# Rendered whether or not the assistant is provisioned, so the file is there
+# the day someone sets assistant_runtime_enabled. Nothing starts from it
+# unless that is true — see the bring-up block after the health gate.
+- name: Render the assistant model-runtime compose file
+  ansible.builtin.template:
+    src: docker-compose.assistant.yml.j2
+    dest: "{{ state_dir }}/docker-compose.assistant.yml"
+    mode: "0644"
+
 - name: Render the Caddyfile
   ansible.builtin.template:
     src: Caddyfile.j2
@@ -88,6 +97,12 @@
     src: sectortrace-wrapper.sh.j2
     dest: /usr/local/bin/sectortrace
     mode: "0755"
+
+- name: Build the warehouse PostgreSQL image
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml build postgres
+    chdir: "{{ state_dir }}"
+  changed_when: true
 
 - name: Build the app image
   ansible.builtin.command:
@@ -148,6 +163,111 @@
   until: sectortrace_health.status is defined and sectortrace_health.status == 200
   failed_when: sectortrace_health.status is not defined or sectortrace_health.status != 200
 
+# The analysis control plane lives in the always-on app, while the executor
+# uses the heavy document-worker image. Start the queue consumer only after the
+# app health gate has proved that migrations and the shared warehouse are ready.
+- name: Bring up the analysis worker
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.documents.yml up -d analysis-worker
+    chdir: "{{ state_dir }}"
+  changed_when: true
+
+# The one-time catch-up of document_embeddings.embedding_vec for rows that
+# predate migration 0071. Deliberately *after* the health gate, never inside
+# `pipeline migrate`: on a populated warehouse this fills six figures of rows
+# and builds the pgvector HNSW index, and that must not sit between the app
+# starting and it serving — that coupling failed a mirror's health gate once
+# (see pipeline/db.py:apply_migrations). Idempotent and resume-safe: a no-op
+# once every row has its vector, and `nlp embed` writes embedding_vec inline
+# for rows built after 0071, so this only ever clears the pre-0071 backlog.
+- name: Backfill pgvector embedding_vec (one-time; a no-op once filled)
+  ansible.builtin.command:
+    cmd: docker compose -f docker-compose.yml exec -T app python -m pipeline nlp backfill-vectors
+    chdir: "{{ state_dir }}"
+  register: sectortrace_backfill
+  changed_when: false
+
+# --- Local analyst assistant model runtime (BETA-107) ----------------------
+# Only when this box provisions it. Ollama serves the LFM synthesis model
+# and the same weights aliased to the router's tag; the app reaches both at
+# http://ollama:11434 on the compose network. Enabling the feature itself
+# (ASSISTANT_ENABLED) is still a separate, gated step — see docs/assistant.md.
+- name: Bring up the assistant model runtime
+  when: assistant_runtime_enabled
+  block:
+    - name: Start Ollama
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml up -d
+        chdir: "{{ state_dir }}"
+      changed_when: true
+
+    - name: Wait for Ollama to answer
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama list
+        chdir: "{{ state_dir }}"
+      register: sectortrace_ollama_ready
+      retries: 20
+      delay: 3
+      until: sectortrace_ollama_ready.rc == 0
+      changed_when: false
+
+    # `ollama pull` of a missing manifest can exit 0 with the error only in
+    # the streamed body (a wrong assistant_lfm_ollama_ref does exactly this),
+    # so check the output too, not just rc. The reference must exist on
+    # ollama.com — `ollama.com/library/lfm2` is a 24B model, not this one.
+    - name: Pull the LFM model (a no-op once current)
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama pull {{ assistant_lfm_ollama_ref }}
+        chdir: "{{ state_dir }}"
+      register: sectortrace_ollama_pull
+      changed_when: "'success' in sectortrace_ollama_pull.stdout or 'pulling' in sectortrace_ollama_pull.stdout"
+      failed_when: >-
+        sectortrace_ollama_pull.rc != 0
+        or 'Error:' in (sectortrace_ollama_pull.stdout + sectortrace_ollama_pull.stderr)
+        or 'file does not exist' in (sectortrace_ollama_pull.stdout + sectortrace_ollama_pull.stderr)
+
+    # No `ollama cp` alias: env.j2 sets ASSISTANT_LFM_MODEL /
+    # ASSISTANT_NEEDLE_MODEL to assistant_lfm_ollama_ref, so the string the
+    # app sends is the exact name Ollama pulled — nothing to rename, and the
+    # ledger records the model that actually answered.
+    #
+    # `run` it, not `show`: pull and show both succeed on a GGUF this Ollama
+    # cannot actually load (an old build panics parsing an LFM2.5 hybrid
+    # metadata array only when a request forces a load), and the failure
+    # would otherwise surface for the first time at `nlp assistant-eval`.
+    - name: Smoke-test that the model loads and generates
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml exec -T ollama ollama run {{ assistant_lfm_ollama_ref }} "reply with the single word ok"
+        chdir: "{{ state_dir }}"
+      register: sectortrace_ollama_smoke
+      changed_when: false
+      timeout: 300
+      failed_when: >-
+        sectortrace_ollama_smoke.rc != 0
+        or 'Error:' in (sectortrace_ollama_smoke.stdout + sectortrace_ollama_smoke.stderr)
+        or (sectortrace_ollama_smoke.stdout | trim | length) == 0
+  rescue:
+    - name: Collect Ollama logs
+      ansible.builtin.command:
+        cmd: docker compose -f docker-compose.assistant.yml logs --tail=60 --no-color
+        chdir: "{{ state_dir }}"
+      register: sectortrace_ollama_failure_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Report what Ollama said
+      ansible.builtin.fail:
+        msg: >-
+          {{ ['The assistant model runtime failed to start or provision.', '',
+              'Pull (' ~ assistant_lfm_ollama_ref ~ '):']
+             + (sectortrace_ollama_pull.stdout_lines | default(['(pull task did not run)']))
+             + (sectortrace_ollama_pull.stderr_lines | default([]))
+             + ['', 'Load smoke-test:']
+             + (sectortrace_ollama_smoke.stdout_lines | default(['(smoke-test did not run)']))
+             + (sectortrace_ollama_smoke.stderr_lines | default([]))
+             + ['', 'Ollama container logs:']
+             + (sectortrace_ollama_failure_logs.stdout_lines | default(['(no logs available)'])) }}
+
 - name: Install the offsite backup script
   ansible.builtin.template:
     src: sectortrace-backup-offsite.sh.j2
@@ -172,5 +292,42 @@
 - name: Enable and start the backup timer
   ansible.builtin.service:
     name: sectortrace-backup.timer
+    enabled: true
+    state: started
+
+- name: Install the archive-audit systemd units and timers
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-archive-audit.service
+    - sectortrace-archive-audit.timer
+    - sectortrace-archive-audit-full.service
+    - sectortrace-archive-audit-full.timer
+  notify: Reload systemd
+
+- name: Enable and start the archive-audit timers
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sectortrace-archive-audit.timer
+    - sectortrace-archive-audit-full.timer
+
+- name: Install the PostgreSQL maintenance-telemetry systemd unit and timer
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - sectortrace-pg-telemetry.service
+    - sectortrace-pg-telemetry.timer
+  notify: Reload systemd
+
+- name: Enable and start the PostgreSQL maintenance-telemetry timer
+  ansible.builtin.service:
+    name: sectortrace-pg-telemetry.timer
     enabled: true
     state: started

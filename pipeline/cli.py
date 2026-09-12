@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
 
 import typer
 
 from pipeline import console as ui
 from pipeline import db, runner
 from pipeline.config import get_settings
+from pipeline.http import PipelineHTTPClient
 from pipeline.logging_conf import configure_logging
 from pipeline.registry import (
     MODULE_REGISTRY,
@@ -18,14 +22,28 @@ from pipeline.registry import (
     resolve_run_order,
     resolve_run_waves,
 )
+from pipeline.telemetry import configure_telemetry
+from pipeline.tui import init_tui
 
 app = typer.Typer(help="England-wide substance misuse sector evidence pipeline")
 graph_app = typer.Typer(help="Manage the derived, rebuildable Evidence Graph.")
 documents_app = typer.Typer(help="Inspect, parse, validate, and search archived documents.")
+nlp_app = typer.Typer(help="Semantic-analysis layer over parsed documents (chunks, embeddings, search).")
+analysis_app = typer.Typer(help="Run the admin analysis worker against the shared warehouse.")
 mirror_app = typer.Typer(help="Keep a mirror in step with the deployment it copies.")
+worker_app = typer.Typer(help="Claim and execute queued pipeline-module runs (Phase 5 worker cutover).")
+open_jobs_app = typer.Typer(help="Inspect and run the operator-only Open Jobs shadow collector.")
 app.add_typer(graph_app, name="graph")
 app.add_typer(documents_app, name="documents")
+app.add_typer(nlp_app, name="nlp")
+app.add_typer(analysis_app, name="analysis")
+app.add_typer(worker_app, name="worker")
+app.add_typer(open_jobs_app, name="open-jobs")
 app.add_typer(mirror_app, name="mirror")
+# Keep the TUI as another entry point over the existing command schema. The
+# project wrapper adds a confirmation boundary, while validation and side
+# effects remain in the tested CLI handlers.
+init_tui(app, name="pipeline")
 
 
 def _document_connection():
@@ -34,6 +52,187 @@ def _document_connection():
     conn = db.get_connection(settings)
     db.apply_migrations(conn, db.migrations_dir_for(settings))
     return conn, settings
+
+
+@open_jobs_app.command("init")
+def open_jobs_init() -> None:
+    """Show the disabled-by-default Open Jobs activation gate and budgets."""
+    settings = get_settings()
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    typer.echo(__import__("json").dumps({
+        "enabled": bool(settings.open_jobs_enabled),
+        "base_url": policy.base_url,
+        "mode": "incremental-only",
+        "archive_budget_bytes": policy.archive_budget_bytes,
+        "note": "Activation remains an explicit operator decision after source-contract verification.",
+    }, indent=2, sort_keys=True))
+
+
+@open_jobs_app.command("status")
+def open_jobs_status() -> None:
+    """Read the public release indexes and report their validated shape."""
+    settings = get_settings()
+    from pipeline.open_jobs.commands import OpenJobsClient
+    from pipeline.open_jobs.policy import OpenJobsPolicy
+
+    policy = OpenJobsPolicy.from_settings(settings)
+    if not settings.open_jobs_enabled:
+        typer.echo('{"enabled": false, "status": "disabled"}')
+        return
+    client_http = PipelineHTTPClient("open_jobs", settings=settings)
+    try:
+        client = OpenJobsClient(client_http, policy)
+        result = {}
+        for kind in ("diffs", "ledger"):
+            response, entries = client.fetch_index(kind)
+            result[kind] = {"http_status": response.status_code,
+                            "entries": len(entries),
+                            "bytes": len(response.body)}
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        client_http.__exit__(None, None, None)
+
+
+@open_jobs_app.command("triage")
+def open_jobs_triage(
+    limit: int | None = typer.Option(None, min=1,
+                                     help="Maximum current adverts to inspect."),
+    dry_run: bool = typer.Option(False, "--dry-run",
+                                 help="Count candidates without creating review items."),
+) -> None:
+    """Find role-shaped Open Jobs adverts for human review.
+
+    This is deliberately a finding aid.  It never changes an advert, provider
+    attribution, export membership, or public response.  The review payload
+    records the exact terms and fields that caused a candidate to be queued.
+    """
+    from pipeline.open_jobs.relevance import TriageResult, classify
+    from pipeline.open_jobs.store import OpenJobsStore, _value
+
+    conn = None
+    counts = {"scanned": 0, "candidate": 0, "excluded": 0,
+              "no_match": 0, "queued": 0}
+    try:
+        settings = get_settings()
+        conn = db.get_connection(settings)
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT advert_id, ats, slug, upstream_id, generation_id, release_id, provenance_id, "
+            "title, company, location "
+            "FROM open_jobs_adverts "
+            "WHERE operation IN ('added', 'changed', 'carried') "
+            "ORDER BY advert_id"
+            + (" LIMIT %s" if limit else ""),
+            (limit,) if limit else (),
+        )
+        store = OpenJobsStore(conn)
+        current: dict[tuple[str, str, str], dict] = {}
+        for row in cursor:
+            advert = dict(row)
+            current[(str(advert["ats"]), str(advert["slug"]), str(advert["upstream_id"]))] = advert
+            counts["scanned"] += 1
+            result = classify(title=_value(row, "title"),
+                              company=_value(row, "company"),
+                              location=_value(row, "location"))
+            advert["triage"] = result
+
+        # The web UI searches the archived Open Jobs content, while the
+        # current projection intentionally keeps only small source-shaped
+        # fields.  Reuse those exact archived bytes when available so the
+        # operator count measures the same text without bypassing provenance.
+        try:
+            import pyarrow.parquet as parquet
+        except ImportError:
+            parquet = None
+        archive_dir = settings.raw_archive_dir / "open_jobs"
+        archive_rows = 0
+        if parquet and archive_dir.is_dir():
+            for path in sorted(archive_dir.glob("*.bin")):
+                parquet_file = parquet.ParquetFile(path)
+                columns = {field.name for field in parquet_file.schema_arrow}
+                wanted = [name for name in ("ats", "slug", "id", "title", "content",
+                                            "departments", "location") if name in columns]
+                if not {"ats", "slug", "id"}.issubset(wanted):
+                    continue
+                for batch in parquet_file.iter_batches(columns=wanted, batch_size=4096):
+                    for source_row in batch.to_pylist():
+                        archive_rows += 1
+                        key = (str(source_row.get("ats")), str(source_row.get("slug")),
+                               str(source_row.get("id")))
+                        advert = current.get(key)
+                        if advert is None:
+                            continue
+                        result = classify(
+                            title=source_row.get("title") or advert.get("title"),
+                            company=advert.get("company"),
+                            location=source_row.get("location") or advert.get("location"),
+                            content=source_row.get("content"),
+                            departments=source_row.get("departments"),
+                        )
+                        previous = advert["triage"]
+                        if result.candidate or previous.candidate:
+                            decision = "candidate"
+                        elif result.decision == "excluded" or previous.decision == "excluded":
+                            decision = "excluded"
+                        else:
+                            decision = "no_match"
+                        advert["triage"] = TriageResult(
+                            decision=decision,
+                            matched_terms=tuple(dict.fromkeys((*previous.matched_terms,
+                                                               *result.matched_terms))),
+                            excluded_terms=tuple(dict.fromkeys((*previous.excluded_terms,
+                                                                 *result.excluded_terms))),
+                            matched_fields=tuple(dict.fromkeys((*previous.matched_fields,
+                                                                 *result.matched_fields))),
+                            location_state=(result.location_state
+                                            if result.location_state == previous.location_state
+                                            else "unresolved"),
+                        )
+
+        # Counts are over unique current adverts, even when a key appeared in
+        # more than one archived release.  This keeps the result comparable to
+        # the web UI's role list and makes repeat runs deterministic.
+        counts = {"scanned": len(current), "candidate": 0, "excluded": 0,
+                  "no_match": 0, "queued": 0, "archive_rows": archive_rows}
+        location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
+        candidate_location_counts = {"england": 0, "non_england": 0, "unresolved": 0}
+        for advert in current.values():
+            result = advert["triage"]
+            counts[result.decision] += 1
+            location_counts[result.location_state] += 1
+            if result.candidate:
+                candidate_location_counts[result.location_state] += 1
+            if not result.candidate or dry_run:
+                continue
+            advert_id = advert["advert_id"]
+            store.queue_review(
+                "role_relevance",
+                "Role vocabulary match requires substance-misuse and England relevance review",
+                advert_id=advert_id,
+                generation_id=advert["generation_id"],
+                release_id=advert["release_id"],
+                provenance_id=advert["provenance_id"],
+                payload=result.payload(),
+            )
+            counts["queued"] += 1
+        if not dry_run:
+            conn.commit()
+        typer.echo(__import__("json").dumps({**counts,
+                                             "location": location_counts,
+                                             "candidate_location": candidate_location_counts,
+                                             "dry_run": dry_run},
+                                             indent=2, sort_keys=True))
+    except Exception as exc:
+        if conn:
+            conn.rollback()
+        typer.echo(f"open jobs triage failed: {exc}", err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        if conn:
+            conn.close()
 
 
 def _document_reference(row):
@@ -46,6 +245,232 @@ def _document_reference(row):
         raw_object_path=row["raw_object_path"], mime_type=row["mime_type"],
         content_length=row["content_length"], source_table=row["source_table"], source_key=row["source_key"],
     )
+
+
+@analysis_app.command("worker")
+def analysis_worker(
+    once: bool = typer.Option(False, "--once", help="Claim one run and exit when it finishes."),
+    poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
+    comparison_workers: int | None = typer.Option(None, "--comparison-workers", min=1,
+                                                   help="CPU processes for structured comparisons; auto by default."),
+    worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
+) -> None:
+    """Process queued admin analysis runs from the shared warehouse."""
+    from pipeline.analysis.worker import AnalysisWorker
+
+    configure_logging("analysis_worker", console_level=logging.INFO)
+    settings = get_settings()
+    configure_telemetry(settings)
+    db_conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(db_conn, db.migrations_dir_for(settings))
+    finally:
+        db_conn.close()
+    worker = AnalysisWorker(settings, poll_seconds=poll_seconds, batch_size=batch_size,
+                            worker_id=worker_id, comparison_workers=comparison_workers)
+    if once:
+        result = worker.run_once()
+        typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
+    else:
+        worker.run_forever()
+
+
+@worker_app.command("run")
+def worker_run(
+    once: bool = typer.Option(False, "--once", help="Claim one queued run and exit when it finishes."),
+    poll_seconds: float = typer.Option(5.0, min=0.1, help="Seconds between queue polls when idle."),
+    lease_seconds: int = typer.Option(
+        900, min=30, help="How long a claimed job may go without a lease renewal "
+                            "before another worker may reclaim it."),
+    worker_id: str = typer.Option(None, help="Stable operator label for this worker."),
+) -> None:
+    """Execute queued pipeline-module runs enqueued by the admin UI.
+
+    A separate process from `pipeline web` (CLAUDE.md settled decision 10,
+    the Phase 5 worker cutover): the web process only ever writes a row to
+    `worker_jobs` and polls it, this process is the one that actually calls
+    `pipeline.runner.run_waves`. At most one worker process is ever inside a
+    run at a time, deployment-wide, enforced by a PostgreSQL advisory lock
+    (see pipeline/worker.py's module docstring) rather than by there being
+    only one worker process -- so it is safe, if never necessary, to run more
+    than one for availability.
+    """
+    from pipeline.worker import PipelineWorker
+
+    configure_logging("worker")
+    settings = get_settings()
+    configure_telemetry(settings)
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn)
+    finally:
+        conn.close()
+
+    worker = PipelineWorker(settings, poll_seconds=poll_seconds,
+                             lease_seconds=lease_seconds, worker_id=worker_id)
+    if once:
+        result = worker.run_once()
+        typer.echo(__import__("json").dumps(result or {"status": "idle"}, default=str, indent=2))
+    else:
+        worker.run_forever()
+
+
+@analysis_app.command("health")
+def analysis_health(
+    max_age_seconds: float | None = typer.Option(
+        None, "--max-age-seconds", min=1.0,
+        help="Maximum heartbeat age; defaults to ANALYSIS_STALE_WORKER_SECONDS."),
+) -> None:
+    """Exit non-zero when the persistent analysis worker heartbeat is stale."""
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        row = conn.execute(
+            "SELECT worker_id, last_seen_at, status, version FROM analysis_worker_heartbeats "
+            "ORDER BY last_seen_at DESC LIMIT 1").fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        typer.echo('{"status":"missing_heartbeat"}')
+        raise typer.Exit(code=1)
+    try:
+        seen_at = datetime.fromisoformat(row["last_seen_at"])
+        age_seconds = max(0.0, (datetime.now(timezone.utc) - seen_at).total_seconds())
+    except (TypeError, ValueError):
+        typer.echo('{"status":"invalid_heartbeat"}')
+        raise typer.Exit(code=1)
+    threshold = max_age_seconds or float(getattr(settings, "analysis_stale_worker_seconds", 900.0))
+    payload = {"status": row["status"], "worker_id": row["worker_id"],
+               "last_seen_at": row["last_seen_at"], "age_seconds": round(age_seconds, 1),
+               "max_age_seconds": threshold}
+    typer.echo(__import__("json").dumps(payload, sort_keys=True))
+    if age_seconds > threshold:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("prefilter-eval")
+def analysis_prefilter_eval(
+    corpus: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                  help="Adjudicated JSONL corpus."),
+    corpus_version: str = typer.Option(..., "--corpus-version",
+                                       help="Immutable corpus version label."),
+    adjudicated_by: str = typer.Option(..., "--adjudicated-by",
+                                       help="Named human reviewer or panel."),
+    record: bool = typer.Option(False, "--record",
+                                help="Persist the immutable gate result."),
+) -> None:
+    """Evaluate the narrative prefilter; suppression still needs explicit config opt-in."""
+    import json
+
+    from pipeline.analysis.prefilter import evaluate, save_result
+
+    rows = []
+    for number, line in enumerate(corpus.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise typer.BadParameter(f"invalid JSON on line {number}: {exc}") from exc
+        if not isinstance(row, dict) or not isinstance(row.get("text"), str):
+            raise typer.BadParameter(f"line {number} must be an object with text")
+        if not isinstance(row.get("positive"), bool) or not isinstance(row.get("critical"), bool):
+            raise typer.BadParameter(
+                f"line {number} must carry boolean positive and critical labels")
+        rows.append(row)
+    try:
+        result = evaluate(rows, corpus_version=corpus_version)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc)) from exc
+    payload = {**result.__dict__, "recorded": False}
+    if record:
+        conn, _settings = _document_connection()
+        try:
+            payload["result_id"] = save_result(
+                conn, result, adjudicated_by=adjudicated_by)
+            conn.commit()
+            payload["recorded"] = True
+        finally:
+            conn.close()
+    typer.echo(json.dumps(payload, sort_keys=True, indent=2))
+    if not result.gate_passed:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("acceptance-capture")
+def analysis_acceptance_capture(
+    release_id: str = typer.Argument(..., help="Completed analytical release to capture."),
+    output: Path = typer.Option(..., "--output", help="Destination JSON snapshot."),
+) -> None:
+    """Capture deterministic Phase 2 parity inputs, outputs and diagnostics."""
+    import json
+
+    from pipeline.analysis.acceptance import release_snapshot, write_report
+
+    conn, _settings = _document_connection()
+    try:
+        report = release_snapshot(conn, release_id)
+    finally:
+        conn.close()
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "snapshot_digest": report["snapshot_digest"]}, sort_keys=True))
+
+
+@analysis_app.command("acceptance-compare")
+def analysis_acceptance_compare(
+    baseline: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                    help="Before snapshot JSON."),
+    candidate: Path = typer.Argument(..., exists=True, dir_okay=False,
+                                     help="After snapshot JSON."),
+    output: Path = typer.Option(..., "--output", help="Destination comparison JSON."),
+) -> None:
+    """Require same-input count/set/order parity between two captures."""
+    import json
+
+    from pipeline.analysis.acceptance import compare_snapshots, write_report
+
+    try:
+        before = json.loads(baseline.read_text(encoding="utf-8"))
+        after = json.loads(candidate.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise typer.BadParameter(f"invalid acceptance snapshot: {exc}") from exc
+    report = compare_snapshots(before, after)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output),
+                           "same_dataset": report["same_dataset"],
+                           "parity_passed": report["parity_passed"],
+                           "comparison_digest": report["comparison_digest"]}, sort_keys=True))
+    if not report["parity_passed"]:
+        raise typer.Exit(code=1)
+
+
+@analysis_app.command("benchmark-once")
+def analysis_benchmark_once(
+    output: Path = typer.Option(..., "--output", help="Destination benchmark JSON."),
+    batch_size: int = typer.Option(100, min=1, help="Analysis candidates processed per batch."),
+    worker_id: str = typer.Option("phase2-acceptance", help="Worker label recorded with the run."),
+) -> None:
+    """Instrument one queued run; use only against an isolated acceptance database."""
+    import json
+
+    from pipeline.analysis.acceptance import benchmark_once, write_report
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+    finally:
+        conn.close()
+    report = benchmark_once(
+        settings, batch_size=batch_size, worker_id=worker_id)
+    write_report(output, report)
+    typer.echo(json.dumps({"written_to": str(output), "status": report["status"],
+                           "benchmark_digest": report["benchmark_digest"]}, sort_keys=True))
+    if report["status"] == "failed":
+        raise typer.Exit(code=1)
 
 
 @documents_app.command("inspect")
@@ -119,23 +544,23 @@ def _document_candidates(conn, evidence_id, source_system, quality, parser_versi
     # evidence (for example, a contract notice) would be retried as a document.
     terms, values = ["e.raw_object_path IS NOT NULL"], []
     if evidence_id:
-        terms.append("e.evidence_id=?")
+        terms.append("e.evidence_id=%s")
         values.append(evidence_id)
     if source_system:
-        terms.append("e.source_system=?")
+        terms.append("e.source_system=%s")
         values.append(source_system)
     if quality:
-        terms.append("s.quality_status=?")
+        terms.append("s.quality_status=%s")
         values.append(quality)
     if parser_version:
         sql += " LEFT JOIN document_records d ON d.evidence_id=e.evidence_id LEFT JOIN document_versions dv ON dv.document_id=d.document_id"
-        terms.append("dv.parser_version=?")
+        terms.append("dv.parser_version=%s")
         values.append(parser_version)
     if pending_only:
         terms.append("COALESCE(s.parse_status, 'PENDING') != 'SUCCESS'")
     if terms:
         sql += " WHERE " + " AND ".join(terms)
-    sql += " ORDER BY e.created_at LIMIT ?"
+    sql += " ORDER BY e.created_at LIMIT %s"
     return conn.execute(sql, (*values, limit)).fetchall()
 
 
@@ -184,7 +609,7 @@ def documents_reprocess(
     try:
         evidence_id = None
         if document_id:
-            row = conn.execute("SELECT evidence_id FROM document_records WHERE document_id=?", (document_id,)).fetchone()
+            row = conn.execute("SELECT evidence_id FROM document_records WHERE document_id=%s", (document_id,)).fetchone()
             if row is None:
                 raise typer.BadParameter(f"unknown document_id {document_id!r}")
             evidence_id = row["evidence_id"]
@@ -219,14 +644,37 @@ def documents_stats() -> None:
     try:
         result = {
             "registered_evidence": conn.execute(
-                "SELECT COUNT(*) FROM document_processing_states s "
+                "SELECT COUNT(*) AS count FROM document_processing_states s "
                 "JOIN evidence_records e ON e.evidence_id=s.evidence_id "
-                "WHERE e.raw_object_path IS NOT NULL").fetchone()[0],
-            "documents": conn.execute("SELECT COUNT(*) FROM document_records").fetchone()[0],
-            "active_versions": conn.execute("SELECT COUNT(*) FROM document_versions WHERE is_active=1").fetchone()[0],
-            "parse_runs": conn.execute("SELECT COUNT(*) FROM document_parse_runs").fetchone()[0],
-            "derived_artifacts": conn.execute("SELECT COUNT(*) FROM derived_artifacts").fetchone()[0],
+                "WHERE e.raw_object_path IS NOT NULL").fetchone()["count"],
+            "documents": conn.execute("SELECT COUNT(*) AS count FROM document_records").fetchone()["count"],
+            "active_versions": conn.execute("SELECT COUNT(*) AS count FROM document_versions WHERE is_active=1").fetchone()["count"],
+            "parse_runs": conn.execute("SELECT COUNT(*) AS count FROM document_parse_runs").fetchone()["count"],
+            "derived_artifacts": conn.execute("SELECT COUNT(*) AS count FROM derived_artifacts").fetchone()["count"],
         }
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@documents_app.command("backfill-titles")
+def documents_backfill_titles(
+    recompute: bool = typer.Option(
+        False, "--recompute",
+        help="Recompute every row, not only those with no display title yet."),
+) -> None:
+    """Fill document_records.display_title / title_basis (BETA-062).
+
+    Deterministic and idempotent. A row whose only usable signal is a
+    hash-like filename resolves to title_basis='unknown' and the portal keeps
+    showing its raw fallback. pdf_metadata is only reachable on a reparse, not
+    here.
+    """
+    from pipeline.documents.repository import backfill_display_titles
+
+    conn, _ = _document_connection()
+    try:
+        result = backfill_display_titles(conn, recompute=recompute)
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
     finally:
         conn.close()
@@ -255,7 +703,7 @@ def documents_validate() -> None:
             "duplicate_active_versions": "SELECT COUNT(*) FROM (SELECT document_id FROM document_versions WHERE is_active=1 GROUP BY document_id HAVING COUNT(*) > 1)",
             "broken_artifact_lineage": "SELECT COUNT(*) FROM derived_artifacts a LEFT JOIN evidence_records e ON e.evidence_id=a.evidence_id WHERE e.evidence_id IS NULL",
         }
-        result = {name: conn.execute(sql).fetchone()[0] for name, sql in checks.items()}
+        result = {name: conn.execute(sql).fetchone()["count"] for name, sql in checks.items()}
         typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
         if any(result.values()):
             raise typer.Exit(code=1)
@@ -281,7 +729,7 @@ def documents_benchmark(
         rows = []
         from pipeline.documents.service import DocumentService
         for evidence_id in evidence_ids:
-            record = conn.execute("SELECT * FROM evidence_records WHERE evidence_id=?", (evidence_id,)).fetchone()
+            record = conn.execute("SELECT * FROM evidence_records WHERE evidence_id=%s", (evidence_id,)).fetchone()
             if record is None:
                 rows.append({"evidence_id": evidence_id, "status": "MISSING"})
                 continue
@@ -297,6 +745,838 @@ def documents_benchmark(
         typer.echo(__import__("json").dumps(rows, indent=2, sort_keys=True))
         if any(row.get("status") == "FAILED" for row in rows):
             raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@documents_app.command("benchmark-parsers")
+def documents_benchmark_parsers(
+    manifest: str = typer.Option(
+        None, help="CSV containing an evidence_id column, pointing at already-archived evidence"),
+    corpus: str = typer.Option(
+        None, help="Directory of PDF files, for a quick check without a populated database"),
+    parsers: str = typer.Option("pymupdf,pdfplumber", help="Comma-separated parser names; the first two are the primary pair for the exit code"),
+    out: str = typer.Option(None, help="Write the full JSON report here as well as stdout"),
+    limit: int = typer.Option(25, min=1),
+) -> None:
+    """Read-only PARITY comparison of two (or more) parser adapters against the
+    same document bytes — never `DocumentService.process`, never a database
+    write. This is the piece `documents benchmark` does not cover: that
+    command persists a `document_versions` row per (document, parser) via
+    `DocumentService`, which is right for populating the warehouse but wrong
+    for a repeatable equivalence check. This command calls
+    `pipeline.documents.parser_parity.compare_parsers` directly against
+    parser adapters, with nothing written anywhere.
+
+    Reports `element_count`/`table_count` deltas and a whitespace-normalized
+    text diff for every parser pair; it does NOT compare document
+    identifiers, amounts, dates, concepts, spans, assertions or relations —
+    those live downstream in `pipeline/nlp/`, not on a parser's raw
+    `ParsedDocument`, and are out of scope here (see
+    `pipeline/documents/parser_parity.py`'s docstring).
+
+    This command's exit code reports parity for THIS run only. It cannot and
+    does not decide which parser should be preferred: that requires an
+    operator running it against a real, representative corpus. This sandbox
+    has neither PyMuPDF installed (it is behind the optional `documents`
+    extra) nor a real document corpus, so no such run has been done here, and
+    nothing in this command touches `Settings.document_parser` or any other
+    configuration based on its result.
+    """
+    import json
+    from pathlib import Path
+
+    from pipeline.documents.parser_parity import compare_parsers
+    from pipeline.documents.parsers import ParserUnavailable, get_parser
+
+    if bool(manifest) == bool(corpus):
+        typer.echo("Pass exactly one of --manifest or --corpus.", err=True)
+        raise typer.Exit(code=2)
+
+    selected = [name.strip() for name in parsers.split(",") if name.strip()]
+    parser_instances = []
+    for name in selected:
+        try:
+            parser_instances.append(get_parser(name))
+        except ParserUnavailable as exc:
+            typer.echo(
+                f"Parser {name!r} is not available ({exc}). "
+                f"Install it with `uv sync --extra documents` and retry.", err=True)
+            raise typer.Exit(code=2) from exc
+
+    documents: list[tuple[str, bytes, str]] = []  # (label, body, mime_type)
+    conn = None
+    if manifest:
+        import csv
+
+        conn, _settings = _document_connection()
+        from pipeline.archive import get_archive
+
+        archive = get_archive(_settings)
+        with Path(manifest).open(newline="", encoding="utf-8") as handle:
+            evidence_ids = [row["evidence_id"] for row in csv.DictReader(handle) if row.get("evidence_id")][:limit]
+        for evidence_id in evidence_ids:
+            record = conn.execute(
+                "SELECT * FROM evidence_records WHERE evidence_id=%s", (evidence_id,)).fetchone()
+            if record is None:
+                typer.echo(f"evidence_id {evidence_id!r} not found in evidence_records; skipping.", err=True)
+                continue
+            reference = _document_reference(record)
+            try:
+                body = archive.read(reference.raw_object_path)
+            except Exception as exc:
+                typer.echo(f"evidence_id {evidence_id!r}: could not read archived bytes ({exc}); skipping.", err=True)
+                continue
+            documents.append((evidence_id, body, reference.mime_type or "application/pdf"))
+    else:
+        corpus_dir = Path(corpus)
+        pdf_paths = sorted(corpus_dir.glob("*.pdf"))[:limit]
+        for path in pdf_paths:
+            documents.append((str(path), path.read_bytes(), "application/pdf"))
+
+    try:
+        if not documents:
+            source = f"--manifest {manifest}" if manifest else f"--corpus {corpus}"
+            typer.echo(f"No documents found for {source}; nothing to benchmark.", err=True)
+            raise typer.Exit(code=2)
+
+        report = []
+        for label, body, mime_type in documents:
+            comparison = compare_parsers(body, mime_type, parser_instances)
+            report.append({"document": label, **comparison})
+
+        payload = json.dumps(report, indent=2, sort_keys=True)
+        typer.echo(payload)
+        if out:
+            Path(out).write_text(payload, encoding="utf-8")
+
+        if len(selected) >= 2:
+            primary_pair = tuple(selected[:2])
+            all_equivalent = True
+            for entry in report:
+                pair_result = next(
+                    (c for c in entry["comparisons"]
+                     if (c["left"], c["right"]) == primary_pair or (c["right"], c["left"]) == primary_pair),
+                    None)
+                if pair_result is None or not pair_result["equivalent"]:
+                    all_equivalent = False
+            if not all_equivalent:
+                raise typer.Exit(code=1)
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@nlp_app.command("chunk")
+def nlp_chunk(
+    source_system: str = typer.Option(None, help="Only versions from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum active document versions to (re)chunk"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Build chunks and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped inputs and invalidate dependants"),
+) -> None:
+    """(Re)chunk active parsed documents into `document_chunks`.
+
+    Reads `document_elements`; fetches nothing. Idempotent for a fixed
+    chunker version; a bumped version supersedes old rows rather than
+    deleting them.
+    """
+    from pipeline.nlp import chunk as nlp_chunk_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_chunk_mod.run(conn, source_system=source_system, limit=limit,
+                                   dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("label")
+def nlp_label(
+    source_system: str = typer.Option(None, help="Only chunked versions from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunked versions to (re)label"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Label and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped labels"),
+) -> None:
+    """Tag chunked elements against the SectorTrace ontology, writing
+    provisional `document_topics` rows with `match_method='ontology_v1'`.
+
+    Reads the ontology and `document_elements`; fetches nothing. `keyword_v1`
+    rows are never touched. Idempotent — its own rows for an element are
+    rewritten each run.
+    """
+    from pipeline.nlp import label as nlp_label_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_label_mod.run(conn, source_system=source_system, limit=limit,
+                                   dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("spans")
+def nlp_spans(
+    extractor: str = typer.Option(
+        None, help="Span extractor: 'stub' (offline, dictionary-backed, default) "
+        "or 'gliner' / a GLiNER model id (needs `uv sync --extra nlp`)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Extract and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped spans and invalidate dependants"),
+) -> None:
+    """Extract entity spans (PROVIDER, COMMISSIONER, SERVICE, SUBSTANCE,
+    TREATMENT, ROLE, LOCATION, PROGRAMME) into `document_concept_mentions`.
+
+    Fetches nothing; the stub downloads nothing. This table never carries
+    `entity_id` — see `pipeline nlp resolve`.
+    """
+    from pipeline.nlp import spans as nlp_spans_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_spans_mod.run(conn, extractor=extractor, source_system=source_system,
+                                   limit=limit, dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("resolve")
+def nlp_resolve(
+    source_system: str = typer.Option(None, help="Only mentions on chunks from this source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum concept mentions to consider"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Resolve and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Re-resolve all scoped mentions"),
+) -> None:
+    """Resolve PROVIDER / COMMISSIONER concept mentions to registered
+    entities, deterministically. Only an exact normalised name match writes a
+    `document_entity_mentions` row; everything else stays a lead.
+    """
+    from pipeline.nlp import resolve as nlp_resolve_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_resolve_mod.run(conn, source_system=source_system, limit=limit,
+                                     dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("relations")
+def nlp_relations(
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Assemble and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped relation candidates"),
+) -> None:
+    """Assemble machine (subject, predicate, object) claim candidates from
+    034D spans + 034E assertions into `document_claim_candidates`.
+
+    Controlled-vocabulary triggers only (a concept→predicate mapping or a
+    predicate pattern) — co-occurrence alone never yields a candidate. This
+    table is not evidence and not a claim; fetches nothing.
+    """
+    from pipeline.nlp import relations as nlp_relations_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_relations_mod.run(conn, source_system=source_system, limit=limit,
+                                       dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("queue-claims")
+def nlp_queue_claims(
+    source_system: str = typer.Option(None, help="Only candidates on chunks from this source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum `new` candidates to consider"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Select and roll back, writing nothing"),
+) -> None:
+    """Queue the selected slice of `new` claim candidates into `review_queue`
+    as `item_type='semantic_claim_candidate'`. A policy, not "everything":
+    campaign predicates, an AFFIRMED + score floor, a resolved subject
+    entity, plus contradiction / novel / validation slices.
+    """
+    from pipeline.nlp import promote as nlp_promote_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_promote_mod.run(conn, source_system=source_system, limit=limit,
+                                     dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("gate-034g")
+def nlp_gate_034g(
+    min_per_class: int = typer.Option(
+        None, min=1, help="Decided examples needed per class to train "
+        "(default: gate.MIN_PER_CLASS, currently 25)"),
+    heldout_per_class: int = typer.Option(
+        None, min=0, help="Held-out eval examples needed per class "
+        "(default: gate.HELDOUT_PER_CLASS, currently 10)"),
+) -> None:
+    """Report whether 034G can start: per-category positive/negative
+    decided-example counts, source/subject/time spread, inter-reviewer
+    agreement, and what is still missing. Read-only. With no flags it uses
+    the same thresholds `nlp claims-train` does, so the two never disagree.
+    """
+    from pipeline.nlp import gate
+
+    kwargs = {}
+    if min_per_class is not None:
+        kwargs["min_per_class"] = min_per_class
+    if heldout_per_class is not None:
+        kwargs["heldout_per_class"] = heldout_per_class
+
+    conn, _ = _document_connection()
+    try:
+        report = gate.check(conn, **kwargs)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+        if not report["ready"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("claims-train")
+def nlp_claims_train(
+    model: str = typer.Option("both", help="both | logreg | setfit — the bake-off arms to run"),
+    category: list[str] = typer.Option(
+        None, help="Gate category to train (repeatable). Omitted: every `ready` category; "
+        "given, bypasses the gate and records the head as experimental."),
+    min_precision: float = typer.Option(
+        None, min=0.0, max=1.0,
+        help="Held-out precision bar; a head below it is quarantined. Default 0.80."),
+    embedder_model_key: str = typer.Option(
+        None, help="nlp_model_registry key for the 034A embeddings the logreg arm reads"),
+    corpus_label: str = typer.Option("beta-box", help="Which warehouse the decisions came from"),
+    corpus_status: str = typer.Option(
+        "experimental", help="experimental | authoritative — travels with every head"),
+    artifact_root: Path = typer.Option(
+        None, help="Where trained head artifacts are written (default nlp-cache/claims). "
+        "Point it at a persistent path when the default is inside an ephemeral container."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Fit and evaluate, then roll back; no artifacts"),
+) -> None:
+    """Run the per-category bake-off: a pure-Python logreg on the 034A chunk
+    embeddings and a SetFit head, each fitted on the same train split and
+    scored on the same deterministic held-out set. The higher-precision head
+    that clears `--min-precision` is `selected` and may write predictions;
+    one below the bar is `quarantined`. Nothing is promoted or written to
+    `graph_claims`. Refuses until `gate-034g` is green, unless `--category`
+    is given. See docs/claim-predictions-spec.md.
+    """
+    from pipeline.nlp import claims, claims_features, claims_train
+
+    models = {"both": claims.MODEL_TYPES}.get(model, (model,))
+    kwargs: dict = {"models": models, "corpus_label": corpus_label,
+                    "corpus_status": corpus_status, "dry_run": dry_run}
+    if category:
+        kwargs["categories"] = list(category)
+    if min_precision is not None:
+        kwargs["min_precision"] = min_precision
+    if embedder_model_key:
+        kwargs["embedder_model_key"] = embedder_model_key
+    if artifact_root is not None:
+        kwargs["artifact_root"] = artifact_root
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            result = claims_train.train(conn, **kwargs)
+        except (claims_features.FeatureError, ValueError) as exc:
+            raise typer.BadParameter(str(exc)) from None
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if not result.get("trained") and not result.get("ready", True):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("claims-eval")
+def nlp_claims_eval() -> None:
+    """The claim-head registry: every trained head with its held-out
+    precision/recall/F1, which one is `selected` per category, and the corpus
+    it was trained on. Read-only.
+    """
+    from pipeline.nlp import claims_eval
+
+    conn, _ = _document_connection()
+    try:
+        typer.echo(__import__("json").dumps(claims_eval.summary(conn), indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("claims-predict")
+def nlp_claims_predict(
+    embedder_model_key: str = typer.Option(
+        None, help="nlp_model_registry key for the embeddings to score against"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Score and roll back; report counts only"),
+) -> None:
+    """Score every live embedded chunk with each `selected` head, writing
+    `document_claim_predictions` (a finding aid — not evidence, not exported,
+    not portal-reachable). Zero selected heads is a logged no-op.
+    """
+    from pipeline.nlp import claims_predict
+
+    kwargs: dict = {"dry_run": dry_run}
+    if embedder_model_key:
+        kwargs["embedder_model_key"] = embedder_model_key
+
+    conn, _ = _document_connection()
+    try:
+        result = claims_predict.predict(conn, **kwargs)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("decide-claim")
+def nlp_decide_claim(
+    candidate: str = typer.Option(..., help="claim_candidate_id"),
+    decision: str = typer.Option(..., help="approved | rejected | corrected"),
+    by: str = typer.Option(..., help="Reviewer name — recorded as given, never defaulted"),
+    reason: str = typer.Option(None, help="A short reason_code"),
+    corrected_predicate: str = typer.Option(None, help="A better relations.yml predicate id"),
+    corrected_object_concept: str = typer.Option(None, help="A better object concept id"),
+    corrected_object_literal: str = typer.Option(None, help="A better object literal"),
+    corrected_subject_mention: str = typer.Option(None, help="A better subject mention id"),
+    note: str = typer.Option(None),
+) -> None:
+    """Record a person's decision on a machine claim candidate into
+    `claim_candidate_decisions`. A 'corrected' decision captures a better
+    predicate / object / subject — stronger training data than a reject.
+    Writes no `graph_claims` draft (that step is held).
+    """
+    from pipeline.nlp import decisions
+
+    conn, _ = _document_connection()
+    try:
+        result = decisions.decide(
+            conn, candidate, decision, by, reason_code=reason,
+            corrected_predicate=corrected_predicate,
+            corrected_object_concept_id=corrected_object_concept,
+            corrected_object_literal=corrected_object_literal,
+            corrected_subject_mention_id=corrected_subject_mention, note=note)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    except decisions.ClaimDecisionError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    finally:
+        conn.close()
+
+
+@nlp_app.command("review-sheet")
+def nlp_review_sheet(
+    predicate: str = typer.Option(..., help="relations.yml predicate id to export"),
+    out: Path = typer.Option(..., help="File to write — .jsonl (default) or .csv"),
+    status: str = typer.Option("queued", help="Candidate status to export"),
+    source_system: str = typer.Option(None, help="Only candidates on chunks from this source_system"),
+    group_by: str = typer.Option(
+        "none", "--group-by",
+        help="none | exact (word-for-word-identical sentences) | template "
+        "(same shape once numbers and the subject/object are blanked). exact "
+        "and template collapse to one row per group (JSONL only); a decision "
+        "fans out to every member"),
+    sample: bool = typer.Option(
+        False, "--sample",
+        help="Keep the high-confidence positive and negative bands (capped at "
+        "--sample-target each) plus a deterministic 1-in-10 of the rest"),
+    sample_target: int = typer.Option(130, min=1, help="Per-band cap when --sample is set"),
+    limit: int = typer.Option(None, min=1, help="Cap the rows read from the warehouse"),
+    fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto (by extension)"),
+) -> None:
+    """Export one predicate's queued claim candidates as a decision sheet: the
+    sentence, the triple, the source, exact- and template-group ids, a
+    deterministic `screen_reason` for broken extractions (exported with a
+    `suggested_decision` of 'rejected'), a `stratum` label, and blank decision
+    / reason_code / corrected_* columns for a reviewer to fill in offline.
+    Writes nothing to the warehouse.
+    """
+    from pipeline.nlp import review_batch
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            rows = review_batch.sheet_rows(
+                conn, predicate=predicate, status=status, source_system=source_system,
+                group_by=group_by, sample=sample, sample_target=sample_target,
+                limit=limit)
+            written = review_batch.write_sheet(rows, out, fmt=fmt)
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        strata: dict = {}
+        screened = 0
+        for row in rows:
+            strata[row.get("stratum", "?")] = strata.get(row.get("stratum", "?"), 0) + 1
+            screened += 1 if row.get("screen_reason") else 0
+        typer.echo(__import__("json").dumps(
+            {"out": str(out), "rows": written, "predicate": predicate,
+             "status": status, "group_by": group_by, "sample": sample,
+             "screened": screened, "strata": strata},
+            indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("decide-claims-batch")
+def nlp_decide_claims_batch(
+    file: Path = typer.Option(..., exists=True, help="A review sheet with the decision column filled in"),
+    by: str = typer.Option(..., help="Reviewer name — recorded on every row, never defaulted"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Validate every row and roll back, writing no decisions"),
+    allow_redecide: bool = typer.Option(
+        False, "--allow-redecide",
+        help="Record a second decision on a candidate this reviewer already "
+        "decided (default: skip it, so a re-run is safe)"),
+    accept_suggested: str = typer.Option(
+        None, "--accept-suggested",
+        help="Lift a screened / model-suggested decision into a real one on "
+        "rows left blank. Only 'rejected' is allowed. Each row records "
+        "note='via <suggester>'."),
+    take_suggested_corrections: bool = typer.Option(
+        False, "--take-suggested-corrections",
+        help="On rows you marked decision=corrected with a blank "
+        "corrected_predicate, fill it from suggested_corrected_predicate "
+        "(noted per row). You still chose 'corrected'."),
+    until_gate: bool = typer.Option(
+        False, "--until-gate",
+        help="Stop once every 034G category this sheet's predicates map to is "
+        "ready — don't review past the finish line. Real runs only."),
+    fmt: str = typer.Option("auto", "--format", help="jsonl | csv | auto"),
+) -> None:
+    """Record one reviewer's decisions from a filled-in review sheet — one
+    `decide-claim` call per row, same validation, in a loop. Rows with no
+    decision are skipped. On the first row a decision is refused it stops and
+    names it; rows already recorded stay. Exits non-zero if any row errored.
+    """
+    from pipeline.nlp import review_batch
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            rows = review_batch.read_sheet(file, fmt=fmt)
+            result = review_batch.apply_sheet(
+                conn, rows, decided_by=by, dry_run=dry_run,
+                allow_redecide=allow_redecide, accept_suggested=accept_suggested,
+                take_suggested_corrections=take_suggested_corrections,
+                until_gate=until_gate, source_label=str(file))
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if result["errors"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("suggest-decisions")
+def nlp_suggest_decisions(
+    file: Path = typer.Option(..., exists=True, help="A review sheet (JSONL) to annotate in place"),
+    model: list[str] = typer.Option(
+        ..., "--model", help="OpenRouter model id (e.g. 'openrouter/free', a "
+        "router over free models). Repeat --model for an ensemble: verdicts "
+        "must agree before anything is written, splits are flagged. A model "
+        "that fails 3 calls in a row (dead slug, bad key, hard rate limit) is "
+        "dropped for the rest of the run."),
+    out: Path = typer.Option(None, help="Write here instead of overwriting --file"),
+    rate: float = typer.Option(
+        1.0, help="Requests per second per model. Free models rate-limit hard "
+        "(~20/min, and a per-day cap on a $0 account) — try 0.3."),
+    limit: int = typer.Option(None, min=1, help="Only ask about the first N eligible rows"),
+) -> None:
+    """Pre-annotate a review sheet with model triage: for each row a person has
+    not decided and no suggestion already covers, ask each --model to triage it
+    reject / approve / correct / keep, and (on agreement) fill the
+    `suggested_*` columns. `correct` also names a replacement predicate,
+    checked against relations.yml. Needs OPENROUTER_API_KEY. See
+    docs/CAVEATS.md, 'Model-assisted review triage' — the reviewer still fills
+    `decision`; only `rejected` is lifted in bulk.
+    """
+    from pipeline.nlp import review_batch, review_suggest
+
+    conn, _ = _document_connection()
+    try:
+        try:
+            rows = review_batch.read_sheet(file, fmt="jsonl")
+        except review_batch.SheetError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        try:
+            result = review_suggest.suggest(
+                conn, rows, models=list(model), rate=rate, limit=limit,
+                source_label=str(file))
+        except RuntimeError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        review_batch.write_sheet(rows, out or file, fmt="jsonl")
+        result["out"] = str(out or file)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("context")
+def nlp_context(
+    detector: str = typer.Option(
+        None, help="'cue' (stdlib, always-on, default) or 'medspacy' (needs a "
+        "separate `pip install medspacy` + a spaCy model)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to process this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Classify and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Rebuild all scoped context assertions"),
+) -> None:
+    """Classify each entity span's assertion status (AFFIRMED / NEGATED /
+    HISTORICAL / HYPOTHETICAL / CONDITIONAL / THIRD_PARTY / UNKNOWN) into
+    `document_assertions`. Fetches nothing.
+    """
+    from pipeline.nlp import context as nlp_context_mod
+
+    conn, _ = _document_connection()
+    try:
+        result = nlp_context_mod.run(conn, detector=detector, source_system=source_system,
+                                     limit=limit, dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-context")
+def nlp_eval_context(
+    cases: Path = typer.Option(
+        None, help="Case set JSON (default: tests/fixtures/nlp/assertion_cases.json)"),
+    detector: str = typer.Option(None, help="'cue' (default) or 'medspacy'"),
+) -> None:
+    """Score the assertion detector against labelled sentences, including the
+    hard negatives: accuracy overall and per class, plus a confusion count."""
+    from pipeline.nlp import context_eval
+
+    report = context_eval.run(cases_path=cases, detector=detector)
+    typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+
+
+@nlp_app.command("embed")
+def nlp_embed(
+    model: str = typer.Option(
+        None, help="Embedder: 'stub' (deterministic, offline, default) or a "
+        "sentence-transformers id (needs `uv sync --extra nlp`)"),
+    source_system: str = typer.Option(None, help="Only chunks from this evidence source_system"),
+    limit: int = typer.Option(None, min=1, help="Maximum chunks to embed this run"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Embed and roll back, writing nothing"),
+    force: bool = typer.Option(False, "--force", help="Re-embed all scoped chunks"),
+) -> None:
+    """Embed live `document_chunks` into `document_embeddings`.
+
+    Resume-safe: only chunks with no vector for the chosen model are
+    processed, so a re-run fills gaps rather than recomputing. Fetches
+    nothing; the stub embedder downloads nothing.
+    """
+    from pipeline.nlp import embeddings
+
+    conn, settings = _document_connection()
+    try:
+        result = embeddings.run(
+            conn, model=model or settings.nlp_embedding_model,
+            source_system=source_system, limit=limit,
+            batch_size=settings.nlp_embed_batch_size, dry_run=dry_run, force=force)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("backfill-vectors")
+def nlp_backfill_vectors(
+    limit: int = typer.Option(None, min=1, help="Maximum rows to fill this run"),
+) -> None:
+    """Fill pre-cutover pgvector values from the legacy packed recovery column.
+
+    PostgreSQL + pgvector only; a no-op otherwise. Resume-safe — re-run to
+    finish an interrupted pass. The deploy runs this once after the app reports
+    healthy (it is deliberately not on the health-gated `pipeline migrate`
+    path); run it by hand after a large PostgreSQL-to-PostgreSQL sync.
+    """
+    from pipeline.nlp import embeddings
+
+    conn, _ = _document_connection()
+    try:
+        result = embeddings.backfill_vectors(conn, limit=limit)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("compact-embeddings")
+def nlp_compact_embeddings(
+    backup_archive: Path = typer.Option(
+        None, "--backup-archive", help="Verified pre-change .sql.gz snapshot"),
+    restore_receipt: Path = typer.Option(
+        None, "--restore-receipt", help="Receipt emitted by an isolated `pipeline restore`"),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Build and validate the replacement, then roll back"),
+) -> None:
+    """Maintenance-window removal of the legacy packed embedding copy.
+
+    Pause embedding, NLP, and analysis writers before invoking this command.
+    It refuses rows without a canonical 384-dimensional pgvector value and
+    takes the exclusive table lock only for the final short table swap.
+    """
+    from pipeline.nlp.embedding_repository import compact_legacy_table
+
+    conn, _ = _document_connection()
+    try:
+        result = compact_legacy_table(
+            conn, backup_archive=backup_archive, restore_receipt=restore_receipt,
+            dry_run=dry_run)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("search")
+def nlp_search(
+    query: str = typer.Argument(..., help="What to search for"),
+    mode: str = typer.Option("hybrid", help="keyword | fuzzy | semantic | hybrid"),
+    limit: int = typer.Option(10, min=1, max=100),
+    source_system: str = typer.Option(None, help="Restrict to one evidence source_system"),
+    model: str = typer.Option(None, help="Override the embedder for semantic/hybrid modes"),
+) -> None:
+    """Hybrid retrieval over `document_chunks`: a finding aid that writes,
+    promotes and attributes nothing."""
+    from pipeline.nlp import semantic_search
+
+    conn, settings = _document_connection()
+    try:
+        result = semantic_search.search(
+            conn, query, mode=mode, limit=limit, source_system=source_system,
+            model=model or settings.nlp_embedding_model)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("benchmark-semantic")
+def nlp_benchmark_semantic(
+    queries: Path = typer.Option(
+        Path("tests/fixtures/nlp/retrieval_queries.json"), "--queries",
+        help="Deterministic JSON query corpus"),
+    model: str = typer.Option(None, help="Embedding model; defaults to configured model"),
+    depth: int = typer.Option(20, min=1, max=200),
+    warmups: int = typer.Option(1, min=0, max=20),
+    repetitions: int = typer.Option(5, min=1, max=100),
+    output: Path = typer.Option(None, "--output", help="Optional JSON report path"),
+) -> None:
+    """Measure HNSW latency and compare IDs/order/scores with exact pgvector."""
+    import json
+
+    from pipeline.nlp import semantic_benchmark
+
+    conn, settings = _document_connection()
+    try:
+        report = semantic_benchmark.run(
+            conn, queries_path=queries, model=model or settings.nlp_embedding_model,
+            depth=depth, warmups=warmups, repetitions=repetitions)
+        rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+        if output is not None:
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(rendered, encoding="utf-8")
+        typer.echo(rendered, nl=False)
+        if not report["all_parity"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("assistant")
+def nlp_assistant(
+    question: str = typer.Argument(..., help="One analyst question"),
+    source_system: str = typer.Option(None, help="Restrict retrieval to one evidence source_system"),
+    date_from: str = typer.Option(None, help="Earliest publication date (YYYY-MM-DD)"),
+    date_to: str = typer.Option(None, help="Latest publication date (YYYY-MM-DD)"),
+    limit: int = typer.Option(None, min=1, max=20, help="Max passages/rows the tool may return"),
+) -> None:
+    """Ask the optional analyst assistant one question (BETA-112).
+
+    Off unless `assistant_enabled`, the `[assistant]` extra, an OpenRouter key
+    and both model slugs are configured (BETA-114); otherwise this prints an
+    explicit `unavailable` outcome. One read-only tool call only. Same
+    orchestration as `POST /api/admin/assistant` — the CLI cannot bypass any
+    check.
+    """
+    from pipeline.assistant import service
+
+    conn, settings = _document_connection()
+    try:
+        result = service.ask(
+            conn, settings, question, source_system=source_system,
+            date_from=date_from, date_to=date_to, limit=limit)
+        typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+        if result["outcome"] not in ("ok", "clarified", "abstained"):
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("assistant-eval")
+def nlp_assistant_eval(
+    routing_set: Path = typer.Option(
+        None, help="Routing prompt set (default: tests/fixtures/assistant/routing_prompts.jsonl)"),
+    grounding_set: Path = typer.Option(
+        None, help="Analyst question set (default: tests/fixtures/assistant/analyst_questions.jsonl)"),
+) -> None:
+    """Score the frozen routing and grounding suites and print the
+    machine-readable release gate (BETA-113). `may_enable` is the only thing
+    that authorises turning the assistant on."""
+    from pipeline.assistant import evaluation
+
+    conn, settings = _document_connection()
+    try:
+        report = evaluation.gate_report(
+            conn, settings, routing_path=routing_set, grounding_path=grounding_set)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+        if not report["gate"]["may_enable"]:
+            raise typer.Exit(code=1)
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-retrieval")
+def nlp_eval_retrieval(
+    queries: Path = typer.Option(
+        None, help="Query set JSON (default: tests/fixtures/nlp/retrieval_queries.json)"),
+    mode: str = typer.Option("hybrid", help="keyword | semantic | hybrid"),
+    model: str = typer.Option(None, help="Override the embedder"),
+) -> None:
+    """Score a retrieval mode against a human-marked query set: Recall@5/10,
+    MRR, nDCG@5/10. The gate for changing the embedding model later."""
+    from pipeline.nlp import eval as nlp_eval
+
+    conn, settings = _document_connection()
+    try:
+        report = nlp_eval.run(
+            conn, queries_path=queries, mode=mode,
+            model=model or settings.nlp_embedding_model)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
+    finally:
+        conn.close()
+
+
+@nlp_app.command("eval-spans")
+def nlp_eval_spans(
+    gold: Path = typer.Option(
+        None, help="Gold span set JSON (default: tests/fixtures/nlp/gold_spans.json)"),
+    extractor: str = typer.Option(None, help="stub (default) | gliner | a GLiNER model id"),
+) -> None:
+    """Score a span extractor against a human-annotated set: precision /
+    recall / F1, overall and per label. The gate for a GLiNER model or
+    threshold change."""
+    from pipeline.nlp import spans_eval
+
+    conn, _ = _document_connection()
+    try:
+        report = spans_eval.run(conn, gold_path=gold, extractor=extractor)
+        typer.echo(__import__("json").dumps(report, indent=2, sort_keys=True))
     finally:
         conn.close()
 
@@ -469,6 +1749,36 @@ def list_modules() -> None:
         typer.echo(name)
 
 
+@app.command("docs-check")
+def docs_check() -> None:
+    """Fail if a machine-owned documentation block is stale (BETA-067).
+
+    Read-only. Prints a unified diff per stale block and exits non-zero, so
+    CI catches a registry change that a hand edit did not follow.
+    """
+    from pipeline import docs_matrix
+
+    stale = docs_matrix.check()
+    if not stale:
+        typer.echo("docs blocks in sync")
+        return
+    for entry in stale:
+        typer.echo(f"\n{entry['name']} ({entry['path']}):")
+        typer.echo(entry.get("diff") or f"  ERROR: {entry['error']}")
+    typer.echo("\nRun `pipeline docs-sync` to regenerate.")
+    raise typer.Exit(code=1)
+
+
+@app.command("docs-sync")
+def docs_sync() -> None:
+    """Rewrite every machine-owned documentation block in place (BETA-067)."""
+    from pipeline import docs_matrix
+
+    changed = docs_matrix.sync()
+    typer.echo("updated: " + (", ".join(changed) if changed
+                               else "nothing (already in sync)"))
+
+
 @app.command()
 def export(
     target: str = typer.Argument(
@@ -509,6 +1819,35 @@ def export(
 
     conn.commit()
     conn.close()
+
+
+@app.command("pmtiles")
+def pmtiles(
+    output_dir: Path = typer.Option(
+        None, "--output-dir",
+        help="Directory for the content-addressed archive and boundaries.json. "
+             "Defaults to frontend/public/public/map."),
+    min_zoom: int = typer.Option(0, "--min-zoom", min=0, max=14),
+    max_zoom: int = typer.Option(9, "--max-zoom", min=0, max=14),
+) -> None:
+    """Build deterministic PMTiles from canonical authority boundaries."""
+    from pipeline import pmtiles as pmtiles_module
+
+    configure_logging("pmtiles")
+    settings = get_settings()
+    destination = output_dir or (
+        Path(__file__).resolve().parent.parent / "frontend" / "public" / "public" / "map")
+    conn = db.get_connection(settings)
+    try:
+        db.apply_migrations(conn, db.migrations_dir_for(settings))
+        manifest = pmtiles_module.build_authority_archive(
+            conn, Path(destination), min_zoom=min_zoom, max_zoom=max_zoom)
+    except pmtiles_module.PmtilesError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from None
+    finally:
+        conn.close()
+    typer.echo(__import__("json").dumps(manifest, sort_keys=True, indent=2))
 
 
 @app.command("resolve-answered")
@@ -688,27 +2027,29 @@ def backup(
 @app.command()
 def restore(
     backup_file: str = typer.Argument(
-        ..., help="Path to a backup to restore: a .db file for SQLite, a "
-                   ".sql.gz snapshot for PostgreSQL"),
+        ..., help="Path to a PostgreSQL .sql.gz snapshot"),
     force: bool = typer.Option(
         False, "--force",
         help="Required when a warehouse already exists. It is moved aside, "
               "not deleted."),
+    receipt: Path = typer.Option(
+        None, "--receipt", help="Write machine-verifiable isolated-restore evidence here"),
 ) -> None:
     """Put a backup back in place of the warehouse.
 
-    Refuses a backup that fails its own checks, and never throws away what it
-    replaces: a SQLite warehouse is renamed with a timestamp, and a PostgreSQL
-    one is snapshotted before it is emptied.
-
-    Which warehouse is restored into is decided by DATABASE_URL, not by the
-    file — a file from the other backend is refused rather than parsed.
+    Refuses a backup that fails its own checks, and snapshots a populated
+    PostgreSQL warehouse before replacing it.
     """
     from pathlib import Path
 
     from pipeline import backup as backup_module
 
     configure_logging("backup")
+    if receipt is not None:
+        if receipt.exists():
+            typer.echo(f"{receipt} already exists; refusing to overwrite restore evidence", err=True)
+            raise typer.Exit(code=1)
+        receipt.parent.mkdir(parents=True, exist_ok=True)
     try:
         result = backup_module.restore(Path(backup_file), get_settings(), force=force)
     except backup_module.BackupError as exc:
@@ -717,6 +2058,21 @@ def restore(
 
     typer.echo(f"restored {result['from']} -> {result['restored']}")
     typer.echo(f"  {result['rows']:,} rows in {result['tables']} tables")
+    if receipt is not None:
+        import hashlib
+        import json
+
+        archive_path = Path(backup_file).resolve()
+        digest = hashlib.sha256()
+        with archive_path.open("rb") as handle:
+            for block in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(block)
+        payload = {**result, "from": str(archive_path),
+                   "archive_sha256": digest.hexdigest(),
+                   "restored_at": datetime.now(timezone.utc).isoformat()}
+        receipt.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n",
+                           encoding="utf-8")
+        typer.echo(f"  restore receipt: {receipt}")
     if result["superseded"]:
         typer.echo(f"  previous warehouse kept at {result['superseded']}")
     if result.get("migrations_ahead_of_archive"):
@@ -745,302 +2101,57 @@ def list_backups() -> None:
                     f"{entry['backend']}")
 
 
-def _postgres_target(settings, what: str):
-    """The configured PostgreSQL warehouse, with its migrations applied.
 
-    Refuses rather than falling back. Both commands below exist to move data
-    between two named databases, and "there is no URL set, so I used the file
-    for both" is a sentence with no useful ending.
-    """
-    if settings.database_backend != "postgres":
-        ui.error(f"{what} needs a PostgreSQL warehouse to talk to, and "
-                  "DATABASE_URL is not set.")
-        ui.muted("  Set it in .env — see pipeline/migrations/postgres/README.md "
-                  "for creating the database and its two roles.")
-        raise typer.Exit(code=1)
-    target = db.get_connection(settings)
-    applied = db.apply_migrations(target, db.migrations_dir_for(settings))
-    if applied:
-        typer.echo(f"Applied migrations: {', '.join(applied)}")
-    target.commit()
-    return target
-
-
-@app.command("migrate-data")
-def migrate_data(
-    dry_run: bool = typer.Option(
-        False, "--dry-run", help="Say what would be loaded, in what order, "
-                                  "and write nothing"),
-    resume: bool = typer.Option(
-        False, "--resume", help="Carry on from an interrupted migration, "
-                                 "skipping the tables it finished"),
-    truncate: bool = typer.Option(
-        False, "--truncate",
-        help="Empty the target's tables first. This discards whatever is in "
-              "them; the SQLite warehouse is never touched."),
-    table: list[str] = typer.Option(
-        None, "--table", help="Load only these tables. For recovering a load, "
-                               "not for performing one."),
-    verify: bool = typer.Option(
-        True, "--verify/--no-verify",
-        help="Run the full row-by-row verification afterwards"),
+@app.command("pg-capabilities")
+def pg_capabilities(
+    strict: bool = typer.Option(
+        False, "--strict",
+        help="Exit non-zero unless every warehouse extension is installed and "
+              "every extension-backed index is present and built correctly."),
 ) -> None:
-    """Copy the SQLite warehouse into PostgreSQL, and prove it arrived.
+    """Report PostgreSQL extension and index readiness, and active fallbacks.
 
-    The source is opened read-only and stays authoritative: nothing here can
-    write to it, and the way back from a bad migration is to unset
-    DATABASE_URL rather than to restore anything.
-
-    Refuses a target that already holds rows unless --truncate says otherwise,
-    checks the schemas and the source's storage types before writing anything,
-    and records each table in a state file so an interrupted run resumes.
+    Read-only: catalogue lookups only, no CREATE EXTENSION and no CREATE
+    INDEX. Point it at a deployment (or a disposable server) with
+    `DATABASE_URL`.
     """
-    from pipeline import pgload, pgverify
+    from pipeline import pg_capabilities as caps
 
-    configure_logging("pgload")
+    configure_logging("pg_capabilities")
     settings = get_settings()
-    target = _postgres_target(settings, "migrate-data")
-    source = pgload.open_source(settings.database_path)
-
+    conn = db.get_connection(settings)
     try:
-        if dry_run:
-            rows = pgload.plan(source, target)
-            problems = pgload.preflight(source, target)
-            ui.heading(f"{len(rows)} tables, "
-                        f"{sum(r['rows'] for r in rows):,} rows, in this order")
-            for entry in rows:
-                ui.info(f"  {entry['rows']:>9,}  {entry['table']}")
-            if problems:
-                ui.error("preflight found problems:")
-                for problem in problems:
-                    ui.warn(f"  {problem}")
-                raise typer.Exit(code=1)
-            ui.success("preflight is clean; nothing was written.")
-            return
-
-        def announce(name: str, expected: int, written: int | None) -> None:
-            if written is None:
-                ui.info(f"  {name} ({expected:,} rows)…")
-            else:
-                ui.success(f"  {name}: {written:,} rows")
-
-        summary = pgload.migrate(
-            source, target, settings=settings, resume=resume,
-            truncate=truncate, only=list(table) if table else None,
-            on_table=announce)
-    except pgload.LoadError as exc:
-        ui.error(str(exc))
-        raise typer.Exit(code=1) from None
-    else:
-        ui.heading(f"{summary['rows']:,} rows in {summary['tables']} tables, "
-                    f"{summary['elapsed_seconds']:,}s")
-        ui.muted(f"  state: {summary['state_path']}")
-        moved = [s for s in summary["sequences"] if s["next_value"] > 1]
-        if moved:
-            ui.muted(f"  {len(moved)} identity sequence(s) moved past the "
-                      "loaded ids")
-
-        if verify:
-            ui.heading("Verifying")
-            report = pgverify.verify(source, target)
-            _report_verification(report)
-            if not report["ok"]:
-                raise typer.Exit(code=1)
+        result = caps.report(conn)
     finally:
-        source.close()
-        target.close()
+        conn.close()
 
-
-def _postgres_source(settings, command: str):
-    """Open the explicit source URL used by PostgreSQL mirror commands."""
-    if settings.database_backend != "postgres":
-        typer.echo(f"{command} needs DATABASE_URL set to the target PostgreSQL warehouse.",
-                   err=True)
-        raise typer.Exit(code=1)
-    if not settings.database_source_url:
-        typer.echo(
-            f"{command} needs DATABASE_SOURCE_URL for the other PostgreSQL warehouse.",
-            err=True)
-        raise typer.Exit(code=1)
-    from pipeline import pg
-
-    return pg.connect(settings.database_source_url, readonly=True,
-                      application_name=f"sectortrace-{command}")
-
-
-@app.command("migrate-postgres")
-def migrate_postgres(
-    truncate: bool = typer.Option(
-        False, "--truncate", help="Replace all target rows instead of refusing a populated target"),
-    verify: bool = typer.Option(
-        True, "--verify/--no-verify", help="Compare every value after copying"),
-) -> None:
-    """Copy DATABASE_SOURCE_URL into the configured PostgreSQL warehouse.
-
-    Use this for the initial local-PostgreSQL -> Railway import. Later, point
-    DATABASE_URL at local PostgreSQL and DATABASE_SOURCE_URL at Railway to
-    refresh the local mirror from the authoritative warehouse.
-    """
-    from pipeline import pgmirror
-
-    configure_logging("pgmirror")
-    settings = get_settings()
-    source = _postgres_source(settings, "migrate-postgres")
-    target = _postgres_target(settings, "migrate-postgres")
-    try:
-        def announce(table: str, rows: int) -> None:
-            ui.success(f"  {table}: {rows:,} rows")
-
-        result = pgmirror.transfer(source, target, truncate=truncate,
-                                   verify=verify, on_table=announce)
-    except pgmirror.MirrorError as exc:
-        ui.error(str(exc))
-        raise typer.Exit(code=1) from None
-    finally:
-        source.close()
-        target.close()
-    ui.heading(f"{result['rows']:,} rows in {result['tables']} tables copied")
-    if result["verified"]:
-        ui.success("  source and target agree on every value")
-
-
-@app.command("check-postgres-sync")
-def check_postgres_sync() -> None:
-    """Compare the two PostgreSQL warehouses without changing either one."""
-    from pipeline import pgmirror
-
-    configure_logging("pgmirror_check")
-    settings = get_settings()
-    source = _postgres_source(settings, "check-postgres-sync")
-    target = _postgres_target(settings, "check-postgres-sync")
-    try:
-        report = pgmirror.compare(source, target)
-    finally:
-        source.close()
-        target.close()
-    if "tables" in report:
-        _report_verification(report)
-    else:
-        ui.error("PostgreSQL sync preflight failed:")
-        for problem in report["problems"]:
-            ui.warn(f"  {problem}")
-    if not report["ok"]:
+    typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
+    if strict and not result["ready"]:
         raise typer.Exit(code=1)
 
 
-@app.command("verify-migration")
-def verify_migration(
-    quick: bool = typer.Option(
-        False, "--quick",
-        help="Counts, NULL counts and per-column minima and maxima only — "
-              "skip the row-by-row comparison"),
-    table: list[str] = typer.Option(
-        None, "--table", help="Only these tables"),
-) -> None:
-    """Check the PostgreSQL warehouse against the SQLite one.
+@app.command("pg-telemetry-snapshot")
+def pg_telemetry_snapshot() -> None:
+    """Capture one PostgreSQL maintenance-telemetry snapshot (migration 0113).
 
-    Reads both and changes neither. Every check that can run does, so the
-    output is the complete list of what is wrong rather than the first thing.
+    Writes table/index churn and usage counters, and query-fingerprint stats
+    if `pg_stat_statements` is installed, into `pg_telemetry_*` so the
+    observation period performance.md's "PostgreSQL maintenance" section
+    requires before any autovacuum/analyze/index/planner change has evidence
+    to point at. Capture only — this never changes server configuration.
+    Schedule it the same way `pipeline backup` is scheduled (see
+    `sectortrace-backup.timer`/`sectortrace-pg-telemetry.timer` in
+    deploy/ansible).
     """
-    from pipeline import pgverify
+    from pipeline import pg_telemetry
 
-    configure_logging("pgverify")
-    settings = get_settings()
-    target = _postgres_target(settings, "verify-migration")
-
-    from pipeline import pgload
-
-    source = pgload.open_source(settings.database_path)
+    configure_logging("pg_telemetry_snapshot")
+    conn, _settings = _document_connection()
     try:
-        report = pgverify.verify(source, target, deep=not quick,
-                                  tables=list(table) if table else None)
+        result = pg_telemetry.snapshot(conn)
     finally:
-        source.close()
-        target.close()
-
-    _report_verification(report)
-    if not report["ok"]:
-        raise typer.Exit(code=1)
-
-
-@app.command("sync-sqlite")
-def sync_sqlite(
-    check: bool = typer.Option(
-        False, "--check",
-        help="Say how far apart the two warehouses are and write nothing"),
-    output: str = typer.Option(
-        None, "--output", help="Build the warehouse here instead of at "
-                                "DATABASE_PATH. For inspecting one without "
-                                "replacing what you have."),
-    verify: bool = typer.Option(
-        True, "--verify/--no-verify",
-        help="Compare the rebuilt file against PostgreSQL before installing it"),
-    quick: bool = typer.Option(
-        False, "--quick",
-        help="Verify by counts and per-column aggregates only, not row by row"),
-    force: bool = typer.Option(
-        False, "--force", help="Overwrite the file named by --output"),
-) -> None:
-    """Rebuild the SQLite warehouse from PostgreSQL, so rollback stays real.
-
-    PostgreSQL is where collection writes once DATABASE_URL is set, and the
-    SQLite file stops moving the moment it is. Unsetting the variable is only
-    a rollback while this has been run recently — see pipeline/pgsync.py.
-
-    The new file is built beside the old one, verified against PostgreSQL, and
-    only then swapped in. What it replaces is renamed, never deleted.
-    """
-    from pathlib import Path
-
-    from pipeline import pgsync
-
-    configure_logging("pgsync")
-    settings = get_settings()
-
-    try:
-        if check:
-            report = pgsync.check(settings)
-            ui.heading(f"{report['postgres_rows']:,} rows in PostgreSQL, "
-                        + (f"{report['sqlite_rows']:,} in {report['sqlite_path']}"
-                            if report["sqlite_present"] else "no SQLite warehouse"))
-            for problem in report["problems"]:
-                ui.warn(f"  {problem}")
-            if report["in_step"]:
-                ui.success("  the two warehouses hold the same rows and the "
-                            "same schema.")
-            elif report["rows_in_step"]:
-                ui.info("  the rows match; it is the migration ledgers that "
-                         "differ. A refresh will not change that — this "
-                         "checkout is not at the commit the server was "
-                         "migrated from.")
-            else:
-                ui.muted("  `./start.sh sync-sqlite` rebuilds the SQLite "
-                          "warehouse from PostgreSQL.")
-            raise typer.Exit(code=0 if report["in_step"] else 1)
-
-        def announce(table: str, rows: int | None) -> None:
-            if rows is not None:
-                ui.success(f"  {table}: {rows:,} rows")
-
-        result = pgsync.refresh(
-            settings, destination=Path(output) if output else None,
-            verify=verify, deep=not quick, force=force, on_table=announce)
-    except pgsync.SyncError as exc:
-        ui.error(str(exc))
-        raise typer.Exit(code=1) from None
-
-    ui.heading(f"{result['rows']:,} rows in {result['tables']} tables -> "
-                f"{result['target']}")
-    if result["verified"]:
-        ui.success("  verified against PostgreSQL by "
-                    + ("every value" if result["deep"]
-                        else "counts and aggregates")
-                    + " before it was installed")
-    else:
-        ui.warn("  not verified — this file has not been compared with the "
-                 "warehouse it came from")
-    if result["superseded"]:
-        ui.muted(f"  previous warehouse kept at {result['superseded']}")
+        conn.close()
+    typer.echo(__import__("json").dumps(result, indent=2, sort_keys=True))
 
 
 @app.command()
@@ -1109,6 +2220,27 @@ def benchmark(
                      f"x{row['p50_ratio']}")
 
 
+@app.command("performance")
+def performance_suite(
+    suite: str = typer.Argument("all", help="Subsystem suite or all"),
+    output: str | None = typer.Option(None, "--output", help="Write a JSON report here"),
+) -> None:
+    """Run a named performance suite with deterministic output metadata."""
+    from pathlib import Path
+
+    from pipeline import performance as performance_module
+
+    configure_logging("performance")
+    report = performance_module.run(
+        get_settings(), suite, output=Path(output) if output else None)
+    ui.heading(f"performance — {suite}")
+    for name, result in report["suites"].items():
+        status = result.get("status", "measured")
+        ui.info(f"  {name:<12} {status:<28} {result['wall_seconds']:.3f}s")
+    if report.get("written_to"):
+        ui.success(f"recorded to {report['written_to']}")
+
+
 @app.command("coverage-report")
 def coverage_report(
     output: str = typer.Option(
@@ -1167,11 +2299,10 @@ def migrate() -> None:
     finally:
         conn.close()
 
-    backend = settings.database_backend
     if applied:
-        typer.echo(f"{backend}: applied {len(applied)} migration(s): {', '.join(applied)}")
+        typer.echo(f"postgres: applied {len(applied)} migration(s): {', '.join(applied)}")
     else:
-        typer.echo(f"{backend}: schema is current")
+        typer.echo("postgres: schema is current")
 
 
 @app.command()
@@ -1201,6 +2332,7 @@ def web(
 
     configure_logging("web")
     settings = get_settings()
+    configure_telemetry(settings)
 
     # Migrations first, on a writable connection: the decisions table arrives
     # in 0026 and the UI would otherwise fail on a warehouse built before it.
@@ -1211,7 +2343,7 @@ def web(
     if applied:
         typer.echo(f"Applied migrations: {', '.join(applied)}")
     pending = conn.execute(
-        "SELECT COUNT(*) FROM review_queue WHERE status = 'pending'").fetchone()[0]
+        "SELECT COUNT(*) AS count FROM review_queue WHERE status = 'pending'").fetchone()["count"]
     conn.close()
 
     try:
@@ -1227,13 +2359,7 @@ def web(
         # The addresses another device on the network can actually type.
         # "listening on 0.0.0.0" is true and useless from a phone.
         ui.info(f"  also on [pipeline.module]{other}[/]")
-    # Whichever warehouse is actually being served. `database_path` is always
-    # set and is the SQLite file, so printing it unconditionally told an
-    # operator running against PostgreSQL the name of a file this process was
-    # not going to open — and the redacted URL is the one line that would have
-    # made that obvious.
-    ui.info(f"  warehouse: [pipeline.muted]"
-             f"{settings.redacted_database_url or settings.database_path}[/]")
+    ui.info(f"  warehouse: [pipeline.muted]{settings.redacted_database_url}[/]")
     ui.info(f"  {pending:,} item(s) pending review")
     if host not in ("127.0.0.1", "localhost", "::1"):
         # Stated every time, not once in a doc. There is no login on this
@@ -1258,6 +2384,38 @@ def web(
     finally:
         server.server_close()
         close_read_pools()
+
+
+@app.command()
+def dashboard() -> None:
+    """Open the operator dashboard and audited review controls in the terminal."""
+    from pipeline import tui_dashboard
+
+    tui_dashboard.run()
+
+
+@app.command("sync")
+def sync_screen() -> None:
+    """Open the backup and sync screen for archive and PostgreSQL copies."""
+    from pipeline import tui_sync
+
+    tui_sync.run()
+
+
+@app.command("containers")
+def containers_screen() -> None:
+    """Open the Docker Compose container management screen."""
+    from pipeline import tui_containers
+
+    tui_containers.run()
+
+
+@app.command("run-all")
+def run_all_screen() -> None:
+    """Open the complete-run screen, defaulting to 14 concurrent modules."""
+    from pipeline import tui_run_all
+
+    tui_run_all.run()
 
 
 _audit_counts = runner.audit_counts
@@ -1287,8 +2445,8 @@ def _print_summary(summary: list[dict], dry_run: bool) -> None:
         # rather than as something that went wrong.
         ui.muted(f"  {review:,} new review item(s), {failures:,} new parse failure(s) "
                   "— see docs/CAVEATS.md for how to read them:")
-        ui.muted("    sqlite3 data/warehouse.db \"SELECT module, item_type, COUNT(*) "
-                  "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
+        ui.muted("    psql \"$DATABASE_URL\" -c \"SELECT module, item_type, COUNT(*) "
+                 "FROM review_queue WHERE status='pending' GROUP BY 1,2;\"")
 
 
 class _BarObserver(runner.RunObserver):
@@ -1344,10 +2502,10 @@ def _execute_module(name: str, fn, settings, since, dry_run, limit, bar, source=
 
 
 def _run_waves(waves: list[list[str]], jobs: int, settings, since, dry_run, limit,
-                bar, source="all") -> list[dict]:
+                bar, source="all", origin="cli") -> list[dict]:
     """Every wave, painted onto `bar`. The ordering rules are in runner.py."""
     return runner.run_waves(waves, jobs, settings, since, dry_run, limit,
-                             _BarObserver(bar), source=source)
+                             _BarObserver(bar), source=source, origin=origin)
 
 
 @app.command()
@@ -1377,6 +2535,10 @@ def run(
     all_sources: bool = typer.Option(
         False, "--all", help="m01 only: run every channel that writes contracts "
                               "(live APIs + CSV archive) -- not --kag, see --kag's help"),
+    origin: str = typer.Option(
+        "cli", "--origin", hidden=True,
+        help="How this run was started, for the run ledger (BETA-058). A cron "
+              "wrapper passes 'scheduled'; anything else is recorded as 'cli'."),
 ) -> None:
     if limit is not None and limit < 1:
         # Every module tests `if ctx.limit:`, so 0 is falsy and reads as "no
@@ -1398,6 +2560,7 @@ def run(
 
     configure_logging(module)
     settings = get_settings()
+    configure_telemetry(settings)
     conn = db.get_connection(settings)
 
     applied = db.apply_migrations(conn)
@@ -1487,7 +2650,9 @@ def run(
     waves = resolve_run_waves([name for name, _ in targets])
 
     with ui.progress() as bar:
-        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar, source=source)
+        summary = _run_waves(waves, jobs, settings, since, dry_run, limit, bar,
+                              source=source,
+                              origin=origin if origin in ("cli", "scheduled") else "cli")
 
     failed = [row for row in summary if row["status"] == "failed"]
     for row in failed:
@@ -1854,15 +3019,90 @@ def archive_process(
     )
 
 
+@app.command("archive-audit")
+def archive_audit(
+    show: bool = typer.Option(
+        False, "--show", help="Print the last few audit rows instead of "
+                               "recording a new one."),
+) -> None:
+    """Record one append-only raw-archive audit snapshot (BETA-060): the
+    daily deterministic sample (performance.md's Phase 5 archive-audit gap —
+    at least 100 objects, or 1% of the archive if larger).
+
+    Counts, by-source distribution, unarchived evidence references, duplicated
+    hashes, and the sample re-hashed against the archive itself, from the
+    `archive_objects` index. Writes exactly one `archive_audits` row and
+    quarantines any verification mismatch (migration 0103) — it never deletes
+    an object, compacts the archive, or changes retention. See
+    `archive-audit-full` for the quarterly complete verification.
+    """
+    import json as _json
+
+    from pipeline import archive_audit as audit_mod
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        if show:
+            typer.echo(_json.dumps(audit_mod.history(conn, limit=10), indent=2))
+            return
+        row = audit_mod.record(conn, settings)
+    finally:
+        conn.close()
+    typer.echo(_json.dumps({k: v for k, v in row.items() if k != "sample"},
+                            indent=2))
+    typer.echo(f"recorded audit {row['audit_id']}: {row['object_count']} objects, "
+                f"{row['total_bytes']} bytes, {row['missing_refs']} unarchived refs, "
+                f"{row['duplicate_hashes']} duplicated hashes, "
+                f"{row['verified_mismatches']} of {row['sample_size']} sampled mismatched")
+
+
+@app.command("archive-audit-full")
+def archive_audit_full() -> None:
+    """Perform the quarterly complete raw-archive verification (BETA-060,
+    performance.md's Phase 5 archive-audit gap): every archived object
+    re-hashed, not the daily 1% sample, with the same quarantine-on-mismatch
+    wiring as `archive-audit` and `archive-verify`. Expensive by design — see
+    deploy/ansible for how it is scheduled quarterly rather than run ad hoc.
+    """
+    import json as _json
+
+    from pipeline import archive_audit as audit_mod
+
+    settings = get_settings()
+    conn = db.get_connection(settings)
+    try:
+        row = audit_mod.record(conn, settings, full=True)
+    finally:
+        conn.close()
+    typer.echo(_json.dumps({k: v for k, v in row.items() if k != "sample"},
+                            indent=2))
+    typer.echo(f"recorded full audit {row['audit_id']}: {row['object_count']} objects verified, "
+                f"{row['verified_mismatches']} mismatched")
+
+
 @app.command("archive-verify")
 def archive_verify() -> None:
     """Perform a complete key, byte-count and SHA-256 verification."""
+    from pipeline import archive_audit, db
     from pipeline.archive import get_archive
     settings = get_settings()
     report = get_archive(settings).verify()
     settings.backup_dir.mkdir(parents=True, exist_ok=True)
     (settings.backup_dir / "archive-manifest.json").write_text(
         __import__("json").dumps(report, indent=2), encoding="utf-8")
+    if report["failures"]:
+        # The manifest file is a point-in-time report; this makes each
+        # failure listable/retryable across runs too (migration 0103) — the
+        # same helper the daily/quarterly archive-audit passes use, so a
+        # mismatch is quarantined identically regardless of which path
+        # found it.
+        conn = db.get_connection(settings)
+        try:
+            archive_audit.quarantine_failures(conn, report["failures"], module="archive_verify")
+            conn.commit()
+        finally:
+            conn.close()
     typer.echo(__import__("json").dumps(report, indent=2))
     if not report["ok"]:
         raise typer.Exit(code=1)

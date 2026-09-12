@@ -1,0 +1,48 @@
+<script setup lang="ts">
+import type { ClaimRow } from '~/types/api'
+import { downloadEvidenceCsv, downloadEvidenceJson } from '~/lib/evidence-export'
+const api = usePublicApi()
+const route = useRoute()
+const filters = useFilterState()
+const notebook = useNotebook()
+const { data, pending, error, refresh } = await useAsyncData('public-statements', (_app, { signal }) => api.claims({ signal }))
+const claims = computed(() => Array.isArray(data.value?.claims) ? data.value.claims : null)
+const get = (key: string) => { const value = filters.get(key); return Array.isArray(value) ? value[0] ?? '' : value ?? '' }
+const draft = ref(get('q'))
+watch(() => get('q'), value => { draft.value = value })
+const matches = computed(() => (claims.value ?? []).filter(claim => `${claim.id ?? ''} ${claim.claim_text ?? ''}`.toLocaleLowerCase('en-GB').includes(get('q').toLocaleLowerCase('en-GB'))))
+const offset = computed(() => { const n = Number(get('offset')); return Number.isSafeInteger(n) && n >= 0 ? n : 0 })
+const displayed = computed(() => matches.value.slice(offset.value, offset.value + 20))
+const identifier = (claim: ClaimRow) => typeof claim.id === 'string' && claim.id !== '' ? claim.id : typeof claim.id === 'number' && Number.isSafeInteger(claim.id) ? String(claim.id) : null
+const candidates = computed(() => get('claim') ? (claims.value ?? []).filter(claim => identifier(claim) === get('claim')) : [])
+const selected = computed(() => candidates.value.length === 1 ? candidates.value[0] : undefined)
+const unresolved = (claim: ClaimRow) => Array.isArray(claim.citations) ? claim.citations.filter(citation => !citation.resolved).length : null
+const status = ref('')
+const fallbackCaveat = 'These are campaign-authored statements linked to selected evidence. Publication approval and an available citation do not establish that every interpretation is correct.'
+let trigger: HTMLElement | null = null
+async function inspect(claim: ClaimRow, event: Event) { trigger = event.currentTarget as HTMLElement; await filters.setAll({ ...filters.all(), claim: identifier(claim) ?? undefined, citation: undefined, citation_offset: undefined }); await nextTick(); document.querySelector<HTMLElement>('.st-inspector-heading')?.focus() }
+async function close() { await filters.setAll({ ...filters.all(), claim: undefined, citation: undefined, citation_offset: undefined }); await nextTick(); if (trigger?.isConnected) trigger.focus() }
+function scope(kind: string) { return { scope: kind, endpoint: '/api/v1/claims', request_filters: {}, local_search: get('q') || null, local_offset: offset.value, retained_view: `#${route.fullPath}`, authorship: 'Campaign-authored statements. Creator and publication approver are separate supplied fields.', caveat: data.value?.caveat ?? null, citation_limitations: 'Unresolved citations are retained. Citation resolutions do not include payload hashes. Publication dates do not substitute for source retrieval dates.' } }
+function download(kind: 'json' | 'csv' | 'selected') {
+  const rows = kind === 'selected' ? selected.value ? [selected.value] : [] : displayed.value
+  if (kind === 'csv') downloadEvidenceCsv('campaign-statements-displayed', rows)
+  else downloadEvidenceJson(kind === 'selected' ? `campaign-statement-${get('claim')}` : 'campaign-statements-displayed', rows, scope(kind === 'selected' ? 'selected-published-statement-with-citations' : 'displayed-page-of-returned-statements'))
+}
+async function copy() { try { await navigator.clipboard.writeText(window.location.href); status.value = 'Statement link copied.' } catch { status.value = 'Copy is unavailable. Select the statement link below.' } }
+function save() { if (selected.value) status.value = notebook.add({ title: `Campaign statement ${selected.value.id}`, href: `#${route.fullPath}`, note: JSON.stringify({ ...scope('selected-published-statement-with-citations'), statement: selected.value }, null, 2) }) ? 'Statement reference saved to this browser’s notebook.' : 'This browser could not save the reference.' }
+watch(() => get('claim'), () => { status.value = '' })
+useHead({ title: 'Evidence-backed statements · SectorTrace' })
+</script>
+<template>
+  <section class="space-y-6"><header class="st-page-header"><p class="atlas-eyebrow">Published campaign statements</p><h1>Evidence-backed statements</h1><p>Statements written by the campaign, with their authorship, publication decisions, citations and caveats.</p></header><p class="atlas-caveat">{{ data?.caveat ?? fallbackCaveat }}</p><p v-if="get('provider_key') || get('ons_code') || get('year_from') || get('year_to')" class="atlas-footnote">Retained provider, authority and year selections do not filter this response.</p>
+    <form class="flex flex-wrap items-end gap-3" role="search" aria-label="Search published statements" @submit.prevent="filters.setAll({ ...filters.all(), q: draft || undefined, offset: undefined })"><label>Statement text or identifier<input v-model="draft" type="search"></label><button type="submit" class="atlas-button">Search statements</button><button type="button" class="atlas-button" @click="filters.setAll({ ...filters.all(), q: undefined, offset: undefined })">Clear search</button></form>
+    <StEvidenceState :pending="pending" :error="error" @retry="refresh"><p v-if="!claims" role="status">The published statement array was not supplied. This is not an empty collection.</p><template v-else>
+      <p class="atlas-footnote">{{ matches.length }} of {{ claims.length }} returned statements match this local search. {{ displayed.length }} displayed in the response’s publication order.</p><div class="flex flex-wrap gap-2"><button type="button" class="atlas-button" @click="download('json')">Download displayed statements JSON</button><button type="button" class="atlas-button" @click="download('csv')">Download displayed statements CSV</button></div><p class="atlas-footnote">Keep the JSON with the CSV. It includes the page caveat and scope. Both preserve statement caveats and original citations, including unresolved references.</p>
+      <div class="st-directory-workspace" :class="{ 'has-inspector': get('claim') }"><div class="min-w-0 space-y-4"><article v-for="(claim, index) in displayed" :key="`${claim.id}:${index}`" class="atlas-panel atlas-panel-body space-y-3" :aria-label="`Campaign statement ${claim.id ?? 'without identifier'}`"><h2>Statement {{ claim.id ?? 'identifier not supplied' }}</h2><p class="st-statement-text">{{ claim.claim_text ?? 'Statement text not supplied.' }}</p><p class="atlas-footnote">Authored by {{ claim.created_by ?? 'not supplied' }}. Created: {{ claim.created_at ?? 'not supplied' }}.</p><p class="atlas-footnote">Publication approved by {{ claim.published_by ?? 'not supplied' }}. Published: {{ claim.published_at ?? 'not supplied' }}.</p><p v-for="(caveat, i) in Array.isArray(claim.caveats) ? claim.caveats : []" :key="i" class="atlas-caveat st-statement-text">{{ caveat }}</p><p v-if="!Array.isArray(claim.caveats)" role="status">Statement caveats were not supplied.</p><p v-if="unresolved(claim) === null" role="status">Citation array not supplied.</p><p v-else-if="!claim.citations.length" role="status">No citations returned.</p><p v-else>{{ claim.citations.length }} citation entries. {{ unresolved(claim) }} unresolved or without resolution data.</p><button v-if="identifier(claim) !== null" type="button" class="atlas-button" :aria-label="`Inspect statement ${claim.id}`" @click="inspect(claim, $event)">Inspect statement and citations</button><p v-else>Inspection unavailable because no usable statement identifier was supplied.</p></article><StEvidenceState v-if="!displayed.length" empty :empty-title="offset ? 'No statements on this display page' : 'No published statements match this search'" message="Clear the local search or return to the first page. A missing statement may no longer be published." /><nav class="flex flex-wrap gap-2" aria-label="Statement display pages"><button type="button" class="atlas-button" :disabled="!offset" @click="filters.set('offset', String(Math.max(0, offset - 20)))">Previous</button><button type="button" class="atlas-button" :disabled="offset + 20 >= matches.length" @click="filters.set('offset', String(offset + 20))">Next</button><button v-if="offset" type="button" class="atlas-button" @click="filters.set('offset', undefined)">First page</button></nav></div>
+      <StInspector v-if="get('claim')" :title="selected ? `Campaign statement ${selected.id}` : 'Statement unavailable or ambiguous'" @close="close"><template v-if="selected"><StStatementDetails :key="get('claim')" :statement="selected" /><p class="atlas-caveat">{{ data?.caveat ?? fallbackCaveat }}</p><div class="st-inspector-actions"><button type="button" class="atlas-button" @click="download('selected')">Download statement with citations JSON</button><button type="button" class="atlas-button" @click="save">Save statement reference</button><button type="button" class="atlas-button" @click="copy">Copy statement link</button></div><p role="status">{{ status }}</p><p class="st-statement-text atlas-footnote">{{ `#${route.fullPath}` }}</p></template><p v-else role="status">The requested statement identifier {{ get('claim') }} does not identify one published statement in this response. No replacement has been selected.</p></StInspector></div>
+    </template></StEvidenceState>
+  </section>
+</template>
+<style scoped>
+.st-statement-text { white-space: pre-wrap; overflow-wrap: anywhere; } label { display: grid; gap: 6px; font-size: 13px; max-width: 100%; } input { padding: 9px; min-height: 44px; max-width: 100%; border: 1px solid var(--border-control); background: var(--surface-base); color: var(--text-primary); border-radius: 4px; }
+</style>
