@@ -334,6 +334,46 @@ def test_comparators_are_present_and_carry_their_own_caveats(ro):
     assert "not" in ta["breakdown_caveat"].lower()
 
 
+def test_multiple_disadvantage_preserves_scope_markers_and_provenance(warehouse):
+    for code, quarter, label in [
+        (BIRMINGHAM, "2026-04-01", "April to June 2026"),
+        ("E10000028", "2026-01-01", "January to March 2026"),
+        (BIRMINGHAM, "2026-01-01", "January to March 2026"),
+    ]:
+        warehouse.execute(
+            "INSERT INTO multiple_disadvantage_snapshot "
+            "(ons_code, quarter_start, quarter_label, md_pct, md_pct_text, "
+            "assessed_md_total, assessed_md_total_text, "
+            "assessed_substance_dependency_total, assessed_substance_dependency_total_text, "
+            "prevention_secured_md_total, prevention_secured_md_total_text, "
+            "relief_secured_md_total, relief_secured_md_total_text, "
+            "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+            "VALUES (%s, %s, %s, 125.5, '125.5%', 10, '10', NULL, '[x]', "
+            "0, '0', NULL, '[z]', 'https://example.invalid/md.xlsx', "
+            "'2026-09-12T00:00:00Z', 200, 'mhclg_multiple_disadvantage', 'md-hash')",
+            (code, quarter, label))
+    payload = public_queries.authority(warehouse, BIRMINGHAM)
+    comparator = payload["comparators"]["multiple_disadvantage"]
+    assert [row["quarter_start"] for row in comparator["rows"]] == [
+        "2026-01-01", "2026-04-01"]
+    row = comparator["rows"][0]
+    assert row["md_pct"] == 125.5
+    assert row["md_pct_text"] == "125.5%"
+    assert row["assessed_md_total"] == 10
+    assert row["assessed_substance_dependency_total"] is None
+    assert row["assessed_substance_dependency_total_text"] == "[x]"
+    assert row["prevention_secured_md_total"] == 0
+    assert row["prevention_secured_md_total_text"] == "0"
+    assert row["relief_secured_md_total"] is None
+    assert row["relief_secured_md_total_text"] == "[z]"
+    assert row["source_url"] == "https://example.invalid/md.xlsx"
+    assert row["retrieved_at"] == "2026-09-12T00:00:00Z"
+    assert row["payload_sha256"] == "md-hash"
+    assert "totals overlap" in comparator["caveat"]
+    assert "not clinical or treatment data" in comparator["caveat"]
+    assert "exceed 100%" in comparator["caveat"]
+
+
 def test_comparators_never_combined_or_scored_against_other_evidence():
     """The three comparator caveats must say, in words, that these figures
     are not combined with the authority's own evidence — the entire reason
@@ -353,6 +393,7 @@ def test_an_authority_with_no_comparator_data_gets_empty_rows_not_an_error(ro):
     assert comparators["statutory_homelessness"]["rows"] == []
     assert comparators["temporary_accommodation"]["rows"] == []
     assert comparators["temporary_accommodation"]["breakdown"] == []
+    assert comparators["multiple_disadvantage"]["rows"] == []
 
 
 def test_an_authority_with_nothing_returns_the_same_empty_shapes(ro):

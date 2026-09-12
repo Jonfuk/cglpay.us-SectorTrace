@@ -14,6 +14,7 @@ interface AuthorityWorkspace extends AuthorityResponse {
   }
   contracts?: { notices?: Row[]; total?: number; caveats?: Record<string, string | null>; [key: string]: unknown }
   comparators?: {
+    multiple_disadvantage?: { rows?: Row[]; caveat?: string | null }
     rough_sleeping?: { rows?: Row[]; caveat?: string | null }
     statutory_homelessness?: { rows?: Row[]; caveat?: string | null }
     temporary_accommodation?: { rows?: Row[]; breakdown?: Row[]; caveat?: string | null; breakdown_caveat?: string | null }
@@ -211,6 +212,7 @@ useHead(() => ({ title: `${name.value} · SectorTrace` }))
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Rough sleeping</h3><p class="atlas-footnote">The estimation method for each observation is not supplied in this response. Check the source before comparing years or areas.</p><StEvidenceTable caption="Rough sleeping observations" source-details :columns="roughColumns" :rows="indexed(comparatorRows('rough_sleeping'), 'rough')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('rough_sleeping').length" title="No rough-sleeping rows collected" /><StCaveat :text="comparatorCaveat('rough_sleeping')" /></div>
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Statutory homelessness</h3><StEvidenceTable caption="Statutory homelessness observations" source-details :columns="homelessnessColumns" :rows="indexed(comparatorRows('statutory_homelessness'), 'homelessness')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('statutory_homelessness').length" title="No statutory-homelessness rows collected" /><StCaveat :text="comparatorCaveat('statutory_homelessness')" /></div>
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Temporary accommodation</h3><p class="atlas-footnote">Published contextual totals. No rate, ranking or change between quarters is computed here.</p><StEvidenceTable caption="Temporary accommodation observations" source-details :columns="temporaryColumns" :rows="indexed(comparatorRows('temporary_accommodation'), 'ta')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('temporary_accommodation').length" title="No temporary-accommodation rows collected" /><details v-if="data.comparators?.temporary_accommodation?.breakdown?.length"><summary class="text-sm opacity-70 cursor-pointer">Bed-and-breakfast breakdown</summary><div class="mt-3"><StEvidenceTable caption="Temporary accommodation breakdown" source-details :columns="temporaryBreakdownColumns" :rows="indexed(data.comparators.temporary_accommodation.breakdown, 'ta-breakdown')" row-key="row_key" /></div><StCaveat :text="data.comparators.temporary_accommodation.breakdown_caveat" /></details><StCaveat :text="comparatorCaveat('temporary_accommodation')" /></div>
+          <StMultipleDisadvantage :comparator="data.comparators?.multiple_disadvantage" />
         </div>
       </section>
       </template>

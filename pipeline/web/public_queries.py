@@ -378,6 +378,17 @@ CAVEATS = {
         "name exactly matches a known provider name variant. Unmatched rows are "
         "not evidence that no tracked provider was paid."
     ),
+    "multiple_disadvantage_comparator": (
+        "MHCLG H-CLIC housing-assessment data, not clinical or treatment data. "
+        "Multiple disadvantage means three or more of five recorded flags. "
+        "The five category totals overlap: never sum them to reconstruct the "
+        "qualifying total. Never combine these observations with NDTMS or "
+        "Fingertips treatment figures. The published percentage is an inflow/"
+        "outflow proxy and can exceed 100%; it is not recomputed here. "
+        "Duty outcomes overlap the statutory homelessness totals. "
+        "Published [x] means missing data/non-submission and [z] means not "
+        "applicable; neither is zero."
+    ),
     "rough_sleeping_comparator": (
         "This is a comparator, shown here because rough sleeping and substance "
         "misuse are widely documented as overlapping populations — never "
@@ -3910,7 +3921,8 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "foi_request_candidates", "rough_sleeping_snapshot",
               "statutory_homelessness_snapshot",
               "temporary_accommodation_snapshot",
-              "temporary_accommodation_breakdowns"])
+              "temporary_accommodation_breakdowns",
+              "multiple_disadvantage_snapshot"])
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
@@ -3994,6 +4006,33 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         FROM temporary_accommodation_breakdowns WHERE ons_code = %s
         ORDER BY quarter_start, measure""", (ons_code,))
 
+    # Explicit projection keeps raw missing-value markers and source identity
+    # beside each metric without exposing future warehouse-only columns.
+    multiple_disadvantage = _rows(conn, """
+        SELECT quarter_start, quarter_label,
+               md_pct, md_pct_text,
+               assessed_md_total, assessed_md_total_text,
+               assessed_domestic_abuse_total, assessed_domestic_abuse_total_text,
+               assessed_mental_health_total, assessed_mental_health_total_text,
+               assessed_substance_dependency_total, assessed_substance_dependency_total_text,
+               assessed_homelessness_rough_sleeping_total, assessed_homelessness_rough_sleeping_total_text,
+               assessed_criminal_justice_total, assessed_criminal_justice_total_text,
+               prevention_secured_md_total, prevention_secured_md_total_text,
+               prevention_secured_domestic_abuse_total, prevention_secured_domestic_abuse_total_text,
+               prevention_secured_mental_health_total, prevention_secured_mental_health_total_text,
+               prevention_secured_substance_dependency_total, prevention_secured_substance_dependency_total_text,
+               prevention_secured_homelessness_rough_sleeping_total, prevention_secured_homelessness_rough_sleeping_total_text,
+               prevention_secured_criminal_justice_total, prevention_secured_criminal_justice_total_text,
+               relief_secured_md_total, relief_secured_md_total_text,
+               relief_secured_domestic_abuse_total, relief_secured_domestic_abuse_total_text,
+               relief_secured_mental_health_total, relief_secured_mental_health_total_text,
+               relief_secured_substance_dependency_total, relief_secured_substance_dependency_total_text,
+               relief_secured_homelessness_rough_sleeping_total, relief_secured_homelessness_rough_sleeping_total_text,
+               relief_secured_criminal_justice_total, relief_secured_criminal_justice_total_text,
+               source_url, retrieved_at, payload_sha256
+        FROM multiple_disadvantage_snapshot WHERE ons_code = %s
+        ORDER BY quarter_start""", (ons_code,))
+
     return {
         "authority": authority_row,
         "coverage": {
@@ -4007,6 +4046,9 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "treatment": treatment,
         "contracts": contracts_held,
         "comparators": {
+            "multiple_disadvantage": {
+                "rows": multiple_disadvantage,
+                "caveat": CAVEATS["multiple_disadvantage_comparator"]},
             "rough_sleeping": {"rows": rough_sleeping,
                                 "caveat": CAVEATS["rough_sleeping_comparator"]},
             "statutory_homelessness": {
