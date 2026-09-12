@@ -96,6 +96,7 @@ UNPUBLISHED = (
     "upgrade-audit-prompt.md",
     "upgrade-roadmap.md",
     "rough-sleeping-data-framework.md",
+    "open-referral-uk-service-directories.md",
 )
 
 # Whole directories, including the data files beside their write-ups.
