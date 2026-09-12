@@ -545,6 +545,31 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "directory and crawl parsers have not yet been validated against "
               "the real sites -- see the module docstring.",
     ),
+    Smoke(
+        module="m36_360giving",
+        produces=("three_sixty_giving_grants",),
+        signal=(("three_sixty_giving_grants", "amount_awarded"),
+                ("three_sixty_giving_grants", "counterparty_name"),
+                ("three_sixty_giving_grants", "award_date_raw")),
+        precondition="SELECT COUNT(*) FROM provider_identifiers "
+                     "WHERE scheme IN ('charity_number', 'company_number')",
+        precondition_note="no provider has a charity_number or company_number "
+                           "on file, so there is no 360Giving org id to look up",
+        limit=None,
+        note="Ignores --limit: already bounded to the tracked providers' own "
+              "identifiers (docs/m36-360giving-grantnav-feasibility.md), not a "
+              "corpus-wide crawl -- roughly 13 providers x up to 2 identifier "
+              "schemes x 2 directions, not thousands of pages. Verified live "
+              "2026-09-12 that Change Grow Live has 21 real grants received "
+              "under GB-CHC-1079327 (see the feasibility doc), so an empty "
+              "three_sixty_giving_grants table on a real run is a genuine "
+              "signal something changed, not an expected outcome the way a "
+              "pure-discovery module's empty evidence table can be. The "
+              "live-fetch path has not yet been watched end-to-end against the "
+              "real API by a person -- the manual checks behind the "
+              "feasibility doc used curl, not this module -- per the "
+              "reduced-testing policy for a new source.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`
