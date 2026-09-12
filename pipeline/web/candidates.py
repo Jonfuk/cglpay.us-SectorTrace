@@ -26,6 +26,7 @@ SUMMARY_COLUMNS = {
     "committee_paper": ("report_title", "committee_name", "meeting_date",
                          "match_quality"),
     "foi_request": ("title", "topic", "request_date", "wdtk_status"),
+    "govuk_publication": ("title", "document_type_guess", "confidence"),
 }
 
 

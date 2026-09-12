@@ -48,6 +48,16 @@ def seeded(conn):
         "VALUES ('E10000016', 'https://wdtk.com/request/1', 'Treatment budget', "
         "'drug treatment', 'budget', '2026-08-01T00:00:00Z', 'wdtk_feed_search', "
         "0, 0, 'https://wdtk.com/search', '2026-08-01T00:00:00Z', 200, 'm15', 'listing-hash')")
+    conn.execute(
+        "INSERT INTO govuk_document_candidates (publishing_organisation, candidate_url, "
+        "content_id, base_path, title, document_type_guess, confidence, matched_terms, "
+        "discovered_at, discovery_method, verified, rejected, source_url, retrieved_at, "
+        "http_status, source_system, payload_sha256) VALUES "
+        "('department-of-health-and-social-care', 'https://assets.publishing.service.gov.uk/dhsc.pdf', "
+        "'11111111-1111-1111-1111-111111111111', '/government/publications/dhsc-drug-strategy', "
+        "'DHSC drug strategy', 'policy_paper', 0.75, 'drug', '2026-08-01T00:00:00Z', "
+        "'search:drug', 0, 0, 'https://www.gov.uk/api/content/government/publications/dhsc-drug-strategy', "
+        "'2026-08-01T00:00:00Z', 200, 'm36', 'listing-hash')")
     conn.commit()
     return conn
 
@@ -58,6 +68,17 @@ def document(httpx_mock):
                              content=b"%PDF-1.4 the actual strategy",
                              headers={"content-type": "application/pdf"})
     httpx_mock.add_response(url="https://kent.gov.uk/robots.txt", text="")
+    return httpx_mock
+
+
+@pytest.fixture
+def govuk_document(httpx_mock):
+    httpx_mock.add_response(
+        url="https://assets.publishing.service.gov.uk/dhsc.pdf",
+        content=b"%PDF-1.4 the actual policy paper",
+        headers={"content-type": "application/pdf"})
+    httpx_mock.add_response(
+        url="https://assets.publishing.service.gov.uk/robots.txt", text="")
     return httpx_mock
 
 
@@ -84,6 +105,11 @@ def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
      "ons_code, request_url, source_url, retrieved_at, http_status, "
      "source_system, payload_sha256",
      "'E10000016', 'https://wdtk.com/request/9', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
+    ("govuk_publication_documents",
+     "publishing_organisation, document_url, document_type, source_url, retrieved_at, "
+     "http_status, source_system, payload_sha256",
+     "'department-of-health-and-social-care', 'https://assets.publishing.service.gov.uk/x.pdf', "
+     "'policy_paper', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
 ])
 def test_every_evidence_table_is_guarded(seeded, table, columns, values):
     with pytest.raises(db.IntegrityError, match="without a human"):
@@ -96,6 +122,23 @@ def test_the_guard_is_satisfied_by_a_real_promotion(seeded, settings, document):
                      settings=settings)
 
     assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
+
+
+def test_a_govuk_publication_promotes_with_its_own_provenance(seeded, settings, govuk_document):
+    """The fourth kind (JON-15): same generic path, a national organisation
+    slug standing in for authority_ons_code rather than an ONS code."""
+    promote.promote(
+        seeded, "govuk_publication",
+        "https://assets.publishing.service.gov.uk/dhsc.pdf",
+        promoted_by="Jon", fields={"document_type": "policy_paper"},
+        settings=settings)
+
+    row = seeded.execute("SELECT * FROM govuk_publication_documents").fetchone()
+    assert row["publishing_organisation"] == "department-of-health-and-social-care"
+    assert row["document_type"] == "policy_paper"
+    assert row["title"] == "DHSC drug strategy"
+    assert row["content_id"] == "11111111-1111-1111-1111-111111111111"
+    assert row["payload_sha256"]
 
 
 # --- what promotion refuses ----------------------------------------------------
