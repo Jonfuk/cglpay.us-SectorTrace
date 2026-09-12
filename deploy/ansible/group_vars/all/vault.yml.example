@@ -49,6 +49,7 @@ vault_archive_s3_secret: ""
 # --- Optional module API keys (blank is fine; only that module refuses) -----
 vault_charity_commission_api_key: ""
 vault_companies_house_api_key: ""
+vault_companies_house_streaming_api_key: ""
 vault_cqc_subscription_key: ""
 vault_kaggle_username: ""
 vault_kaggle_key: ""
