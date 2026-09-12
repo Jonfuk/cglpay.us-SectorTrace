@@ -175,4 +175,3 @@ jobs:
           "import transformers; from packaging.version import Version; from
           setfit.compat import default_logdir; v=Version(transformers.__version__);
           assert Version('5.10.4') <= v < Version('6'); assert callable(default_logdir)"
-
