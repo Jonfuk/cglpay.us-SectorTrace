@@ -1051,6 +1051,71 @@ on the public portal.*
 
 ---
 
+### Police recorded crime — drug offences (Module 36)
+
+*Surfaced on the public authority page (BETA-017) as a fourth "Comparators"
+table alongside Modules 29-31, below their own caveat.*
+
+- **This is a comparator, not sector evidence, and it is never combined with
+  the sector's own evidence** — the same rule as Modules 29-31.
+  `docs/CAVEATS.md`'s first rule applies here exactly as everywhere else: no
+  arithmetic across evidence layers.
+- **A recorded drug offence measures policing activity, not drug use.** ONS's
+  own *User Guide to Crime Statistics* states that recorded drug possession
+  offences are "heavily influenced by police activities and priorities" —
+  more stop-and-search or a local enforcement operation raises the count
+  without any change in the population this pipeline's own sector evidence
+  is about. **Never read a figure from this table as a proxy for drug
+  prevalence or unmet treatment need.**
+- **This is not `data.police.uk`.** JON-34 originally proposed that site as a
+  crime comparator; its own street-level open data publishes no geography
+  coarser than LSOA (see
+  [`docs/crime-data-area-level-context-feasibility.md`](crime-data-area-level-context-feasibility.md)).
+  This table instead comes from a separate GOV.UK/Home Office publication,
+  "Police recorded crime and outcomes open data tables", produced under a
+  different pipeline with different quality assurance. The two are not
+  verified to reconcile for the same area and period and must not be treated
+  as interchangeable if `data.police.uk` is ever read by a future module.
+- **"Official statistics, not accredited official statistics"** is the Home
+  Office's own designation for this source (its user guide, verbatim) — a
+  real, weaker category than the "Accredited Official Statistics" some other
+  comparators in this pipeline carry, not a typo or an omission.
+- **A Community Safety Partnership (CSP) is matched to a local authority by
+  exact name only — a CSP with no exact match is not stored.** Most current
+  CSPs are named identically to their local authority; a combined CSP
+  covering more than one authority, a historic pre-reorganisation
+  sub-district CSP, or a Welsh CSP (this source covers England and Wales;
+  `authorities` holds only English authorities) are all expected outcomes of
+  that name not matching, not evidence of a data problem, and are logged once
+  per run to `review_queue` rather than guessed onto a component authority.
+  **Coverage is therefore a subset of England's CSPs**, not all of them.
+- **`offence_subgroup` rows are not summed into a "drug offences" total.**
+  "Possession of drugs" and "Trafficking of drugs" are stored as separate
+  rows because this pipeline computes no total the source itself did not
+  publish at this geography — the same discipline as the Rough Sleeping Data
+  Framework's own sub-population tables.
+- **Comparisons across HMIC's 2014 crime-data-integrity inspections need
+  care.** The Home Office's own user guide states those inspections improved
+  recording accuracy in ways that "led to a discontinuity in several crime
+  types" — a named break in the series, not a gradual drift. This module
+  only reads the current file (financial years 2020/21 onward), which sits
+  entirely after that break, so it does not arise for this table's own data
+  yet; it would if a future backfill read the closed 2003-2020 historical
+  windows the same GOV.UK page also lists.
+- **Only the current, rolling six-year file is read.** The same publication
+  also lists four further, closed historical windows back to year ending
+  March 2003; reading the full series is a real further step, not attempted
+  here (Module 29's own "one source read properly this cycle" discipline).
+- **No small-number suppression marker was found in this file's own
+  structure.** Unlike MHCLG's `[c]`-style convention this pipeline already
+  reads for Modules 30/31, this source's `Offence Count` column carries
+  plain numbers, including zero, with no observed placeholder for a
+  suppressed cell. Treat a very small count with the same care any small-area
+  figure needs, and do not assume a suppression convention that this file
+  has not been seen to use.
+
+---
+
 ## Personal data
 
 Named individuals — tribunal claimants, deceased persons in coroners' reports,

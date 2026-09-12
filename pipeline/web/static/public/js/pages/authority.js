@@ -123,7 +123,7 @@ async function renderOne(main, code) {
   // BETA-076: sticky section index with counts, scroll-spy, back-to-top and
   // ?section= deep links.
   const comparatorCount = ['rough_sleeping', 'statutory_homelessness',
-    'temporary_accommodation'].filter(
+    'temporary_accommodation', 'police_recorded_crime'].filter(
     (k) => (data.comparators?.[k]?.rows || []).length).length;
   const sections = [
     { id: 'coverage', label: 'Coverage' },
@@ -134,7 +134,7 @@ async function renderOne(main, code) {
     { id: 'treatment', label: 'Treatment' },
     { id: 'contracts', label: 'Contracts', count: data.contracts?.total || 0,
       available: (data.contracts?.total || 0) > 0 },
-    { id: 'comparators', label: 'Homelessness comparators', count: comparatorCount,
+    { id: 'comparators', label: 'Comparators', count: comparatorCount,
       available: comparatorCount > 0 },
   ];
   const wb = workbenchNav(page, sections, { routePath: `/authorities/${code}` });
@@ -548,43 +548,47 @@ function renderContracts(container, data, code) {
       }) || el('span', {}))));
 }
 
-// --- comparators (Modules 29-31) ---------------------------------------------
+// --- comparators (Modules 29-31, 36) ------------------------------------------
 
-/* Rough sleeping, statutory homelessness and temporary accommodation —
- * requested and built specifically to sit beside this authority's own
- * substance-misuse evidence, because the two are widely documented as
- * overlapping populations. Three separate tables, three separate caveats,
- * never a combined figure: the whole point of a comparator is that the
- * reader draws the inference, not this page. */
+/* Rough sleeping, statutory homelessness, temporary accommodation and police
+ * recorded crime (drug offences) — requested and built specifically to sit
+ * beside this authority's own substance-misuse evidence, because these are
+ * widely documented as overlapping populations and contexts. Four separate
+ * tables, four separate caveats, never a combined figure: the whole point of
+ * a comparator is that the reader draws the inference, not this page. */
 function renderComparators(container, data) {
   const comparators = data.comparators || {};
   const roughSleeping = comparators.rough_sleeping?.rows || [];
   const statutoryHomelessness = comparators.statutory_homelessness?.rows || [];
   const temporaryAccommodation = comparators.temporary_accommodation?.rows || [];
+  const policeRecordedCrime = comparators.police_recorded_crime?.rows || [];
 
   if (!roughSleeping.length && !statutoryHomelessness.length
-    && !temporaryAccommodation.length) {
+    && !temporaryAccommodation.length && !policeRecordedCrime.length) {
     replace(container, section(
       'Comparators',
-      'Rough sleeping and homelessness figures for this authority, shown '
-      + 'beside its substance-misuse evidence because the two populations '
-      + 'are widely documented to overlap.',
-      noData('rough sleeping and homelessness comparators',
-        './start.sh run m29_rough_sleeping m30_statutory_homelessness m31_temporary_accommodation')));
+      'Rough sleeping, homelessness and police recorded crime figures for '
+      + 'this authority, shown beside its substance-misuse evidence because '
+      + 'these populations and contexts are widely documented to overlap.',
+      noData('comparators',
+        './start.sh run m29_rough_sleeping m30_statutory_homelessness '
+        + 'm31_temporary_accommodation m36_police_recorded_crime')));
     return;
   }
 
   replace(container, section(
     'Comparators',
-    'Rough sleeping and homelessness figures for this authority, shown '
-    + 'beside its substance-misuse evidence above because the two '
-    + 'populations are widely documented to overlap — never combined, '
-    + 'ratioed or scored against it.',
+    'Rough sleeping, homelessness and police recorded crime figures for '
+    + 'this authority, shown beside its substance-misuse evidence above '
+    + 'because these populations and contexts are widely documented to '
+    + 'overlap — never combined, ratioed or scored against it.',
     el('div', { class: 'panel' },
       renderRoughSleeping(roughSleeping, comparators.rough_sleeping?.caveat),
       renderStatutoryHomelessness(statutoryHomelessness,
         comparators.statutory_homelessness?.caveat),
-      renderTemporaryAccommodation(comparators.temporary_accommodation || {}))));
+      renderTemporaryAccommodation(comparators.temporary_accommodation || {}),
+      renderPoliceRecordedCrime(policeRecordedCrime,
+        comparators.police_recorded_crime?.caveat))));
 }
 
 function renderRoughSleeping(rows, caveat) {
@@ -655,5 +659,22 @@ function renderTemporaryAccommodation(comparator) {
       tables: breakdown.length
         ? ['temporary_accommodation_snapshot', 'temporary_accommodation_breakdowns']
         : ['temporary_accommodation_snapshot'],
+    }) || el('span', {}));
+}
+
+function renderPoliceRecordedCrime(rows, caveat) {
+  if (!rows.length) return el('span', {});
+  return el('div', {},
+    el('h3', { class: 'small muted', text: 'Police recorded crime — drug offences (Home Office, quarterly)' }),
+    pinnedCaveat(caveat, 'Read before comparing'),
+    tableCard('Police recorded crime', [
+      { title: 'Financial year', field: 'financial_year', width: 110 },
+      { title: 'Quarter', field: 'financial_quarter', width: 80 },
+      { title: 'Offence subgroup', field: 'offence_subgroup', width: 180 },
+      { title: 'Published count', field: 'offence_count_text', width: 140 },
+      { title: 'Community Safety Partnership', field: 'csp_name', width: 220 },
+    ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
+    provenanceFromRows(rows, {
+      module: 'm36_police_recorded_crime', tables: ['police_recorded_drug_offences'],
     }) || el('span', {}));
 }

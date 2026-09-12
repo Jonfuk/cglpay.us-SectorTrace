@@ -98,6 +98,7 @@ _STATED_CADENCE_DAYS: dict[str, int] = {
     "rough-sleeping": 365,          # "Annual, autumn snapshot"
     "statutory-homelessness": 91,   # "Quarterly"
     "temporary-accommodation": 91,  # "Quarterly"
+    "police-recorded-crime-drug-offences": 91,  # "Quarterly"
 }
 
 
@@ -529,6 +530,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "do); a mention in a board pack is context, never a figure, and is "
         "never attributed to an LA or added to anything. Officer names and "
         "incident detail are held in restricted_ tables.",
+    ),
+    Dataset(
+        "police-recorded-crime-drug-offences", "m36_police_recorded_crime",
+        "Police recorded crime — drug offences (Community Safety Partnership)",
+        "Home Office",
+        "https://www.gov.uk/government/statistical-data-sets/"
+        "police-recorded-crime-and-outcomes-open-data-tables",
+        "comparator", "England — Community Safety Partnership matched to local authority",
+        "Quarterly",
+        ("police_recorded_drug_offences",),
+        "A comparator only. Recorded drug offences reflect police activity and "
+        "priorities, not levels of drug use — never a proxy for treatment need. "
+        "Community Safety Partnerships not matching a single local authority "
+        "by name are not covered. Never combined with the sector's own evidence.",
     ),
     Dataset(
         "open-jobs-shadow", "m35_open_jobs",
