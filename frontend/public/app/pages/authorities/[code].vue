@@ -17,6 +17,7 @@ interface AuthorityWorkspace extends AuthorityResponse {
     rough_sleeping?: { rows?: Row[]; caveat?: string | null }
     statutory_homelessness?: { rows?: Row[]; caveat?: string | null }
     temporary_accommodation?: { rows?: Row[]; breakdown?: Row[]; caveat?: string | null; breakdown_caveat?: string | null }
+    police_recorded_crime?: { rows?: Row[]; caveat?: string | null }
   }
 }
 
@@ -140,6 +141,14 @@ const temporaryBreakdownColumns: Column<Row>[] = [
   { key: 'households_text', label: 'Households' }, { key: 'unit', label: 'Unit' },
   { key: 'source_url', label: 'Source', link: true },
 ]
+const policeRecordedCrimeColumns: Column<Row>[] = [
+  { key: 'financial_year', label: 'Financial year', mono: true },
+  { key: 'financial_quarter', label: 'Quarter', mono: true },
+  { key: 'offence_subgroup', label: 'Offence subgroup' },
+  { key: 'offence_count_text', label: 'Published count' },
+  { key: 'csp_name', label: 'Community Safety Partnership' },
+  { key: 'source_url', label: 'Source', link: true },
+]
 
 const coverageRows = computed<Row[]>(() => (data.value?.coverage?.labels ?? Object.keys(coverageCells.value)).map((dataset) => ({ dataset, rows: coverageCells.value[dataset] ?? null })))
 const indexed = (rows: Row[], prefix: string): Row[] => rows.map((row, index) => ({ ...row, row_key: `${prefix}-${index}-${String(row.financial_year ?? row.time_period ?? row.notice_id ?? '')}` }))
@@ -161,8 +170,9 @@ function holdingLink(dataset: string) {
   return { path: '/coverage', query: { lens: 'history', ons_code: code.value } }
 }
 function caveat(key: string): string | null | undefined { return data.value?.caveats?.[key] }
-function comparatorRows(key: 'rough_sleeping' | 'statutory_homelessness' | 'temporary_accommodation'): Row[] { return data.value?.comparators?.[key]?.rows ?? [] }
-function comparatorCaveat(key: 'rough_sleeping' | 'statutory_homelessness' | 'temporary_accommodation'): string | null | undefined { return data.value?.comparators?.[key]?.caveat }
+type ComparatorKey = 'rough_sleeping' | 'statutory_homelessness' | 'temporary_accommodation' | 'police_recorded_crime'
+function comparatorRows(key: ComparatorKey): Row[] { return data.value?.comparators?.[key]?.rows ?? [] }
+function comparatorCaveat(key: ComparatorKey): string | null | undefined { return data.value?.comparators?.[key]?.caveat }
 
 useHead(() => ({ title: `${name.value} · SectorTrace` }))
 </script>
@@ -211,6 +221,7 @@ useHead(() => ({ title: `${name.value} · SectorTrace` }))
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Rough sleeping</h3><p class="atlas-footnote">The estimation method for each observation is not supplied in this response. Check the source before comparing years or areas.</p><StEvidenceTable caption="Rough sleeping observations" source-details :columns="roughColumns" :rows="indexed(comparatorRows('rough_sleeping'), 'rough')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('rough_sleeping').length" title="No rough-sleeping rows collected" /><StCaveat :text="comparatorCaveat('rough_sleeping')" /></div>
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Statutory homelessness</h3><StEvidenceTable caption="Statutory homelessness observations" source-details :columns="homelessnessColumns" :rows="indexed(comparatorRows('statutory_homelessness'), 'homelessness')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('statutory_homelessness').length" title="No statutory-homelessness rows collected" /><StCaveat :text="comparatorCaveat('statutory_homelessness')" /></div>
           <div class="atlas-panel atlas-panel-body space-y-4"><h3>Temporary accommodation</h3><p class="atlas-footnote">Published contextual totals. No rate, ranking or change between quarters is computed here.</p><StEvidenceTable caption="Temporary accommodation observations" source-details :columns="temporaryColumns" :rows="indexed(comparatorRows('temporary_accommodation'), 'ta')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('temporary_accommodation').length" title="No temporary-accommodation rows collected" /><details v-if="data.comparators?.temporary_accommodation?.breakdown?.length"><summary class="text-sm opacity-70 cursor-pointer">Bed-and-breakfast breakdown</summary><div class="mt-3"><StEvidenceTable caption="Temporary accommodation breakdown" source-details :columns="temporaryBreakdownColumns" :rows="indexed(data.comparators.temporary_accommodation.breakdown, 'ta-breakdown')" row-key="row_key" /></div><StCaveat :text="data.comparators.temporary_accommodation.breakdown_caveat" /></details><StCaveat :text="comparatorCaveat('temporary_accommodation')" /></div>
+          <div class="atlas-panel atlas-panel-body space-y-4"><h3>Police recorded crime — drug offences</h3><p class="atlas-footnote">A recorded drug offence measures police activity and priorities, not levels of drug use. Matched to a Community Safety Partnership by exact name only; partnerships covering more than one authority are not shown.</p><StEvidenceTable caption="Police recorded crime observations" source-details :columns="policeRecordedCrimeColumns" :rows="indexed(comparatorRows('police_recorded_crime'), 'prc')" row-key="row_key" /><StEmptyState v-if="!comparatorRows('police_recorded_crime').length" title="No police recorded crime rows collected" /><StCaveat :text="comparatorCaveat('police_recorded_crime')" /></div>
         </div>
       </section>
       </template>
