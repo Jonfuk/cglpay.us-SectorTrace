@@ -78,3 +78,11 @@ No application tests, browser sessions, database queries, live-source requests, 
 **Result:** JON-63 preparation is complete as a dated read-only reconciliation report. The implementation boundary is not crossed, and no application acceptance is claimed.
 
 **Exact next human action:** Jon Firth should review this crosswalk against the current candidate evidence register, resolve the inaccessible/unmerged documentation PR #119 decision, confirm which historical GitHub issues are superseded or still active, and approve or correct the requirement-to-gate mappings before JON-47 scope acceptance. After candidate freeze, the owner must separately review candidate-specific CI, accessibility, deployment, evidence-safety and release-approval records.
+
+## Addendum — 2026-09-12
+
+This report was reviewed at the 2026-09-09 SHA and accepted (JON-63 closed 2026-09-12). One factual input has since changed and is recorded here rather than by rewriting the accepted report above.
+
+- **PR #119 has merged.** It was open and inaccessible (`403 auth_insufficient_scope`) at review time; it merged into `beta` at `45d0d84` on 2026-09-11, after this report was written and after JON-63 was marked Done. It touches `AGENTS.md`, `CLAUDE.md`, `agent/README.md`, `agent/environments.md`, `agent/preparation-pilots-2026-09-09.md` and `agent/task-template.md` — agent instruction and readiness files, not application code, tests, or the ten V1 gates themselves.
+- **Effect on the crosswalk:** the "Candidate identity and instruction revision" row's caveat ("PR #119 is unmerged and inaccessible") no longer holds. The current `beta` HEAD (`8770531`, which also carries this report via merged PR #124) now includes those instruction/readiness files as merged content. This does not change any gate status in the "Authoritative state observed" section — PR #119 does not touch `beta.md`, `performance.md`, or the frontend redesign docs — so no other row in the crosswalk is affected.
+- **No re-review performed.** This addendum records the status change only. It does not re-inspect PR #119's content for instruction conflicts, does not re-run the boundary/preflight checks, and does not reopen or alter JON-63's Done status. That remains Jon Firth's call, and JON-64/JON-47 scope review should treat PR #119 as merged input going forward.
