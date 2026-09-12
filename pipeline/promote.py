@@ -99,6 +99,21 @@ KINDS: dict[str, dict] = {
         "requires": (),
         "title_column": "title",
     },
+    "govuk_publication": {
+        "candidate_table": "govuk_document_candidates",
+        "target_table": "govuk_publication_documents",
+        # Not an ONS code -- a GOV.UK organisation slug. The generic column
+        # name is kept so this kind needs no special-casing anywhere else in
+        # promote.py or pipeline/web/candidates.py.
+        "authority_column": "publishing_organisation",
+        "candidate_url_column": "candidate_url",
+        "target_url_column": "document_url",
+        "source_system": "govuk_publication_promotion",
+        # document_type is GOV.UK's own content_store vocabulary, but it is
+        # still a guess from this table's point of view -- see migration 0116.
+        "requires": ("document_type",),
+        "title_column": "title",
+    },
 }
 
 
@@ -346,6 +361,12 @@ def _target_fields(kind: str, found: dict, fields: dict) -> dict:
                  "meeting_date": found.get("meeting_date"),
                  "agenda_item_title": found.get("agenda_item_title"),
                  "report_title": found.get("report_title")}
+    if kind == "govuk_publication":
+        return {"title": found.get("title"),
+                 "document_type": fields["document_type"].strip(),
+                 "published_date": (fields.get("published_date") or "").strip() or None,
+                 "content_id": found.get("content_id"),
+                 "base_path": found.get("base_path")}
     return {"subject": found.get("title"),
              "request_date": found.get("request_date"),
              "status": found.get("wdtk_status"),
