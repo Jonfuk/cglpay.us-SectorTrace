@@ -41,6 +41,7 @@ _PUBLICLY_ROUTED: frozenset[str] = frozenset({
     "m25_skills_for_care", "m27_ndtms_monthly", "m28_sar_reports",
     "m29_rough_sleeping", "m30_statutory_homelessness",
     "m31_temporary_accommodation", "m32_sab_site_reviews", "m33_hse_notices",
+    "m33_hse_convictions",
 })
 
 # A documented gap on the source's side, module -> the note a person needs.
@@ -49,6 +50,10 @@ _SOURCE_BLOCKED: dict[str, str] = {
     "m33_hse_notices": "The live-fetch parser has not yet been validated "
                         "against real HSE HTML — first run to be watched by a "
                         "person (docs/SOURCES.md, Module 33).",
+    "m33_hse_convictions": "The live-fetch path is unvalidated and the "
+                        "defendant-name search field code is unconfirmed "
+                        "against the live register — first run to be watched "
+                        "by a person (docs/SOURCES.md, Module 33).",
     "m15_foi": "A robots.txt exception for the WhatDoTheyKnow feed is time-"
                 "limited; see the caveat before treating FOI coverage as "
                 "stable.",

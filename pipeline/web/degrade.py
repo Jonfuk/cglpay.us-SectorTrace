@@ -119,6 +119,11 @@ REQUIREMENTS: dict[str, Requirement] = {
         tables=("hse_enforcement_notices",),
         label="HSE enforcement notices",
     ),
+    "hse_convictions": Requirement(
+        min_migration=116,
+        tables=("hse_enforcement_convictions",),
+        label="HSE convictions register",
+    ),
     "cqc_locations": Requirement(
         min_migration=10,
         tables=("cqc_locations",),
