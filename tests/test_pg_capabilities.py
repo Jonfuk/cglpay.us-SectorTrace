@@ -1,8 +1,8 @@
-"""PostgreSQL extension readiness report (BETA-063).
+"""PostgreSQL extension capability report (BETA-063).
 
 The CLI, admin route, and consistency of the hand-maintained matrix against
 the migration text. The whole suite now runs against PostgreSQL, so the
-extension gate is active in every test.
+capability report is active in every test.
 """
 from __future__ import annotations
 
