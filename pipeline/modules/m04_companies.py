@@ -71,17 +71,66 @@ client, because the register already holds the answers:
     and year of birth as well as the name. Weaker matches are review items.
     Expect no rows: acting while disqualified is a criminal offence, so this
     is a checkable negative rather than a discovery engine.
+
+STREAMING (JON-36). Four Companies House streams -- company, filing-history,
+insolvency-cases, charges -- are a change-notification mechanism only. No
+event's own embedded payload is ever written to a table: a matching event
+only ever triggers the same authoritative REST fetch this module already has
+for that one company number (_refresh_company, or a single-endpoint function
+directly). Four reasons this matters more than the extra REST round trip
+costs:
+
+  1. One writer per resource shape. _fetch_filings/_fetch_insolvency/etc.
+     already carry the pagination, review-item and verbatim-vocabulary
+     discipline docs/CAVEATS.md requires. A second parser reading the
+     stream's embedded data would drift from these over time.
+  2. The event's data is a snapshot at publish time; by the time a bounded
+     batch run gets to it, a fresh REST read is strictly more current and no
+     more expensive than trusting a possibly-stale embedded copy.
+  3. Insolvency and charges both need the same verbatim date-vocabulary
+     split _fetch_insolvency already implements correctly and is tested
+     against -- reusing it is safer than a second implementation.
+  4. This is what "replace repeated change polling" means here: it replaces
+     polling every tracked company on every scheduled run with polling only
+     the companies a stream said changed, whenever it says so. Each notified
+     change still costs one authoritative REST call -- that is the trade,
+     not the elimination of REST calls.
+
+Companies House's own event volume across ~5.5M companies means a bounded
+per-invocation catch-up run only as often as this module's normal schedule
+will not keep pace in any meaningful sense. The intended shape is a second,
+more frequent scheduled invocation (`pipeline run m04_companies
+--stream-only`) alongside the slower full sweep -- see pipeline/cli.py. Off
+by default (COMPANIES_HOUSE_STREAMING_ENABLED); a streaming API key is a
+separate registered application from the REST key above, not interchangeable.
+
+Filing-history events tagged category='accounts' seed a candidate
+(companies_house_accounts_candidates), never evidence directly -- a human
+promotes it through pipeline/promote.py, the same discipline m09/m10/m15's
+candidates already follow. This evidence layer is deliberately named and
+kept structurally separate from m03's charity_commission_filed_accounts: a
+charity's own accounts filed with the Charity Commission and its trading
+subsidiary's statutory accounts filed with Companies House are different
+legal entities' filings under different regimes, and are never merged,
+reconciled or read as duplicates. See docs/CAVEATS.md.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import re
+import time
+from datetime import datetime, timezone
 
 import structlog
 
 from pipeline import db, providers
-from pipeline.http import PipelineHTTPClient
+from pipeline.http import (
+    PipelineHTTPClient,
+    StreamCursorStale,
+    StreamRateLimited,
+    StreamTransientError,
+)
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
 
@@ -91,6 +140,15 @@ SOURCE_SYSTEM = "companies_house"
 API_BASE = "https://api.company-information.service.gov.uk"
 FILINGS_PER_PAGE = 100
 MAX_FILINGS = 200
+CHARGES_PER_PAGE = 25
+
+# JON-36 streaming. Companies House's Streaming API is a separate host from
+# the REST API above, authenticated with its own (separate) key.
+STREAM_BASE = "https://stream.companieshouse.gov.uk"
+STREAM_SOURCE_SYSTEM = "companies_house_streaming"
+ACCOUNTS_SOURCE_SYSTEM = "companies_house_filed_accounts"
+
+_RESOURCE_URI_COMPANY = re.compile(r"^/company/([A-Za-z0-9]+)")
 
 
 def normalise_company_number(raw: str | int) -> str:
@@ -254,16 +312,24 @@ def _fetch_officers(client: PipelineHTTPClient, conn, module_name: str,
 
 
 def _fetch_insolvency(client: PipelineHTTPClient, conn, module_name: str,
-                       company_number: str, profile: dict) -> int:
+                       company_number: str, profile: dict | None, *,
+                       force: bool = False) -> int:
     """Insolvency cases, where the company profile says there are any.
 
     Gated on the profile's own `links.insolvency` rather than probing every
     company: the register tells us where to look, and asking nine companies a
     question eight of them answer 404 to is a request budget spent on nothing.
+
+    `force=True` skips the gate. The insolvency-cases stream consumer passes
+    it: a stream event naming this company on this stream *is* the positive
+    signal the gate otherwise exists to approximate, and there may be no
+    fresh profile to hand at all (the stream names only the company, not its
+    profile).
     """
-    links = profile.get("links") or {}
-    if not (links.get("insolvency") or profile.get("has_insolvency_history")):
-        return 0
+    if not force:
+        links = (profile or {}).get("links") or {}
+        if not (links.get("insolvency") or (profile or {}).get("has_insolvency_history")):
+            return 0
 
     result = client.get(f"{API_BASE}/company/{company_number}/insolvency")
     if not result.ok:
@@ -440,6 +506,361 @@ def _fetch_filings(client: PipelineHTTPClient, conn, module_name: str, company_n
         if start_index >= data.get("total_count", 0):
             break
     return written
+
+
+_CHARGE_DATE_FIELDS = (
+    "acquired_on", "created_on", "delivered_on",
+    "satisfied_on", "resolved_on", "covering_instrument_date",
+)
+
+
+def _charge_ref(item: dict, company_number: str) -> str:
+    self_link = (item.get("links") or {}).get("self") or ""
+    ref = self_link.rstrip("/").rpartition("/")[2]
+    if ref:
+        return ref
+    # No id in the register response: derive a stable one the same way
+    # _officer_ref/company_psc's psc_ref already do, so a re-run stays
+    # idempotent.
+    basis = f"{company_number}|{item.get('created_on')}|{(item.get('classification') or {}).get('description')}"
+    return "H" + hashlib.sha256(basis.encode()).hexdigest()[:16]
+
+
+def _fetch_charges(client: PipelineHTTPClient, conn, module_name: str,
+                    company_number: str, profile: dict | None, *,
+                    force: bool = False) -> int:
+    """Charges register (mortgages, debentures and the like registered
+    against a company) -- new in JON-36, run unconditionally on every
+    ordinary sweep regardless of whether streaming is ever turned on.
+
+    Gated on the profile's own `links.charges`, the same pattern
+    `_fetch_insolvency` uses for `links.insolvency` -- unless `force=True`,
+    which the charges-stream consumer passes, since the event is itself the
+    positive signal.
+
+    VERIFY BEFORE SHIPPING: `CHARGES_PER_PAGE` and the field names below
+    (`persons_entitled` shape, the exact set of date fields a charge
+    carries) are taken from Companies House's published documentation, not a
+    freshly captured live response. Confirm against a real
+    `/company/{number}/charges` call before relying on this in production --
+    the ticket's own opening instruction is to verify current source shape
+    first.
+    """
+    if not force:
+        links = (profile or {}).get("links") or {}
+        if not links.get("charges"):
+            return 0
+
+    written = 0
+    start_index = 0
+    while True:
+        result = client.get(f"{API_BASE}/company/{company_number}/charges",
+                             params={"items_per_page": CHARGES_PER_PAGE, "start_index": start_index})
+        if not result.ok:
+            if result.status_code == 404:
+                return written  # no charges register for this company; not an error
+            db.record_review_item(conn, module_name, "company_charges_unavailable", company_number,
+                                   json.dumps({"status": result.status_code}))
+            return written
+        data = json.loads(result.body)
+        items = data.get("items", [])
+        for item in items:
+            charge_ref = _charge_ref(item, company_number)
+            classification = item.get("classification") or {}
+            persons = item.get("persons_entitled") or []
+            db.upsert(conn, "company_charges", {
+                "company_number": company_number,
+                "charge_ref": charge_ref,
+                "classification_type": classification.get("type"),
+                "classification_description": classification.get("description"),
+                "status": item.get("status"),
+                "charge_code": item.get("charge_code"),
+                "particulars": (item.get("particulars") or {}).get("description"),
+                "persons_entitled": ", ".join(
+                    p["name"] for p in persons if p.get("name")) or None,
+                **_provenance(result),
+            }, natural_key=["company_number", "charge_ref"])
+            written += 1
+
+            for date_type in _CHARGE_DATE_FIELDS:
+                value = item.get(date_type)
+                if value:
+                    db.upsert(conn, "company_charge_dates", {
+                        "company_number": company_number,
+                        "charge_ref": charge_ref,
+                        "date_type": date_type,
+                        "date_value": value,
+                    }, natural_key=["company_number", "charge_ref", "date_type"])
+
+        total_count = data.get("total_count", 0)
+        start_index += len(items)
+        if not items or start_index >= total_count:
+            return written
+
+
+def _refresh_company(client: PipelineHTTPClient, conn, module_name: str,
+                      company_number: str, provider_key: str | None,
+                      match_basis: str, *, filings_limit: int | None = None) -> dict | None:
+    """One company's full authoritative refresh -- profile, previous names,
+    officers, filings, insolvency, PSC, charges.
+
+    Shared by the REST sweep's per-company loop and by every streaming
+    consumer, so a company reached by either route is written through
+    exactly one code path. See the module docstring's STREAMING section for
+    why a stream event never writes anything itself.
+    """
+    data = _fetch_company(client, conn, module_name, company_number, provider_key, match_basis)
+    if data is None:
+        return None
+
+    # Only write an identifier back for entities whose link to the provider
+    # came from an authoritative cross-reference, never from a name match —
+    # otherwise a same-named unrelated company would become a permanent (if
+    # unverified) part of the group.
+    if provider_key is not None:
+        providers.record_discovered_identifier(
+            conn, provider_key, "company_number", company_number,
+            discovered_by=module_name, role=data.get("type"))
+
+    officers, directors = _fetch_officers(client, conn, module_name, company_number)
+    filings = _fetch_filings(client, conn, module_name, company_number, filings_limit)
+    insolvency_cases = _fetch_insolvency(client, conn, module_name, company_number, data)
+    psc = _fetch_psc(client, conn, module_name, company_number)
+    charges = _fetch_charges(client, conn, module_name, company_number, data)
+    return {
+        "data": data,
+        "directors": directors,
+        "officers": officers,
+        "filings": filings,
+        "insolvency_cases": insolvency_cases,
+        "psc": psc,
+        "charges": charges,
+    }
+
+
+# --- streaming discovery (JON-36) -------------------------------------------
+#
+# See the module docstring's STREAMING section for the design rationale.
+# Each consumer below is a thin binding of one stream name to the existing
+# fetch function it triggers on a match; _consume_stream owns the actual
+# connect/checkpoint/error-handling loop.
+
+def _known_company_numbers(conn) -> set[str]:
+    """Every company already in `companies`, any match_basis -- worth
+    watching for future changes even before a human confirms a name-only
+    match, since the company row itself is real data either way."""
+    return {row["company_number"] for row in
+            conn.execute("SELECT company_number FROM companies")}
+
+
+def _company_number_from_resource_uri(resource_uri: str | None) -> str | None:
+    """'/company/12345678/filing-history/...' -> '12345678'. Cheap and
+    common to all four streams; avoids inspecting a whole event body just to
+    decide whether it is worth acting on."""
+    if not resource_uri:
+        return None
+    m = _RESOURCE_URI_COMPANY.match(resource_uri)
+    return normalise_company_number(m.group(1)) if m else None
+
+
+def _record_stream_event(conn, stream: str, event, resource_uri: str | None,
+                          company_number: str | None) -> None:
+    """The one row that satisfies exact-byte provenance for the triggering
+    notification itself, independent of whatever REST fetch it causes.
+    Called only for a matched event whose bytes the caller has already
+    archived via `client.archive_line`.
+    """
+    envelope = event.data or {}
+    event_meta = envelope.get("event") or {}
+    db.upsert(conn, "company_stream_events", {
+        "stream": stream,
+        "timepoint": event_meta.get("timepoint"),
+        "resource_kind": envelope.get("resource_kind"),
+        "resource_uri": resource_uri,
+        "event_type": event_meta.get("type"),
+        "company_number": company_number,
+        "source_url": f"{STREAM_BASE}{resource_uri}" if resource_uri else f"{STREAM_BASE}/{stream}",
+        "retrieved_at": event.received_at.isoformat(),
+        "http_status": 200,
+        "source_system": STREAM_SOURCE_SYSTEM,
+        "payload_sha256": hashlib.sha256(event.raw).hexdigest(),
+    }, natural_key=["stream", "timepoint"])
+
+
+def _consume_stream(client: PipelineHTTPClient, conn, module_name: str, stream: str,
+                     known: set[str], settings, on_match) -> dict:
+    """Open (or reopen, up to `companies_house_stream_max_reconnects` times)
+    a connection at the checkpointed timepoint for one stream, and for every
+    event naming a company this pipeline already tracks: archive the raw
+    line, record it, and call `on_match(company_number, event_data)`.
+
+    Progress is checkpointed (`module_cursors`, key
+    `m04_companies:stream:<stream>`) after a clean pass and before returning
+    on any of the three handled failure modes, so a partial run's real
+    progress is never discarded. One stream's failure never aborts the
+    other three -- each is a separate call from `run()`.
+    """
+    cursor_key = f"m04_companies:stream:{stream}"
+    stats = {"scanned": 0, "matched": 0, "reconnects": 0, "parse_failures": 0}
+    reconnects_left = settings.companies_house_stream_max_reconnects
+
+    while True:
+        cursor = db.get_cursor(conn, cursor_key)
+        params = ({"timepoint": cursor[len("TIMEPOINT:"):]}
+                  if cursor and cursor.startswith("TIMEPOINT:") else None)
+        last_timepoint = None
+        try:
+            for event in client.stream_events(
+                    f"{STREAM_BASE}/{stream}", params=params,
+                    max_events=settings.companies_house_stream_max_events,
+                    max_seconds=settings.companies_house_stream_max_seconds):
+                stats["scanned"] += 1
+                if event.parse_error:
+                    stats["parse_failures"] += 1
+                    db.record_parse_failure(
+                        conn, module_name, "companies_house_stream_event",
+                        event.raw.decode("utf-8", "replace")[:500], event.parse_error,
+                        f"{STREAM_BASE}/{stream}")
+                    # No timepoint could be read from an unparseable line, so
+                    # the cursor cannot skip past it -- a persistently
+                    # malformed line would stall this stream at that point
+                    # until it is cleared by hand. Expected to be vanishingly
+                    # rare against a first-party government API.
+                    continue
+
+                envelope = event.data or {}
+                resource_uri = envelope.get("resource_uri")
+                number = _company_number_from_resource_uri(resource_uri)
+                timepoint = (envelope.get("event") or {}).get("timepoint")
+
+                if number is not None and number in known:
+                    stats["matched"] += 1
+                    client.archive_line(event.raw)
+                    _record_stream_event(conn, stream, event, resource_uri, number)
+                    on_match(number, envelope)
+                    conn.commit()
+
+                if timepoint is not None:
+                    last_timepoint = timepoint
+
+            if last_timepoint is not None:
+                db.set_cursor(conn, cursor_key, f"TIMEPOINT:{last_timepoint}")
+                conn.commit()
+            return stats  # budget reached, or a clean end of the connection
+
+        except StreamCursorStale:
+            db.record_review_item(
+                conn, module_name, "companies_house_stream_cursor_stale", stream,
+                json.dumps({"note": "Companies House's streaming retention window is "
+                            "undocumented; the cursor is reset to start from now rather "
+                            "than guessing a replacement timepoint -- any change "
+                            "published in the gap is unrecoverable and not backfilled"}))
+            db.set_cursor(conn, cursor_key, "")
+            conn.commit()
+            log.warning("companies.stream_cursor_stale", stream=stream)
+            return stats
+
+        except StreamRateLimited as exc:
+            if last_timepoint is not None:
+                db.set_cursor(conn, cursor_key, f"TIMEPOINT:{last_timepoint}")
+                conn.commit()
+            # Do not busy-wait inside a foreground pipeline run: stop
+            # consuming this stream for this run and let the next scheduled
+            # invocation retry from the checkpoint above.
+            log.warning("companies.stream_rate_limited", stream=stream,
+                        retry_after=exc.retry_after)
+            return stats
+
+        except StreamTransientError:
+            if last_timepoint is not None:
+                db.set_cursor(conn, cursor_key, f"TIMEPOINT:{last_timepoint}")
+                conn.commit()
+            reconnects_left -= 1
+            stats["reconnects"] += 1
+            log.warning("companies.stream_transient_error", stream=stream,
+                        reconnects_left=reconnects_left)
+            if reconnects_left <= 0:
+                return stats
+            time.sleep(settings.companies_house_stream_connect_retry_wait_seconds)
+            continue
+
+
+def _consume_company_stream(rest_client: PipelineHTTPClient, stream_client: PipelineHTTPClient,
+                             conn, module_name: str, known: set[str], settings) -> dict:
+    def on_match(number, _envelope):
+        row = conn.execute(
+            "SELECT provider_key, match_basis FROM companies WHERE company_number = %s",
+            (number,)).fetchone()
+        if row is None:
+            return
+        _refresh_company(rest_client, conn, module_name, number,
+                          row["provider_key"], row["match_basis"])
+    return _consume_stream(stream_client, conn, module_name, "companies", known, settings, on_match)
+
+
+def _seed_accounts_candidates(conn, company_number: str) -> int:
+    """After `_fetch_filings` has refreshed `company_filings` for this
+    company, pick up any 'accounts'-category filing not yet a candidate.
+
+    Reads from `company_filings` rather than the raw stream event: the REST
+    re-fetch just ran and is the authoritative copy, and this makes the
+    function work identically whether it was called after a stream event or
+    any future one-off backfill, with no dependence on the event's own shape.
+    """
+    rows = conn.execute(
+        "SELECT transaction_id, filing_date, description, subcategory, document_url "
+        "FROM company_filings WHERE company_number = %s AND category = 'accounts' "
+        "AND document_url IS NOT NULL", (company_number,)).fetchall()
+    written = 0
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    for row in rows:
+        # The candidate's own payload_sha256 hashes a synthetic identity
+        # string, not fetched bytes -- the candidate was never itself
+        # "fetched" as a document, the same "candidate provenance is the
+        # listing, not the document" pattern the three existing promote.py
+        # kinds already use. The real document bytes are only hashed once a
+        # human promotes it, via pipeline/promote.py.
+        identity = f"{company_number}|{row['transaction_id']}"
+        db.upsert(conn, "companies_house_accounts_candidates", {
+            "company_number": company_number,
+            "candidate_url": row["document_url"],
+            "transaction_id": row["transaction_id"],
+            "filing_date": row["filing_date"],
+            "description": row["description"],
+            "accounts_type": row["subcategory"],
+            "discovered_at": now,
+            "discovery_method": "filing_history_stream",
+            "source_url": f"{API_BASE}/company/{company_number}/filing-history/{row['transaction_id']}",
+            "retrieved_at": now,
+            "http_status": 200,
+            "source_system": ACCOUNTS_SOURCE_SYSTEM,
+            "payload_sha256": hashlib.sha256(identity.encode()).hexdigest(),
+        }, natural_key=["company_number", "candidate_url"],
+           preserve=("verified", "rejected", "verified_at"))
+        written += 1
+    return written
+
+
+def _consume_filing_stream(rest_client: PipelineHTTPClient, stream_client: PipelineHTTPClient,
+                            conn, module_name: str, known: set[str], settings) -> dict:
+    def on_match(number, _envelope):
+        _fetch_filings(rest_client, conn, module_name, number, limit=None)
+        _seed_accounts_candidates(conn, number)
+    return _consume_stream(stream_client, conn, module_name, "filings", known, settings, on_match)
+
+
+def _consume_insolvency_stream(rest_client: PipelineHTTPClient, stream_client: PipelineHTTPClient,
+                                conn, module_name: str, known: set[str], settings) -> dict:
+    def on_match(number, _envelope):
+        _fetch_insolvency(rest_client, conn, module_name, number, profile=None, force=True)
+    return _consume_stream(stream_client, conn, module_name, "insolvency-cases", known, settings, on_match)
+
+
+def _consume_charges_stream(rest_client: PipelineHTTPClient, stream_client: PipelineHTTPClient,
+                             conn, module_name: str, known: set[str], settings) -> dict:
+    def on_match(number, _envelope):
+        _fetch_charges(rest_client, conn, module_name, number, profile=None, force=True)
+    return _consume_stream(stream_client, conn, module_name, "charges", known, settings, on_match)
 
 
 # --- disqualified directors ---------------------------------------------------
@@ -726,24 +1147,69 @@ def _search_candidates(client: PipelineHTTPClient, conn, module_name: str,
     return accepted
 
 
+def _run_streams(rest_client: PipelineHTTPClient, stream_client: PipelineHTTPClient,
+                  conn, module_name: str, settings) -> None:
+    """The four stream consumers, over the companies this pipeline already
+    tracks. Shared by `--stream-only` and by the tail of an ordinary sweep
+    when streaming is enabled.
+
+    Two clients, deliberately: `stream_client` (the streaming key) only ever
+    reads events and archives the odd matched line; every authoritative
+    write goes through `rest_client` (the REST key) via the same fetch
+    functions the ordinary sweep uses. Companies House states the two keys
+    are separate registered applications and are not interchangeable, so a
+    stream-triggered REST call must never ride on the streaming client's
+    auth.
+    """
+    known = _known_company_numbers(conn)
+    for consume in (_consume_company_stream, _consume_filing_stream,
+                    _consume_insolvency_stream, _consume_charges_stream):
+        stats = consume(rest_client, stream_client, conn, module_name, known, settings)
+        log.info("companies.stream_consumed", fn=consume.__name__, **stats)
+
+
 @register_module(
     "m04_companies",
     supports_since=False,
     depends_on=("m03_charity_finance", "m05_cqc",),
     depends_note="both publish company numbers into provider_identifiers; without them every name match stays unconfirmed",
-    since_note="company profiles and officer lists are current-state snapshots, not a dated stream",
+    since_note="company profiles and officer lists are current-state snapshots, not a dated stream. "
+               "Streaming timepoints (module_cursors, keys 'm04_companies:stream:<name>') are a "
+               "separate resumability mechanism from --since and are unaffected by it.",
+    supports_source=True,
+    source_note="--stream-only runs just the bounded streaming catch-up (companies/filings/"
+                "insolvency/charges) and skips the full REST sweep; see pipeline/cli.py.",
 )
 def run(ctx: ModuleContext) -> None:
     module_name = "m04_companies"
     conn = ctx.conn
-    api_key = ctx.settings.require_companies_house_key()
     providers.seed_providers(conn, commit=not ctx.dry_run)
+
+    if ctx.source == "stream":
+        # --stream-only: frequent, cheap catch-up. Skips the full REST sweep
+        # entirely -- see the module docstring's STREAMING section for why
+        # this is meant to be scheduled far more often than the normal run.
+        if not ctx.settings.companies_house_streaming_enabled:
+            log.info("companies.stream_disabled",
+                      note="COMPANIES_HOUSE_STREAMING_ENABLED is false; nothing to do")
+            return
+        api_key = ctx.settings.require_companies_house_key()
+        streaming_key = ctx.settings.require_companies_house_streaming_key()
+        with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as rest_client, \
+             PipelineHTTPClient(STREAM_SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as stream_client:
+            rest_client.set_basic_auth(api_key, "")
+            stream_client.set_basic_auth(streaming_key, "")
+            _run_streams(rest_client, stream_client, conn, module_name, ctx.settings)
+        return
+
+    api_key = ctx.settings.require_companies_house_key()
 
     companies_written = 0
     officers_written = 0
     filings_written = 0
     insolvency_cases = 0
     psc_written = 0
+    charges_written = 0
     serving_directors: list[dict] = []
 
     with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as client:
@@ -767,29 +1233,17 @@ def run(ctx: ModuleContext) -> None:
             return
 
         for provider_key, company_number, match_basis in ctx.track(targets, "companies"):
-            data = _fetch_company(client, conn, module_name, company_number, provider_key, match_basis)
-            if data is None:
+            refreshed = _refresh_company(client, conn, module_name, company_number,
+                                          provider_key, match_basis, filings_limit=ctx.limit)
+            if refreshed is None:
                 continue
             companies_written += 1
-
-            # Only write an identifier back for entities whose link to the
-            # provider came from an authoritative cross-reference, never from
-            # a name match — otherwise a same-named unrelated company would
-            # become a permanent (if unverified) part of the group.
-            if provider_key is not None:
-                providers.record_discovered_identifier(
-                    conn, provider_key, "company_number", company_number,
-                    discovered_by=module_name,
-                    role=data.get("type"),
-                )
-
-            officers, directors = _fetch_officers(client, conn, module_name, company_number)
-            officers_written += officers
-            serving_directors.extend(directors)
-            filings_written += _fetch_filings(client, conn, module_name, company_number, ctx.limit)
-            insolvency_cases += _fetch_insolvency(
-                client, conn, module_name, company_number, data)
-            psc_written += _fetch_psc(client, conn, module_name, company_number)
+            officers_written += refreshed["officers"]
+            serving_directors.extend(refreshed["directors"])
+            filings_written += refreshed["filings"]
+            insolvency_cases += refreshed["insolvency_cases"]
+            psc_written += refreshed["psc"]
+            charges_written += refreshed["charges"]
 
             if not ctx.dry_run:
                 conn.commit()
@@ -802,10 +1256,26 @@ def run(ctx: ModuleContext) -> None:
         if not ctx.dry_run:
             conn.commit()
 
+    if ctx.settings.companies_house_streaming_enabled:
+        # Fresh clients, not the REST one above (which is already closed by
+        # here): stream-sourced rows must carry
+        # source_system="companies_house_streaming", not "companies_house",
+        # and the streaming key is a separate registered application from
+        # the REST key -- see _run_streams's docstring for why both are
+        # opened even though only one call site (the REST sweep) is active.
+        ctx.phase("consuming Companies House streams")
+        streaming_key = ctx.settings.require_companies_house_streaming_key()
+        with PipelineHTTPClient(SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as rest_client, \
+             PipelineHTTPClient(STREAM_SOURCE_SYSTEM, settings=ctx.settings, conn=conn) as stream_client:
+            rest_client.set_basic_auth(api_key, "")
+            stream_client.set_basic_auth(streaming_key, "")
+            _run_streams(rest_client, stream_client, conn, module_name, ctx.settings)
+
     log.info("companies.run_complete", companies=companies_written,
               officers=officers_written, filings=filings_written,
               insolvency_cases=insolvency_cases,
               psc=psc_written,
+              charges=charges_written,
               serving_directors_checked=len(serving_directors),
               disqualifications=disqualifications,
               unconfirmed_disqualification_names=unconfirmed)

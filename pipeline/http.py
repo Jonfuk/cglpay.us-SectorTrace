@@ -43,6 +43,45 @@ class RobotsDisallowed(Exception):
     """robots.txt forbids fetching this URL for our user agent."""
 
 
+class StreamCursorStale(Exception):
+    """The streaming source no longer holds the requested timepoint (416).
+
+    Companies House does not publish how long it retains its backlog, so a
+    stale cursor is a real, permanent gap -- not a hint to guess a nearby
+    replacement. The caller resets its checkpoint to start fresh from now and
+    records the gap as a review item; it never invents a replacement
+    timepoint.
+    """
+
+
+class StreamRateLimited(Exception):
+    """The streaming source answered 429. Carries `retry_after` (seconds)
+    when the response sent one.
+
+    Companies House documents a mandatory 60-second wait before reconnecting
+    and an escalating IP block for repeat violations, so a caller must not
+    busy-wait inside a foreground pipeline run -- stop consuming this stream
+    for the run and let the next scheduled invocation retry from the last
+    checkpoint.
+    """
+
+    def __init__(self, message: str, retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+class StreamTransientError(Exception):
+    """A connect-phase failure that persisted past the retry budget, or any
+    failure once the response body had already started streaming.
+
+    Deliberately never retried automatically once inside the body: only the
+    caller knows the last *confirmed-processed* timepoint to reconnect from,
+    and retrying here would either replay events already handled or silently
+    skip the caller's own checkpoint bookkeeping. Reconnection is the
+    caller's job -- call `stream_events` again with an updated `timepoint`.
+    """
+
+
 def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, httpx.TransportError):
         return True
@@ -175,6 +214,30 @@ class StreamedFetchResult:
             raise httpx.HTTPStatusError(
                 f"{self.status_code} for {self.url}", request=None, response=None  # type: ignore[arg-type]
             )
+
+
+@dataclass
+class StreamEvent:
+    """One line from a Companies House streaming connection.
+
+    `raw` is the exact bytes of the line (newline stripped) -- what gets
+    hashed and archived, through `archive_line`, when a caller decides the
+    event is worth keeping. That is what satisfies the same "SHA-256 of the
+    exact bytes" provenance rule an ordinary `get()` gets automatically, for
+    a source this pipeline never gets as a normal request/response. Blank
+    keep-alive lines the source sends between events are consumed by
+    `stream_events` and never reach here -- they are not events and must
+    never count toward a caller's `max_events` budget.
+
+    `data` is `None` and `parse_error` is set when the line was not valid
+    JSON: NULL-first, the same discipline as everywhere else in this
+    pipeline, rather than raising and losing the whole connection over one
+    malformed line.
+    """
+    raw: bytes
+    data: dict | None
+    parse_error: str | None
+    received_at: datetime
 
 
 class _RequestCounter:
@@ -886,6 +949,166 @@ class PipelineHTTPClient:
             )
         finally:
             spool.close()
+
+    def _check_robots_and_reserve(self, url: str) -> str:
+        """The robots/override/rate-limit preamble every fetch method shares.
+        Returns the host, already reserved on the shared clock."""
+        if not self._robots.can_fetch(url):
+            override = self.settings.robots_override_for(url)
+            if override is None:
+                raise RobotsDisallowed(
+                    f"robots.txt disallows fetching {url} as {self.settings.user_agent!r}")
+            log.warning("http.robots_override", url=url, allowed_by=override,
+                        source_system=self.source_system)
+            if self.conn is not None and override not in self._overrides_recorded:
+                self._overrides_recorded.add(override)
+                db.record_review_item(
+                    self.conn, self.source_system, "robots_override_in_use", override,
+                    json.dumps({"note": "robots.txt disallows this prefix; fetched under an "
+                                        "explicit exception in Settings.robots_exceptions",
+                                "user_agent": self.settings.user_agent}))
+        host = urlparse(url).netloc
+        self._rate_limiter.wait(host)
+        return host
+
+    def stream_events(
+        self,
+        url: str,
+        *,
+        params: dict | None = None,
+        headers: dict | None = None,
+        max_events: int | None = None,
+        max_seconds: float | None = None,
+        idle_timeout_seconds: float = 90.0,
+        connect_retry_attempts: int = 3,
+        connect_retry_wait_seconds: float = 10.0,
+    ) -> Iterator[StreamEvent]:
+        """Consume a bounded slice of a long-lived, newline-delimited-JSON
+        streaming connection (Companies House's Streaming API; nothing else
+        in this pipeline talks to a source shaped like this).
+
+        This is deliberately not `get()`/`get_streaming()`: those are one
+        request with one response, archived and cached as a unit. A stream
+        connection is indefinite, carries no ETag, and this pipeline only
+        ever wants a bounded slice of it per invocation -- so there is no
+        conditional-request cache entry, no whole-body archive (the caller
+        decides per *event* whether to keep it, via `archive_line`), and the
+        one `HOST_CLOCK` reservation covers opening the connection, not each
+        line read from it.
+
+        Stops and returns (a normal generator exit, not an exception) once
+        `max_events` or `max_seconds` is reached -- reaching budget is
+        success, not failure. A connect-phase failure (before any response
+        headers arrive) is retried up to `connect_retry_attempts` times,
+        `connect_retry_wait_seconds` apart -- the ticket's "~10s backoff for
+        other transient errors", scoped to connecting only. A 416 raises
+        `StreamCursorStale`, a 429 raises `StreamRateLimited`. A failure
+        *after* the body has started streaming raises `StreamTransientError`
+        immediately, with no retry inside this call -- see that exception's
+        docstring for why reconnecting is the caller's job.
+        """
+        self._ensure_db_live()
+        self._check_robots_and_reserve(url)
+        request_url = str(httpx.URL(url, params=params)) if params else url
+
+        response = None
+        ctx = None
+        attempt = 0
+        while response is None:
+            attempt += 1
+            try:
+                ctx = self._client.stream(
+                    "GET", url, params=params, headers=headers or {},
+                    timeout=httpx.Timeout(30.0, read=idle_timeout_seconds))
+                candidate = ctx.__enter__()
+            except httpx.TransportError as exc:
+                if attempt >= connect_retry_attempts:
+                    raise StreamTransientError(
+                        f"could not connect to {request_url} after {attempt} "
+                        f"attempt(s): {exc}") from exc
+                time.sleep(connect_retry_wait_seconds)
+                continue
+
+            if candidate.status_code == 416:
+                ctx.__exit__(None, None, None)
+                raise StreamCursorStale(
+                    f"{request_url} answered 416 -- the requested timepoint is stale")
+            if candidate.status_code == 429:
+                retry_after_header = candidate.headers.get("Retry-After")
+                try:
+                    retry_after = float(retry_after_header) if retry_after_header else None
+                except ValueError:
+                    retry_after = None
+                ctx.__exit__(None, None, None)
+                raise StreamRateLimited(f"{request_url} answered 429", retry_after=retry_after)
+            if candidate.status_code >= 500:
+                ctx.__exit__(None, None, None)
+                if attempt >= connect_retry_attempts:
+                    raise StreamTransientError(
+                        f"{request_url} answered {candidate.status_code} after "
+                        f"{attempt} attempt(s)")
+                time.sleep(connect_retry_wait_seconds)
+                continue
+            if candidate.status_code >= 400:
+                ctx.__exit__(None, None, None)
+                raise StreamTransientError(f"{request_url} answered {candidate.status_code}")
+            response = candidate
+
+        log.info("http.stream_events_open", url=request_url, source_system=self.source_system)
+        events_yielded = 0
+        started = time.monotonic()
+        close_reason = "eof"
+        buffer = b""
+        try:
+            try:
+                for chunk in response.iter_bytes():
+                    buffer += chunk
+                    while b"\n" in buffer:
+                        line, buffer = buffer.split(b"\n", 1)
+                        line = line.strip(b"\r")
+                        if not line:
+                            continue  # keep-alive; not an event
+                        received_at = datetime.now(timezone.utc)
+                        try:
+                            data = json.loads(line)
+                            parse_error = None
+                        except json.JSONDecodeError as exc:
+                            data = None
+                            parse_error = str(exc)
+                        yield StreamEvent(raw=line, data=data, parse_error=parse_error,
+                                           received_at=received_at)
+                        events_yielded += 1
+                        if max_events is not None and events_yielded >= max_events:
+                            close_reason = "max_events"
+                            return
+                        if (max_seconds is not None
+                                and (time.monotonic() - started) >= max_seconds):
+                            close_reason = "max_seconds"
+                            return
+            except httpx.TransportError as exc:
+                close_reason = type(exc).__name__
+                raise StreamTransientError(
+                    f"{request_url} disconnected after {events_yielded} event(s): "
+                    f"{exc}") from exc
+        finally:
+            log.info("http.stream_events_close", url=request_url,
+                      source_system=self.source_system, events_yielded=events_yielded,
+                      elapsed_seconds=round(time.monotonic() - started, 3),
+                      reason=close_reason)
+            ctx.__exit__(None, None, None)
+
+    def archive_line(self, raw: bytes, *, content_type: str = "application/x-ndjson") -> tuple[str, str]:
+        """Archive exactly one already-consumed stream event's bytes, through
+        the same content-addressed backend `get()`/`post()` use.
+
+        The one new *public* surface a module needs to write to the archive
+        for a source `get()` never touches -- no conditional-request cache
+        entry is written (an event carries no ETag to revalidate against).
+        Returns `(sha256, archived_ref)`.
+        """
+        sha256 = hashlib.sha256(raw).hexdigest()
+        archived = self._archive_body(raw, sha256, content_type)
+        return sha256, archived.logical_path
 
     def post(
         self,

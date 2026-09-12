@@ -212,6 +212,42 @@ anyone using it.
   publishes. A company whose PSC register is redacted answers with a
   statement: `psc_register_statement` review items mean the absence of rows
   is a redaction, not a finding.
+- **Charge status (`company_charges.status`) is Companies House's own word,
+  never a boolean (JON-36).** `outstanding`, `satisfied`, `part-satisfied` and
+  whatever else the register publishes are kept verbatim. `company_charge_dates`
+  keeps the register's own per-charge date field names the same way
+  `company_insolvency_case_dates` keeps its own — `created_on`, `delivered_on`,
+  `satisfied_on` and so on are distinct published facts, not stages of one
+  invented lifecycle.
+- **The four Companies House streams (company, filing-history, insolvency-cases,
+  charges) are a change-notification mechanism only.** No stream event's own
+  payload is ever the source of a written row — a matching event only ever
+  triggers the same authoritative REST fetch this module already makes for
+  that company. `company_stream_events` records the triggering notification's
+  own exact bytes separately from whatever REST fetch it caused.
+- **The streaming API's timepoint retention window is undocumented by
+  Companies House.** A checkout left un-run longer than that window gets a
+  416, which becomes a `companies_house_stream_cursor_stale` review item and a
+  cursor reset to "now" — never a silent backfill or a guessed replacement
+  timepoint. Any change published during the gap is unrecoverable through this
+  mechanism, and that gap is not detectable after the fact from the data
+  alone; the review item is the only record of it.
+- **On a 429, the affected stream stops for that run rather than waiting.**
+  Companies House documents a mandatory 60-second wait before reconnecting;
+  this pipeline does not hold a foreground run open for it. The next scheduled
+  run resumes from the last checkpointed timepoint.
+- **`companies_house_accounts_candidates`/`_documents` are a fourth,
+  structurally separate evidence layer from `charity_accounts_documents`
+  (Module 3) and must never be merged, reconciled or read as duplicates of
+  it.** A charity's own accounts filed with the Charity Commission and its
+  trading subsidiary's statutory accounts filed with Companies House are
+  different legal entities' filings under different regimes; the fact that
+  both may describe entities behind the same provider is not license to
+  combine their figures. A filing tagged `accounts` by Companies House's own
+  category is a pointer nobody has opened, exactly like the m09/m10/m15
+  candidates it copies the discipline from — it requires the same human
+  promotion (`pipeline/promote.py`) before it is evidence, and this module
+  does not extract or compute any figure from the promoted document.
 
 ### CQC (Module 5)
 

@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import json
 import re
+import time
 
+import httpx
 import pytest
+from pytest_httpx import IteratorStream
 
-from pipeline import providers
+from pipeline import db, providers
+from pipeline.http import PipelineHTTPClient
 from pipeline.modules import m04_companies as ch
 from pipeline.registry import ModuleContext
 
@@ -13,6 +18,11 @@ def _allow_all_robots(httpx_mock) -> None:
     httpx_mock.add_response(
         url="https://api.company-information.service.gov.uk/robots.txt",
         status_code=200, text="", is_reusable=True)
+
+
+def _allow_stream_robots(httpx_mock) -> None:
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/robots.txt", status_code=200, text="", is_reusable=True)
 
 
 @pytest.fixture
@@ -154,11 +164,14 @@ def _register_company_mocks(httpx_mock, number="03861209"):
             {"transaction_id": "t1", "date": "2025-06-01", "category": "accounts",
              "description": "accounts-with-accounts-type-group"},
         ]})
-    # The disqualification sweep runs for every serving director. An empty
-    # register answer is the normal case and is what these tests want.
+    # The disqualification sweep runs for every serving director, but only
+    # from run()'s own end-of-sweep call -- a test that exercises
+    # _refresh_company directly (JON-36's streaming consumers) never reaches
+    # it, hence is_optional=True. An empty register answer is the normal case
+    # and is what the run()-based tests want.
     httpx_mock.add_response(
         url=re.compile(rf"{base}/search/disqualified-officers.*"),
-        json={"total_results": 0, "items": []}, is_reusable=True)
+        json={"total_results": 0, "items": []}, is_reusable=True, is_optional=True)
     # The PSC pass (Phase 15 / G3) fetches the register for every company.
     # An empty register is the normal fixture state; the PSC-specific tests
     # register a richer payload BEFORE this helper so their rule wins the
@@ -502,3 +515,397 @@ def test_psc_pagination_reads_the_whole_register(httpx_mock, settings, conn):
     ch.run(ctx)
 
     assert conn.execute("SELECT COUNT(*) c FROM company_psc").fetchone()["c"] == 2
+
+
+# --- charges (JON-36) -----------------------------------------------------------
+
+def _seed_tracked_company(conn, company_number="03861209", provider_key="change_grow_live",
+                           name="CHANGE, GROW, LIVE", match_basis="seed") -> None:
+    """A company already in `companies`, as if a prior sweep had already run
+    -- the state company_charges/company_insolvency_cases' foreign key
+    requires, and every stream consumer test starts from."""
+    providers.seed_providers(conn)
+    db.upsert(conn, "companies", {
+        "company_number": company_number,
+        "provider_key": provider_key,
+        "company_name": name,
+        "company_status": "active",
+        "company_type": None,
+        "date_of_creation": None,
+        "date_of_cessation": None,
+        "sic_codes": None,
+        "registered_address": None,
+        "jurisdiction": None,
+        "match_basis": match_basis,
+        "source_url": "https://api.company-information.service.gov.uk/company/" + company_number,
+        "retrieved_at": "2026-01-01T00:00:00+00:00",
+        "http_status": 200,
+        "source_system": ch.SOURCE_SYSTEM,
+        "payload_sha256": "seed-fixture",
+    }, natural_key=["company_number"])
+    conn.commit()
+
+
+def _charges_payload(number="03861209"):
+    return {
+        "total_count": 1,
+        "items": [{
+            "links": {"self": f"/company/{number}/charges/charge1"},
+            "classification": {"type": "charge-description", "description": "A registered charge"},
+            "status": "outstanding",
+            "created_on": "2020-01-01",
+            "delivered_on": "2020-01-05",
+            "persons_entitled": [{"name": "Big Bank Plc"}],
+        }],
+    }
+
+
+def test_fetch_charges_preserves_status_vocabulary_verbatim(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _seed_tracked_company(conn)
+    httpx_mock.add_response(
+        url=re.compile(r".*/company/03861209/charges.*"), json=_charges_payload())
+
+    client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    written = ch._fetch_charges(client, conn, "m04_companies", "03861209",
+                                 profile={"links": {"charges": "/company/03861209/charges"}})
+    client.close()
+
+    assert written == 1
+    row = conn.execute("SELECT * FROM company_charges").fetchone()
+    # Never collapsed to a boolean "is_satisfied" -- Companies House's own word.
+    assert row["status"] == "outstanding"
+    assert row["persons_entitled"] == "Big Bank Plc"
+    dates = {d["date_type"]: d["date_value"]
+             for d in conn.execute("SELECT * FROM company_charge_dates").fetchall()}
+    assert dates == {"created_on": "2020-01-01", "delivered_on": "2020-01-05"}
+
+
+def test_fetch_charges_gated_on_profile_links_unless_forced(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _seed_tracked_company(conn)
+    client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+
+    # No links.charges -> no request at all (nothing mocked, none consumed).
+    written = ch._fetch_charges(client, conn, "m04_companies", "03861209", profile={})
+    assert written == 0
+    assert conn.execute("SELECT COUNT(*) c FROM company_charges").fetchone()["c"] == 0
+
+    httpx_mock.add_response(
+        url=re.compile(r".*/company/03861209/charges.*"), json=_charges_payload())
+    written = ch._fetch_charges(client, conn, "m04_companies", "03861209", profile=None, force=True)
+    client.close()
+    assert written == 1
+
+
+def test_fetch_insolvency_force_bypasses_the_profile_gate(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _seed_tracked_company(conn)
+    httpx_mock.add_response(
+        url=re.compile(r".*/company/03861209/insolvency.*"),
+        json={"cases": [{"number": "1", "type": "administration", "dates": [], "practitioners": []}]})
+
+    client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    written = ch._fetch_insolvency(client, conn, "m04_companies", "03861209", profile=None, force=True)
+    client.close()
+
+    assert written == 1
+    assert conn.execute("SELECT case_type FROM company_insolvency_cases").fetchone()["case_type"] == "administration"
+
+
+# --- streaming discovery (JON-36) ------------------------------------------------
+
+def test_company_stream_event_for_tracked_company_triggers_refresh(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _allow_stream_robots(httpx_mock)
+    _seed_tracked_company(conn)
+
+    event = {"resource_uri": "/company/03861209", "resource_kind": "company-profile",
+              "event": {"type": "changed", "timepoint": 5}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/companies",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+    _register_company_mocks(httpx_mock)  # the authoritative REST refresh this triggers
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_company_stream(
+        rest_client, stream_client, conn, "m04_companies", {"03861209"}, settings)
+    rest_client.close()
+    stream_client.close()
+
+    assert stats["matched"] == 1
+    # The authoritative REST fetch actually ran -- the event's own payload
+    # (which carried no company_name at all) was never trusted.
+    row = conn.execute("SELECT * FROM companies WHERE company_number='03861209'").fetchone()
+    assert row["company_name"] == "CHANGE, GROW, LIVE"
+    stream_event = conn.execute("SELECT * FROM company_stream_events").fetchone()
+    assert stream_event["stream"] == "companies"
+    assert stream_event["timepoint"] == 5
+    assert db.get_cursor(conn, "m04_companies:stream:companies") == "TIMEPOINT:5"
+
+
+def test_company_stream_event_for_untracked_company_is_ignored_and_not_archived(
+        httpx_mock, settings, conn):
+    _allow_stream_robots(httpx_mock)
+    event = {"resource_uri": "/company/99999999", "resource_kind": "company-profile",
+              "event": {"type": "changed", "timepoint": 5}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/companies",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_company_stream(
+        rest_client, stream_client, conn, "m04_companies", set(), settings)
+    rest_client.close()
+    stream_client.close()
+
+    assert stats["scanned"] == 1
+    assert stats["matched"] == 0
+    assert conn.execute("SELECT COUNT(*) c FROM company_stream_events").fetchone()["c"] == 0
+    # The cursor still advances on an unmatched event -- consumption must not
+    # replay the whole firehose every run just because nothing matched.
+    assert db.get_cursor(conn, "m04_companies:stream:companies") == "TIMEPOINT:5"
+
+
+def test_filing_stream_updates_company_filings_and_seeds_an_accounts_candidate_only(
+        httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _allow_stream_robots(httpx_mock)
+    _seed_tracked_company(conn)
+
+    event = {"resource_uri": "/company/03861209/filing-history/t1",
+              "resource_kind": "filing-history", "event": {"type": "changed", "timepoint": 7}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/filings",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+    base = "https://api.company-information.service.gov.uk"
+    httpx_mock.add_response(
+        url=re.compile(rf"{base}/company/03861209/filing-history.*"),
+        json={"total_count": 2, "items": [
+            {"transaction_id": "t1", "date": "2025-06-01", "category": "accounts",
+             "subcategory": "accounts-with-accounts-type-group", "description": "Accounts",
+             "links": {"document_metadata":
+                       "https://document-api.company-information.service.gov.uk/document/abc"}},
+            {"transaction_id": "t2", "date": "2025-06-02", "category": "confirmation-statement",
+             "description": "Confirmation statement",
+             "links": {"document_metadata":
+                       "https://document-api.company-information.service.gov.uk/document/def"}},
+        ]})
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_filing_stream(
+        rest_client, stream_client, conn, "m04_companies", {"03861209"}, settings)
+    rest_client.close()
+    stream_client.close()
+
+    assert stats["matched"] == 1
+    assert conn.execute("SELECT COUNT(*) c FROM company_filings").fetchone()["c"] == 2
+
+    candidates = conn.execute("SELECT * FROM companies_house_accounts_candidates").fetchall()
+    assert len(candidates) == 1
+    assert candidates[0]["accounts_type"] == "accounts-with-accounts-type-group"
+    assert candidates[0]["candidate_url"] == \
+        "https://document-api.company-information.service.gov.uk/document/abc"
+    # A candidate is a pointer nobody has opened -- never evidence directly.
+    assert conn.execute(
+        "SELECT COUNT(*) c FROM companies_house_accounts_documents").fetchone()["c"] == 0
+
+
+def test_filing_stream_reseeding_never_resets_a_human_decision(httpx_mock, settings, conn):
+    """A filing re-seen on a later event must not silently reopen a
+    candidate a person already promoted or rejected."""
+    _allow_all_robots(httpx_mock)
+    _allow_stream_robots(httpx_mock)
+    _seed_tracked_company(conn)
+
+    event = {"resource_uri": "/company/03861209/filing-history/t1",
+              "resource_kind": "filing-history", "event": {"type": "changed", "timepoint": 9}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/filings",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+    base = "https://api.company-information.service.gov.uk"
+    httpx_mock.add_response(
+        url=re.compile(rf"{base}/company/03861209/filing-history.*"),
+        json={"total_count": 1, "items": [
+            {"transaction_id": "t1", "date": "2025-06-01", "category": "accounts",
+             "subcategory": "accounts-with-accounts-type-group", "description": "Accounts",
+             "links": {"document_metadata":
+                       "https://document-api.company-information.service.gov.uk/document/abc"}},
+        ]})
+
+    # As if an earlier run had already discovered and seeded this filing --
+    # matching what the mocked REST re-fetch above will also produce, so the
+    # stream-triggered reseed below hits the natural-key conflict rather than
+    # inserting a fresh row.
+    db.upsert(conn, "company_filings", {
+        "company_number": "03861209", "transaction_id": "t1", "filing_date": "2025-06-01",
+        "category": "accounts", "subcategory": "accounts-with-accounts-type-group",
+        "description": "Accounts",
+        "document_url": "https://document-api.company-information.service.gov.uk/document/abc",
+        "source_url": "https://x", "retrieved_at": "2026-01-01T00:00:00+00:00",
+        "http_status": 200, "source_system": ch.SOURCE_SYSTEM, "payload_sha256": "x",
+    }, natural_key=["company_number", "transaction_id"])
+    ch._seed_accounts_candidates(conn, "03861209")
+    conn.execute(
+        "UPDATE companies_house_accounts_candidates SET verified = 1, "
+        "verified_at = '2026-01-01T00:00:00+00:00' WHERE company_number = '03861209'")
+    conn.commit()
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    ch._consume_filing_stream(rest_client, stream_client, conn, "m04_companies", {"03861209"}, settings)
+    rest_client.close()
+    stream_client.close()
+
+    row = conn.execute("SELECT * FROM companies_house_accounts_candidates").fetchone()
+    assert row["verified"] == 1
+
+
+def test_insolvency_stream_event_bypasses_the_rest_gate_via_force(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _allow_stream_robots(httpx_mock)
+    _seed_tracked_company(conn)
+
+    event = {"resource_uri": "/company/03861209/insolvency", "resource_kind": "insolvency",
+              "event": {"type": "changed", "timepoint": 11}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/insolvency-cases",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+    httpx_mock.add_response(
+        url=re.compile(r".*/company/03861209/insolvency.*"),
+        json={"cases": [{"number": "1", "type": "administration", "dates": [], "practitioners": []}]})
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_insolvency_stream(
+        rest_client, stream_client, conn, "m04_companies", {"03861209"}, settings)
+    rest_client.close()
+    stream_client.close()
+
+    assert stats["matched"] == 1
+    assert conn.execute("SELECT COUNT(*) c FROM company_insolvency_cases").fetchone()["c"] == 1
+
+
+def test_charges_stream_event_bypasses_the_rest_gate_via_force(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    _allow_stream_robots(httpx_mock)
+    _seed_tracked_company(conn)
+
+    event = {"resource_uri": "/company/03861209/charges", "resource_kind": "charges",
+              "event": {"type": "changed", "timepoint": 13}}
+    httpx_mock.add_response(
+        url=f"{ch.STREAM_BASE}/charges",
+        stream=IteratorStream([json.dumps(event).encode() + b"\n"]))
+    httpx_mock.add_response(
+        url=re.compile(r".*/company/03861209/charges.*"), json=_charges_payload())
+
+    rest_client = PipelineHTTPClient(ch.SOURCE_SYSTEM, settings=settings, conn=conn)
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_charges_stream(
+        rest_client, stream_client, conn, "m04_companies", {"03861209"}, settings)
+    rest_client.close()
+    stream_client.close()
+
+    assert stats["matched"] == 1
+    assert conn.execute("SELECT COUNT(*) c FROM company_charges").fetchone()["c"] == 1
+
+
+def test_stream_cursor_stale_resets_cursor_and_queues_a_review_item(httpx_mock, settings, conn):
+    _allow_stream_robots(httpx_mock)
+    # A regex, not a plain string: the checkpointed cursor below means the
+    # actual request carries a ?timepoint=100 query string.
+    httpx_mock.add_response(url=re.compile(rf"{re.escape(ch.STREAM_BASE)}/filings.*"), status_code=416)
+    db.set_cursor(conn, "m04_companies:stream:filings", "TIMEPOINT:100")
+    conn.commit()
+
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    stats = ch._consume_stream(
+        stream_client, conn, "m04_companies", "filings", set(), settings, lambda n, e: None)
+    stream_client.close()
+
+    assert stats["matched"] == 0
+    assert db.get_cursor(conn, "m04_companies:stream:filings") == ""
+    review = conn.execute(
+        "SELECT * FROM review_queue WHERE item_type='companies_house_stream_cursor_stale'").fetchall()
+    assert len(review) == 1
+    assert review[0]["raw_value"] == "filings"
+
+
+def test_rate_limited_stream_returns_promptly_without_busy_waiting(httpx_mock, settings, conn):
+    """Companies House documents a mandatory 60-second wait before
+    reconnecting after a 429 -- this pipeline must not sit inside that wait
+    on a foreground run."""
+    _allow_stream_robots(httpx_mock)
+    httpx_mock.add_response(url=f"{ch.STREAM_BASE}/filings", status_code=429,
+                             headers={"Retry-After": "60"})
+
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=settings, conn=conn)
+    started = time.monotonic()
+    stats = ch._consume_stream(
+        stream_client, conn, "m04_companies", "filings", set(), settings, lambda n, e: None)
+    elapsed = time.monotonic() - started
+    stream_client.close()
+
+    assert stats["matched"] == 0
+    assert elapsed < 5  # nowhere near the documented 60-second wait
+    assert db.get_cursor(conn, "m04_companies:stream:filings") is None
+
+
+def test_transient_error_reconnects_up_to_the_configured_limit_then_gives_up(
+        httpx_mock, settings, conn):
+    _allow_stream_robots(httpx_mock)
+    # Reusable rather than a fixed count: what this test verifies is that
+    # _consume_stream gives up after exactly companies_house_stream_max_reconnects
+    # attempts, not the precise number of underlying HTTP connect attempts
+    # stream_events' own connect_retry_attempts happens to make along the way.
+    httpx_mock.add_exception(
+        httpx.ConnectError("boom"), url=f"{ch.STREAM_BASE}/filings", is_reusable=True)
+
+    stream_settings = settings.model_copy(update={
+        "companies_house_stream_connect_retry_attempts": 1,
+        "companies_house_stream_connect_retry_wait_seconds": 0.01,
+        "companies_house_stream_max_reconnects": 2,
+    })
+    stream_client = PipelineHTTPClient(ch.STREAM_SOURCE_SYSTEM, settings=stream_settings, conn=conn)
+    stats = ch._consume_stream(
+        stream_client, conn, "m04_companies", "filings", set(), stream_settings, lambda n, e: None)
+    stream_client.close()
+
+    assert stats["reconnects"] == 2
+
+
+def test_streaming_disabled_by_default_and_run_is_unaffected(httpx_mock, settings, conn):
+    _allow_all_robots(httpx_mock)
+    providers.seed_providers(conn)
+    providers.record_discovered_identifier(
+        conn, "change_grow_live", "company_number", "03861209", discovered_by="test")
+    httpx_mock.add_response(url=re.compile(r".*/search/companies.*"), json={"items": []}, is_reusable=True)
+    _register_company_mocks(httpx_mock)
+
+    assert settings.companies_house_streaming_enabled is False
+    ctx = ModuleContext(conn=conn, settings=settings, since=None, dry_run=False, limit=None)
+    ch.run(ctx)  # would fail if it tried to reach STREAM_BASE -- nothing is mocked there
+
+    assert conn.execute("SELECT COUNT(*) c FROM company_stream_events").fetchone()["c"] == 0
+
+
+def test_stream_only_skips_the_rest_sweep_entirely(httpx_mock, settings, conn):
+    stream_settings = settings.model_copy(update={
+        "companies_house_streaming_enabled": True,
+        "companies_house_streaming_api_key": "test-stream-key",
+    })
+    _allow_stream_robots(httpx_mock)
+    for stream in ("companies", "filings", "insolvency-cases", "charges"):
+        httpx_mock.add_response(url=f"{ch.STREAM_BASE}/{stream}", stream=IteratorStream([b""]))
+
+    ctx = ModuleContext(conn=conn, settings=stream_settings, since=None, dry_run=False,
+                         limit=None, source="stream")
+    ch.run(ctx)
+
+    # The REST sweep's own identity-discovery step would have hit the REST
+    # host; --stream-only never runs it at all.
+    rest_requests = [r for r in httpx_mock.get_requests() if str(r.url).startswith(ch.API_BASE)]
+    assert rest_requests == []
