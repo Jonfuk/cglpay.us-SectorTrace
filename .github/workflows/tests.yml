@@ -42,7 +42,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9  # v7
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78  # v7
         with:
           enable-cache: true
 
@@ -175,3 +175,4 @@ jobs:
           "import transformers; from packaging.version import Version; from
           setfit.compat import default_logdir; v=Version(transformers.__version__);
           assert Version('5.10.4') <= v < Version('6'); assert callable(default_logdir)"
+
