@@ -530,6 +530,24 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "against real HSE HTML -- see the module docstring.",
     ),
     Smoke(
+        module="m33_hse_convictions",
+        produces=("hse_enforcement_convictions", "review_queue"),
+        signal=(("hse_enforcement_convictions", "result"),
+                ("hse_enforcement_convictions", "legislation")),
+        limit=None,
+        note="The provider-name shape (m18, m33_hse_notices): one HSE "
+              "convictions-register breach-list search per tracked-provider "
+              "name variant. A --limit run does not make sense -- the "
+              "register returns the whole match set per name -- so this "
+              "ignores it. Whether it writes any hse_enforcement_convictions "
+              "row at all depends on whether any tracked provider has ever "
+              "been convicted, so a run that only produces review_queue "
+              "near-miss items is still a working run. Neither the live-fetch "
+              "path nor the defendant-name search field code has been "
+              "validated against the real register -- see the module "
+              "docstring.",
+    ),
+    Smoke(
         module="m34_icb_board_papers",
         produces=("integrated_care_boards", "icb_site_crawls", "review_queue"),
         signal=(("integrated_care_boards", "name"),
