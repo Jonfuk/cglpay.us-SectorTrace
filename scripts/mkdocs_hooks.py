@@ -87,6 +87,7 @@ UNPUBLISHED = (
     "m15-alaveteli-feed-feasibility.md",
     "mysociety-access-request.md",
     "m34-icb-board-papers.md",
+    "mysociety-identifier-mappings-feasibility.md",
     "ohid-ndtms-contextual-indicators.md",
     "public-portal-ui-spec.md",
     "public-ui-refinement-backlog.md",
