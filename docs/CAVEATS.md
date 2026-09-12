@@ -1051,6 +1051,69 @@ on the public portal.*
 
 ---
 
+### 360Giving grants (Module 36)
+
+*Feasibility and access-term detail: `docs/m36-360giving-grantnav-feasibility.md`.
+Reads only `api.threesixtygiving.org`, a separate and newer API from
+GrantNav's own retired bulk endpoints — do not extend this module toward
+GrantNav's HTML search, which `robots.txt` disallows.*
+
+- **Never summed with any other finance-layer module.** A grant a tracked
+  provider received is not commissioning income and is never added to,
+  compared as a ratio with, or combined in any way with `m01` contract
+  value, `m11` public health grant allocations, or `m13` local authority
+  budgets. Different populations, different reference periods, a different
+  publisher for every row — the same rule this file states once at the top
+  and repeats per source rather than assumes is remembered.
+- **A floor over voluntary publication, not a picture of a provider's grant
+  income.** 360Giving publication is voluntary; a funder who has never
+  published to the standard is invisible here, and a provider's row count
+  can only ever be a floor, the same "capture, not a census" caveat
+  `m23_sector_universe` carries for its own universe. Absence of a row for a
+  provider is absence from what has been published, never a statement that
+  the provider received no grants.
+- **Scoped to the tracked providers, never the whole 360Giving corpus.**
+  This module looks up each tracked provider's own charity/company numbers
+  and asks the API for that organisation's grants; it does not walk or store
+  any part of the ~450,000-organisation universe the API otherwise exposes.
+- **A provider can appear under either identifier scheme, and this module
+  records which one found each row.** Confirmed live: the same real
+  organisation (Change Grow Live) is filed as `GB-CHC-1079327` on one grant
+  and `GB-COH-03861209` on another. `matched_scheme`/`matched_identifier`
+  say which of a provider's own numbers this particular row came from;
+  `provider_key` is set only through that identifier match, never through a
+  counterparty name.
+- **`data_license` is per row, not per module, and genuinely varies.**
+  Counted directly against the 360Giving Data Registry: predominantly CC BY
+  4.0, with OGL v3.0, CC BY-SA 4.0 and CC0 also live. Read
+  `data_license_name`/`data_license_url` off the row being quoted, not a
+  single licence for the table.
+- **`award_date_raw` is kept verbatim because publishers do not agree on a
+  format** — a bare `2023-03-22` from one funder, a full
+  `2020-05-29T00:00:00+00:00` timestamp from another, for grants to the same
+  recipient. `award_date` is a best-effort `YYYY-MM-DD` reading of the same
+  string and is `NULL` when it cannot be parsed; the raw column never is.
+- **A source field can contain garbage, and it is stored as published, not
+  repaired.** One live grant's own `postalCode` field literally reads
+  "Change Grow Live" — a publisher data-entry error, not a parsing fault.
+  This pipeline's general discipline applies: store what the source said.
+- **`date_modified` is present on some grants and absent on others**, even
+  from the same publisher, and is never defaulted to the fetch time or to
+  `award_date` when missing.
+- **A grant that stops appearing on a later run is left as stored, not
+  deleted.** The API has no incremental/changed-since signal and a
+  publisher can withdraw a dataset; this pipeline does not infer that a
+  now-absent grant was withdrawn versus simply not returned this run — the
+  same "absence is not evidence of removal" discipline the CDP-documents
+  entry above states for a comparable case. A confirmed take-down is a
+  manual operator action, not an automatic one.
+- **Not surfaced on the public portal yet.** The table is collected and
+  catalogued (`/api/v1/catalogue` reports its row count like any other
+  dataset) but there is no dedicated provider-page section for it in this
+  pass — a separate decision from whether the data is collected at all.
+
+---
+
 ## Personal data
 
 Named individuals — tribunal claimants, deceased persons in coroners' reports,

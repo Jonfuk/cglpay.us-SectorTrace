@@ -543,6 +543,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "catalogue, query and export projections until separately approved.",
         operator_only=True,
     ),
+    Dataset(
+        "360giving-grants", "m36_360giving",
+        "360Giving grants received and made",
+        "360Giving (multiple funders, via the 360Giving API)",
+        "https://www.360giving.org/",
+        "finance", "Not geographic — the tracked provider set",
+        "Ad hoc",
+        ("three_sixty_giving_grants",),
+        "Voluntarily published grant data, scoped to the tracked providers' "
+        "own charity/company numbers, never the whole 360Giving corpus. A "
+        "provider's grants here are a floor over what funders chose to "
+        "publish, not its total grant income, and are never summed with "
+        "procurement or public health grant figures from another module.",
+    ),
 )
 
 
