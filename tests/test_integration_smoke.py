@@ -497,6 +497,26 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "spec above.",
     ),
     Smoke(
+        module="m36_multiple_disadvantage",
+        produces=("multiple_disadvantage_snapshot",),
+        signal=(("multiple_disadvantage_snapshot", "quarter_label"),
+                ("multiple_disadvantage_snapshot", "assessed_md_total_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="A separate attachment on the same evergreen page m30 already "
+              "fetches, not a sheet in m30's own Table A1 workbook -- "
+              "discovery is shared code (imported from "
+              "m30_statutory_homelessness, passed this module's own title "
+              "regex), so this smoke test also indirectly exercises that "
+              "parameterisation. assessed_md_total_text is the signal, not "
+              "the numeric column, for the same [x]/[z]-placeholder reason "
+              "as m30's own smoke spec above. This is a very recently "
+              "launched product (13 August 2026) with only three published "
+              "editions at the time this was written, so --limit 2 covers "
+              "most of its current history rather than a small slice of it.",
+    ),
+    Smoke(
         module="m32_sab_site_reviews",
         produces=("sab_site_crawls", "review_queue"),
         signal=(("sab_site_crawls", "status"), ("sab_site_crawls", "pages_fetched")),

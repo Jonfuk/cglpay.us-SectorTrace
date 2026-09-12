@@ -979,6 +979,84 @@ every other section on the page already uses, not a missing section.*
   than one sheet name would match after stripping is refused rather than
   guessed at.
 
+### Multiple Disadvantage Detailed Local Authority Data (Module 36)
+
+*Not yet surfaced on the public authority page's "Comparators" section
+(BETA-017) alongside Modules 29-31 — collected and catalogued, but the
+portal wiring is a separate follow-up. See
+`docs/m30-multiple-disadvantage-feasibility.md` for the source verification
+this module was built from.*
+
+- **This is a comparator, not sector evidence, and it is never combined
+  with the sector's own evidence** — the same rule as Modules 29-31, for
+  the same reason (documented overlap between the homelessness and
+  substance-misuse populations).
+- **This is H-CLIC housing-assessment administrative data, not clinical or
+  treatment data, despite one column reading "substance dependency".** The
+  flag is a support-need/referral checkbox MHCLG derives from existing
+  H-CLIC fields at homelessness assessment — "Drug dependency needs" or
+  "Alcohol dependency needs" as a recorded support need — not an NDTMS
+  treatment episode or a clinical diagnosis. **Never read this module's
+  rows against this pipeline's own NDTMS/Fingertips substance-misuse
+  figures (Modules 7, 12, 27)** — the word "substance" appearing in a
+  column header here is exactly the kind of coincidence the project's
+  first CAVEATS rule (no arithmetic across evidence layers) exists to
+  guard against.
+- **The five disadvantage-category totals are not mutually exclusive, and
+  summing them wildly exceeds the qualifying total — do not reassemble one
+  from the other.** Qualifying for "multiple disadvantage" requires three
+  or more of five flags (homelessness/rough sleeping, substance dependence,
+  mental health, domestic abuse, criminal justice contact), so a single
+  qualifying household is counted in at least three of the five category
+  columns at once. Confirmed against the January-March 2026 edition's own
+  England row: the qualifying total is 7,340, but its five category
+  columns sum to 67,650 — over nine times the total. Each category column
+  answers "how many multiple-disadvantage households have this flag among
+  their three-plus", never "households whose only disadvantage is this
+  one."
+- **`md_pct` is MHCLG's own published metric and this pipeline never
+  recomputes it.** Its own footnote states it can legitimately exceed
+  100%: it is a proxy of inflow and outflow across the quarter, not a
+  simple ratio of the two totals stored beside it, and those two totals
+  should not be divided against each other to reproduce or check it.
+- **A duty-outcome total here is a subset of Module 30's own Table A1
+  total for the same quarter, not an independent count.** Presenting the
+  two side by side as a proportion is exactly the source's own published
+  metric (`md_pct`); computing a different proportion by dividing this
+  module's total by Module 30's own stored `total_owed_duty` would
+  silently recompute a rate the source already publishes, from two
+  independently-fetched, independently-revised tables that may not be
+  from the same edition at read time.
+- **`Multiple_Disadvantage_values` (Table 1)'s other three columns are
+  deliberately not read.** Confirmed by comparing real editions: they
+  exactly duplicate the qualifying total already stored from each of the
+  three stage sheets (`assessed_md_total`, `prevention_secured_md_total`,
+  `relief_secured_md_total`). Reading them again would not be additional
+  coverage.
+- **`[x]` (missing data, non-submission) and `[z]` (not applicable) are
+  kept verbatim in each field's paired `_text` column with the numeric
+  column `NULL`.** Neither means zero. This source publishes no `[n]`/`[c]`
+  equivalent (confirmed by scanning every cell of all three currently-
+  published editions) — unlike Module 30's Table A1, there is **no
+  small-number-suppression marker in this file at all**, so genuine
+  single-digit local-authority counts are published as published, not
+  rounded or withheld.
+- **England/region totals are rounded to the nearest 10; local-authority
+  figures are not.** The source states this itself ("Total figures are
+  presented rounded to the nearest 10 households... Totals may not equal
+  the sum of components because of rounding") — do not expect an
+  authority's own exact figures to sum to a rounded regional total.
+- **This is a very recently launched product (13 August 2026) with three
+  quarters of history, all released at once.** There is no earlier
+  edition to discover beyond what the evergreen page currently attaches —
+  unlike Modules 7/27's own backfill discovery, no collection-walk is
+  applicable here because MHCLG has not yet published anything before its
+  own launch date.
+- **A local authority code not in this pipeline's `authorities` table is
+  logged to `review_queue` as `multiple_disadvantage_unmatched_authority`,
+  not silently dropped** — the same reorganisation-reconciliation gap
+  Modules 29-31 have, unrelated to this module's own parsing.
+
 ### HSE enforcement notices (Module 33)
 
 *Surfaced through `/api/v1/safety`. Only notices whose recipient name exactly

@@ -516,6 +516,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "own evidence.",
     ),
     Dataset(
+        "multiple-disadvantage", "m36_multiple_disadvantage",
+        "Multiple Disadvantage Detailed Local Authority Data",
+        "Ministry of Housing, Communities and Local Government",
+        "https://www.gov.uk/government/collections/homelessness-statistics",
+        "comparator", "England — local authority",
+        "Quarterly",
+        ("multiple_disadvantage_snapshot",),
+        "A comparator only, despite one column reading 'substance "
+        "dependency': this is H-CLIC housing-assessment data, not clinical "
+        "or treatment data, and is never combined with the sector's own "
+        "evidence. The five disadvantage-category totals are not mutually "
+        "exclusive and sum to several times the qualifying total.",
+    ),
+    Dataset(
         "icb-board-papers", "m34_icb_board_papers",
         "Integrated Care Board governance documents",
         "The 42 Integrated Care Boards' own websites",

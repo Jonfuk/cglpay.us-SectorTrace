@@ -297,14 +297,23 @@ def to_float(raw: str) -> float | None:
         return None
 
 
-def parse_quarter_title(title: str) -> tuple[str, int, str] | None:
+def parse_quarter_title(
+    title: str, title_re: re.Pattern = TITLE_RE
+) -> tuple[str, int, str] | None:
     """(quarter_start 'YYYY-MM-01', year, quarter_label) from a matching
     attachment title, or None if the title is not a quarterly LA-level
     file this module reads (financial-year summaries, Multiple
     Disadvantage tables, and "- Accessible" duplicates all correctly
     return None — see `TITLE_RE`).
+
+    `title_re` defaults to this module's own `TITLE_RE` but is a parameter
+    rather than a hardcoded global so Module 36 (Multiple Disadvantage,
+    which shares this fetch — see `discover_publications`) can pass its own
+    `MD_TITLE_RE` through the same quarter/year/label parsing instead of
+    duplicating it. Both regexes must keep the same three capture groups
+    (start month, end month, year) for this to work.
     """
-    m = TITLE_RE.match((title or "").strip())
+    m = title_re.match((title or "").strip())
     if not m:
         return None
     start_month, _end_month, year = m.group(1), m.group(2), int(m.group(3))
@@ -314,10 +323,21 @@ def parse_quarter_title(title: str) -> tuple[str, int, str] | None:
     return quarter_start, year, quarter_label
 
 
-def discover_publications(client: PipelineHTTPClient) -> list[dict]:
+def discover_publications(
+    client: PipelineHTTPClient, title_re: re.Pattern = TITLE_RE
+) -> list[dict]:
     """Every quarterly LA-level attachment on the one evergreen page,
     deduplicated to one file per quarter (a "(revised)" edition wins over
-    the original where both exist)."""
+    the original where both exist).
+
+    `title_re` lets a sibling module reuse this one content-API fetch
+    against its own attachment title convention rather than duplicating the
+    fetch-and-group-by-quarter logic — Module 36's Multiple Disadvantage
+    files live on this exact page (confirmed live; see
+    `docs/m30-multiple-disadvantage-feasibility.md`) and share this
+    module's "(revised)" convention, so passing `MD_TITLE_RE` here is the
+    whole of what that module needs from this function.
+    """
     content = client.get(CONTENT_URL)
     if not content.ok:
         raise StatutoryHomelessnessParseError(
@@ -326,7 +346,7 @@ def discover_publications(client: PipelineHTTPClient) -> list[dict]:
     attachments = json.loads(content.body).get("details", {}).get("attachments", [])
     by_quarter: dict[str, dict] = {}
     for attachment in attachments:
-        parsed = parse_quarter_title(attachment.get("title") or "")
+        parsed = parse_quarter_title(attachment.get("title") or "", title_re)
         if parsed is None:
             continue
         quarter_start, year, quarter_label = parsed

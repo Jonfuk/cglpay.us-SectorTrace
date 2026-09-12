@@ -75,6 +75,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
+| `m36_multiple_disadvantage` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `multiple_disadvantage_snapshot` | Open Government Licence v3.0 |
 
 <!-- END GENERATED: source-capability-matrix -->
 
@@ -576,6 +577,19 @@ public `querydata`/`public/query` responses. The legacy HTML flow below remains 
 | Key | None |
 | Rate limit | Default |
 | Notes | Shares Module 30's discovery and file-reading code directly (imported, not duplicated — the two modules read the same evergreen page, the same per-quarter attachment and the same revision-preference rule; see Module 30's `read_workbook_sheet` docstring for why this is a genuinely different situation from Modules 13/29's independent, coincidentally-similar `sheet_rows` copies). Reads the top-level totals (households in TA, with children, children in TA) into `temporary_accommodation_snapshot`, and the bed-and-breakfast "of which" block into the narrow `temporary_accommodation_breakdowns` (BETA-064) — one row per authority/quarter/`measure`, because the B&B sub-columns differ across the series. `_BB_MEASURES` is a closed set; an unrecognised B&B column is a review item, not a guessed row. A real edition (January–March 2023) published Table TA1 under the misnamed sheet `TA1_`; `read_workbook_sheet` resolves a single unambiguous trailing-underscore variant rather than failing that whole quarter |
+
+## Module 36 — Multiple Disadvantage Detailed Local Authority Data
+
+| | |
+| --- | --- |
+| Source | MHCLG Multiple Disadvantage Detailed Local Authority Data, published on GOV.UK — the same evergreen page Modules 30/31 read |
+| Endpoints | Same as Module 30: `https://www.gov.uk/api/content/government/statistical-data-sets/live-tables-on-homelessness`, a separate per-quarter attachment (own workbook, own title convention) rather than a sheet in Module 30's Table A1 workbook |
+| Licence | OGL v3.0 |
+| Key | None |
+| Rate limit | Default |
+| Notes | A brand-new MHCLG product, launched 13 August 2026 with three quarters of history released at once; verified live and documented in full in `docs/m30-multiple-disadvantage-feasibility.md`. Shares Module 30's discovery (`discover_publications`, parameterised by title regex) and file reading directly — the same relationship Module 31 already has with Module 30. Reads four sheets per edition: the headline published percentage (`Multiple_Disadvantage_values`, one column only — its other columns duplicate the three stage sheets below) and three stage sheets sharing one five-category shape (domestic abuse, mental health, substance dependency, homelessness/rough sleeping, criminal justice contact) — assessed as owed a duty, accommodation secured after a prevention duty, and after a relief duty. This is housing-assessment administrative data, not clinical or treatment data, and stays in the `comparator` evidence layer alongside Modules 29-31 — see `docs/CAVEATS.md`'s Module 36 entry for why it must never be read against this pipeline's own NDTMS/Fingertips figures, and for the within-source category-overlap caveat |
+
+---
 
 ## Module 33 — HSE enforcement notices
 
