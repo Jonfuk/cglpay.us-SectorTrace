@@ -78,6 +78,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
 | `m36_govuk_publications` | GOV.UK Search API and Content API (Government Digital Service) | Accountability & scrutiny | Continuous | `govuk_publication_documents`, `govuk_document_candidates` | Open Government Licence v3.0 |
 | `m37_multiple_disadvantage` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `multiple_disadvantage_snapshot` | Open Government Licence v3.0 |
+| `m38_police_recorded_crime` | Home Office | Comparator (never combined) | Quarterly | `police_recorded_drug_offences` | Open Government Licence v3.0 |
 
 <!-- END GENERATED: source-capability-matrix -->
 

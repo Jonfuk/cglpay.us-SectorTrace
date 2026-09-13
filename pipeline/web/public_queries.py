@@ -430,6 +430,18 @@ CAVEATS = {
         "source did not publish it, not zero. Context only: not a rate, not "
         "compared between authorities, not differenced across quarters."
     ),
+    "police_recorded_crime_comparator": (
+        "This is a comparator, shown because substance misuse and recorded "
+        "crime are both policing- and service-relevant contexts — never "
+        "combined, ratioed or correlated with this authority's own evidence "
+        "above. A recorded drug offence measures police activity and "
+        "priorities, not levels of drug use: never read this as a proxy for "
+        "drug prevalence or unmet treatment need. Matched from a Home Office "
+        "Community Safety Partnership by exact name only; a partnership "
+        "covering more than one authority, or with no exact match, is not "
+        "shown here at all. 'Possession of drugs' and 'Trafficking of drugs' "
+        "are kept as separate rows and never summed into a single total."
+    ),
 }
 
 
@@ -3993,7 +4005,8 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "statutory_homelessness_snapshot",
               "temporary_accommodation_snapshot",
               "temporary_accommodation_breakdowns",
-              "multiple_disadvantage_snapshot"])
+              "multiple_disadvantage_snapshot",
+              "police_recorded_drug_offences"])
 
     authority_row = _one(
         conn, "SELECT ons_code, name, type, region FROM authorities "
@@ -4046,13 +4059,15 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "caveats": contract_payload["caveats"],
     }
 
-    # Comparators (Modules 29-31): rough sleeping, statutory homelessness and
-    # temporary accommodation, requested and built specifically to sit beside
-    # this authority's own substance-misuse evidence — never combined with
-    # it, never a ratio, never a score. Each carries its own caveat rather
-    # than sharing one, because each source's own limitations differ (an
-    # unstandardised annual methodology; a quarterly figure that can be
-    # revised; a table that reads only the top-level totals).
+    # Comparators (Modules 29-31, 38): rough sleeping, statutory homelessness,
+    # temporary accommodation and police recorded crime (drug offences),
+    # requested and built specifically to sit beside this authority's own
+    # substance-misuse evidence — never combined with it, never a ratio,
+    # never a score. Each carries its own caveat rather than sharing one,
+    # because each source's own limitations differ (an unstandardised annual
+    # methodology; a quarterly figure that can be revised; a table that reads
+    # only the top-level totals; a figure that measures policing activity as
+    # much as the thing it appears to count).
     rough_sleeping = _rows(conn, """
         SELECT snapshot_year, count, count_text, rate_per_100k, rate_text,
                source_url, retrieved_at, payload_sha256
@@ -4076,6 +4091,12 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
                households_text, source_url, retrieved_at, payload_sha256
         FROM temporary_accommodation_breakdowns WHERE ons_code = %s
         ORDER BY quarter_start, measure""", (ons_code,))
+    police_recorded_crime = _rows(conn, """
+        SELECT csp_name, financial_year, financial_quarter, quarter_start,
+               offence_subgroup, offence_count, offence_count_text,
+               source_url, retrieved_at, payload_sha256
+        FROM police_recorded_drug_offences WHERE ons_code = %s
+        ORDER BY quarter_start, offence_subgroup""", (ons_code,))
 
     # Explicit projection keeps raw missing-value markers and source identity
     # beside each metric without exposing future warehouse-only columns.
@@ -4130,6 +4151,9 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
                 "breakdown": temporary_accommodation_breakdown,
                 "breakdown_caveat": CAVEATS["temporary_accommodation_breakdown"],
                 "caveat": CAVEATS["temporary_accommodation_comparator"]},
+            "police_recorded_crime": {
+                "rows": police_recorded_crime,
+                "caveat": CAVEATS["police_recorded_crime_comparator"]},
         },
         "caveats": {
             "grant_not_budget": CAVEATS["grant_not_budget"],

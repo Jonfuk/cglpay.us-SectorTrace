@@ -213,6 +213,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m35_open_jobs": "open_jobs_cc0",
     "m36_govuk_publications": "ogl_v3",
     "m37_multiple_disadvantage": "ogl_v3",
+    "m38_police_recorded_crime": "ogl_v3",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by

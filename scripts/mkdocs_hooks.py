@@ -80,6 +80,7 @@ UNPUBLISHED = (
     "document-analysis.md",
     "assistant.md",
     "claim-predictions-spec.md",
+    "crime-data-area-level-context-feasibility.md",
     "design-system.md",
     "frontend-redesign-plan.md",
     "frontend-redesign-progress.md",

@@ -191,6 +191,7 @@ const MODULE_LICENCES = {
   m35_open_jobs: 'open_jobs_cc0',
   m36_govuk_publications: 'ogl_v3',
   m37_multiple_disadvantage: 'ogl_v3',
+  m38_police_recorded_crime: 'ogl_v3',
 };
 
 export function licenceFor(module) {
