@@ -10,8 +10,17 @@ describe('browser persistence', () => {
     expect(JSON.parse(localStorage.getItem('st.saved')!)).toEqual({ v: 1, data: [{ label: 'New view' }] })
   })
   it('does not claim success when browser storage rejects writes', () => {
-    vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded') })
-    expect(useLocalStore('st.saved', 1, () => []).write([])).toBe(false)
+    // Restored explicitly rather than relying on the afterEach's
+    // restoreAllMocks: a spy on the Storage host object's own method
+    // survives into the next test under Vitest 5 unless mockRestore() is
+    // called before the test ends, so the next test's own setItem call
+    // (line 17 below) would otherwise inherit this throw.
+    const setItem = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new DOMException('Quota exceeded') })
+    try {
+      expect(useLocalStore('st.saved', 1, () => []).write([])).toBe(false)
+    } finally {
+      setItem.mockRestore()
+    }
   })
   it('does not overwrite an unreadable saved record when reading', () => {
     localStorage.setItem('st.saved', 'broken JSON')
