@@ -122,6 +122,16 @@ const LICENCES = {
       + 'or withdrawn. The register’s own `result` field travels with '
       + 'every notice; check it, and the register, before republishing.',
   },
+  hse_convictions: {
+    name: 'HSE public register — Crown copyright / OGL v3.0', url: OGL_URL,
+    attribution: 'Breach-level entries from the Health and Safety Executive '
+      + 'public register of convictions, Crown copyright.',
+    caution: 'Breach level, not case level: fine, hearing date and result '
+      + 'are the breach’s own; the case file’s address, industry and HSE '
+      + 'division are not collected. The register carries a conviction for '
+      + 'one year and then a further nine on its history register before '
+      + 'removal — an absence is not a clean record.',
+  },
   skills_for_care: {
     name: 'OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)',
     url: OGL_URL,
@@ -176,6 +186,7 @@ const MODULE_LICENCES = {
   m31_temporary_accommodation: 'ogl_v3',
   m32_sab_site_reviews: 'authority_varies',
   m33_hse_notices: 'hse_notices',
+  m33_hse_convictions: 'hse_convictions',
   m34_icb_board_papers: 'ogl_v3',
   m35_open_jobs: 'open_jobs_cc0',
 };

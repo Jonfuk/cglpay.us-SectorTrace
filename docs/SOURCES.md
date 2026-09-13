@@ -72,6 +72,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m30_statutory_homelessness` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `statutory_homelessness_snapshot` | Open Government Licence v3.0 |
 | `m31_temporary_accommodation` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `temporary_accommodation_snapshot`, `temporary_accommodation_breakdowns` | Open Government Licence v3.0 |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | Safety & safeguarding | Ad hoc | `sab_site_crawls`, `safeguarding_adults_boards` | Varies by authority |
+| `m33_hse_convictions` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_convictions` | HSE public register — Crown copyright / OGL v3.0 |
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
@@ -587,6 +588,17 @@ public `querydata`/`public/query` responses. The legacy HTML flow below remains 
 | Key | None |
 | Rate limit | Default (`resources.hse.gov.uk` serves no robots.txt) |
 | Notes | One organisation-name search per tracked-provider name variant. Notices served on **individuals are excluded at parse time**; a notice is attributed to a provider (`provider_key` set) only on an exact normalised name match, the same discipline as Modules 4 and 18, and a near-miss is a `review_queue` item. Every field is stored verbatim, including `result` — a notice can be appealed, affirmed, modified, cancelled or withdrawn after issue, and this pipeline never infers compliance. **The live-fetch parser is written to the register's documented structure and exercised by a representative fixture; not yet validated against real HSE HTML — first run to be watched by a person.** Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety` |
+
+## Module 33 — HSE convictions
+
+| | |
+| --- | --- |
+| Source | Health and Safety Executive public register of convictions |
+| Endpoints | `https://resources.hse.gov.uk/convictions/breach/breach_list.asp` (defendant-name contains-search, breach level) |
+| Licence | Crown copyright; HSE content is generally OGL v3.0 — recorded as `hse_convictions` in `pipeline/licences.py` |
+| Key | None |
+| Rate limit | Default |
+| Notes | Sibling to Module 33's notices collector, sharing its organisation/individual test and exact-match discipline (`m33_hse_convictions` imports `is_organisation`/`name_matches` from `m33_hse_notices` rather than duplicating them). Collects the register's **breach list**, not the case file: one row per breach (`hse_enforcement_convictions`), keyed on the register's own breach id, carrying hearing date, result, fine and the Act/Regulation section — not the case-level address, industry or HSE division, which sit behind a separate `case_details.asp` fetch this module does not make. **The register's own retention window is not this pipeline's**: a conviction is published for one year, then for a further nine on the conviction-history register, then not at all — an absence here is not a clean record. **The defendant-name search field code is not confirmed against the live register**: HSE's standard/advanced search forms build their field dropdown after a POST step no archived capture shows, so this module reuses the notices collector's confirmed `SF=CN` convention on the (evidenced but not proven) assumption the two registers share a query engine. A wrong field code returns no rows, not wrong ones, but does mean an empty result is not yet trustworthy as "no convictions" until confirmed live. **The live-fetch path itself is unvalidated**: `resources.hse.gov.uk` timed out from the environment this module was written in (`www.hse.gov.uk` answered normally), so the parser was built and tested against real HTML pulled from the Wayback Machine's archived captures of `breach_list.asp`, not a live fetch — first run to be watched by a person, more so than Module 33's notices collector given the unconfirmed search parameter above. Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety`, kept as a distinct `hse_conviction` stream from notices (never summed with them) |
 
 ## Module 34 — Integrated Care Board governance documents
 

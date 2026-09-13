@@ -1009,6 +1009,56 @@ rest are collected but not served.*
   is exercised by a representative fixture; the first real run should be
   watched by a person, per the reduced-testing policy for a new source.
 
+### HSE convictions (Module 33)
+
+*Surfaced through `/api/v1/safety` as a stream distinct from HSE notices —
+never summed with them, never with a combined "HSE actions" total. Only
+breaches whose defendant name exactly matches a tracked provider
+(`provider_key IS NOT NULL`) are published.*
+
+- **Breach level, not case level.** HSE prosecutes a "Case" against a
+  defendant; each separate failure to comply within it is a "Breach", the
+  register's own unit. This module collects the breach list — one row per
+  breach, several rows per case where a case carries several breaches — and
+  does not fetch the case-detail page, so address, industry, HSE division and
+  total case costs are not collected. Grouping to a per-case view means
+  grouping on `case_number` yourself; this pipeline does not do it for you.
+- **An absence is not a clean record.** The register publishes a conviction
+  for one year, then moves it to the conviction-history register for a
+  further nine, then removes it. A defendant with no rows here may have a
+  conviction older than that window, may have been prosecuted by a local
+  authority rather than HSE, or the case may simply not have reached the
+  register's nine-week post-conviction publication delay yet.
+- **Individuals are excluded, at parse time** — the same organisation test
+  `m33_hse_notices` applies, because the register lists breaches against
+  named defendants as well as organisations.
+- **Exact name match only**, same discipline as Modules 4, 18 and the notices
+  half of Module 33. A near-miss is a `review_queue` item, never a stored
+  attribution.
+- **The defendant-name search parameter is not confirmed against the live
+  register.** This module reuses the notices collector's `SF=CN`
+  contains-match convention by analogy — both registers live under
+  `resources.hse.gov.uk` and share the same `SN`/`ST`/`SF`/`EO`/`SV` query
+  grammar, confirmed by comparing archived search URLs from both — but no
+  archived capture shows the exact field code the live defendant-name search
+  form submits, because it is built server-side after a POST step. A wrong
+  code returns no rows rather than the wrong ones, so this cannot cause a
+  false attribution, but it does mean a zero-conviction result cannot yet be
+  read as "this provider has none" — only as "the first live run has not yet
+  confirmed the search works."
+- **The live-fetch path itself has not been validated.**
+  `resources.hse.gov.uk` was unreachable (connection timeout) from the
+  environment this module was prepared in, while `www.hse.gov.uk` answered
+  normally; the parser was built and tested against real HTML retrieved from
+  the Wayback Machine's archived captures of `breach_list.asp`, not a live
+  fetch. The first real run should be watched by a person, per the reduced-
+  testing policy for a new source — more so than the notices collector,
+  given the unconfirmed search parameter above.
+- **Fine is stored as the register's own display text**, not parsed to a
+  number — "300,000.00" verbatim, including the thousands separator. This
+  pipeline does not sum, average or compare fines across breaches or
+  providers.
+
 ---
 
 ### ICB board papers (Module 34)
