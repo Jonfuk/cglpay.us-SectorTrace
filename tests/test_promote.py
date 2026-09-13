@@ -48,6 +48,16 @@ def seeded(conn):
         "VALUES ('E10000016', 'https://wdtk.com/request/1', 'Treatment budget', "
         "'drug treatment', 'budget', '2026-08-01T00:00:00Z', 'wdtk_feed_search', "
         "0, 0, 'https://wdtk.com/search', '2026-08-01T00:00:00Z', 200, 'm15', 'listing-hash')")
+    conn.execute(
+        "INSERT INTO govuk_document_candidates (publishing_organisation, candidate_url, "
+        "content_id, base_path, title, document_type_guess, confidence, matched_terms, "
+        "discovered_at, discovery_method, verified, rejected, source_url, retrieved_at, "
+        "http_status, source_system, payload_sha256) VALUES "
+        "('department-of-health-and-social-care', 'https://assets.publishing.service.gov.uk/dhsc.pdf', "
+        "'11111111-1111-1111-1111-111111111111', '/government/publications/dhsc-drug-strategy', "
+        "'DHSC drug strategy', 'policy_paper', 0.75, 'drug', '2026-08-01T00:00:00Z', "
+        "'search:drug', 0, 0, 'https://www.gov.uk/api/content/government/publications/dhsc-drug-strategy', "
+        "'2026-08-01T00:00:00Z', 200, 'm36', 'listing-hash')")
     conn.commit()
     return conn
 
@@ -58,6 +68,17 @@ def document(httpx_mock):
                              content=b"%PDF-1.4 the actual strategy",
                              headers={"content-type": "application/pdf"})
     httpx_mock.add_response(url="https://kent.gov.uk/robots.txt", text="")
+    return httpx_mock
+
+
+@pytest.fixture
+def govuk_document(httpx_mock):
+    httpx_mock.add_response(
+        url="https://assets.publishing.service.gov.uk/dhsc.pdf",
+        content=b"%PDF-1.4 the actual policy paper",
+        headers={"content-type": "application/pdf"})
+    httpx_mock.add_response(
+        url="https://assets.publishing.service.gov.uk/robots.txt", text="")
     return httpx_mock
 
 
@@ -84,6 +105,11 @@ def test_evidence_cannot_be_inserted_without_a_promotion(seeded):
      "ons_code, request_url, source_url, retrieved_at, http_status, "
      "source_system, payload_sha256",
      "'E10000016', 'https://wdtk.com/request/9', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
+    ("govuk_publication_documents",
+     "publishing_organisation, document_url, document_type, source_url, retrieved_at, "
+     "http_status, source_system, payload_sha256",
+     "'department-of-health-and-social-care', 'https://assets.publishing.service.gov.uk/x.pdf', "
+     "'policy_paper', 'u', '2026-08-01T00:00:00Z', 200, 'm', 'h'"),
 ])
 def test_every_evidence_table_is_guarded(seeded, table, columns, values):
     with pytest.raises(db.IntegrityError, match="without a human"):
@@ -96,6 +122,23 @@ def test_the_guard_is_satisfied_by_a_real_promotion(seeded, settings, document):
                      settings=settings)
 
     assert seeded.execute("SELECT COUNT(*) FROM cdp_documents").fetchone().values().__iter__().__next__() == 1
+
+
+def test_a_govuk_publication_promotes_with_its_own_provenance(seeded, settings, govuk_document):
+    """The fourth kind (JON-15): same generic path, a national organisation
+    slug standing in for authority_ons_code rather than an ONS code."""
+    promote.promote(
+        seeded, "govuk_publication",
+        "https://assets.publishing.service.gov.uk/dhsc.pdf",
+        promoted_by="Jon", fields={"document_type": "policy_paper"},
+        settings=settings)
+
+    row = seeded.execute("SELECT * FROM govuk_publication_documents").fetchone()
+    assert row["publishing_organisation"] == "department-of-health-and-social-care"
+    assert row["document_type"] == "policy_paper"
+    assert row["title"] == "DHSC drug strategy"
+    assert row["content_id"] == "11111111-1111-1111-1111-111111111111"
+    assert row["payload_sha256"]
 
 
 # --- what promotion refuses ----------------------------------------------------
@@ -429,3 +472,113 @@ def test_restore_flags_leaves_a_rejection_alone(seeded, settings, document):
     assert promote.restore_flags(seeded) == []
     row = seeded.execute("SELECT * FROM cdp_document_candidates").fetchone()
     assert (row["verified"], row["rejected"]) == (0, 1)
+
+
+# --- companies_house_accounts (JON-36) ------------------------------------------
+#
+# The fourth kind: a filing m04_companies's filing-history stream tagged
+# 'accounts' is a pointer nobody has opened, promoted the same way as the
+# three kinds above -- except the fetch itself is a two-step Document API
+# negotiation (metadata, then content) rather than a single client.get(url).
+
+METADATA_URL = "https://document-api.company-information.service.gov.uk/document/abc"
+CONTENT_URL = "https://document-api.company-information.service.gov.uk/document/abc/content"
+
+
+@pytest.fixture
+def ch_accounts_seeded(conn):
+    """A tracked company and one companies_house_accounts candidate against it."""
+    conn.execute(
+        "INSERT INTO companies (company_number, company_name, match_basis, "
+        "source_url, retrieved_at, http_status, source_system, payload_sha256) "
+        "VALUES ('03861209', 'CHANGE, GROW, LIVE', 'seed', 'https://x', "
+        "'2026-08-01T00:00:00Z', 200, 'companies_house', 'x')")
+    conn.execute(
+        "INSERT INTO companies_house_accounts_candidates (company_number, candidate_url, "
+        "transaction_id, filing_date, description, accounts_type, discovered_at, "
+        "discovery_method, verified, rejected, source_url, retrieved_at, http_status, "
+        "source_system, payload_sha256) VALUES ('03861209', %s, "
+        "'t1', '2025-06-01', 'Accounts', 'accounts-with-accounts-type-group', "
+        "'2026-08-01T00:00:00Z', 'filing_history_stream', 0, 0, "
+        "'https://api.company-information.service.gov.uk/company/03861209/filing-history/t1', "
+        "'2026-08-01T00:00:00Z', 200, 'companies_house_filed_accounts', 'identity-hash')",
+        (METADATA_URL,))
+    conn.commit()
+    return conn
+
+
+def _allow_document_api_robots(httpx_mock) -> None:
+    httpx_mock.add_response(
+        url="https://document-api.company-information.service.gov.uk/robots.txt",
+        text="", is_reusable=True)
+
+
+def test_promote_companies_house_accounts_fetches_metadata_then_negotiates_content(
+        ch_accounts_seeded, settings, httpx_mock):
+    _allow_document_api_robots(httpx_mock)
+    httpx_mock.add_response(
+        url=METADATA_URL,
+        json={"links": {"document": CONTENT_URL},
+              "resources": {"application/pdf": {"content_length": 1234}}})
+    httpx_mock.add_response(
+        url=CONTENT_URL, content=b"%PDF-1.4 accounts",
+        headers={"content-type": "application/pdf"})
+
+    promote.promote(ch_accounts_seeded, "companies_house_accounts", METADATA_URL,
+                     promoted_by="Jon", settings=settings)
+
+    row = ch_accounts_seeded.execute("SELECT * FROM companies_house_accounts_documents").fetchone()
+    # document_url is the stable metadata URL a human reviewed; source_url is
+    # the actual content fetched, after content negotiation.
+    assert row["document_url"] == METADATA_URL
+    assert row["source_url"] == CONTENT_URL
+    assert row["content_type"] == "application/pdf"
+    assert row["archived_path"]
+    assert row["description"] == "Accounts"
+    assert row["accounts_type"] == "accounts-with-accounts-type-group"
+
+
+def test_promote_companies_house_accounts_falls_back_to_ixbrl_when_pdf_is_not_offered(
+        ch_accounts_seeded, settings, httpx_mock):
+    _allow_document_api_robots(httpx_mock)
+    httpx_mock.add_response(
+        url=METADATA_URL,
+        json={"links": {"document": CONTENT_URL},
+              "resources": {"application/xhtml+xml": {"content_length": 999}}})
+    httpx_mock.add_response(
+        url=CONTENT_URL, content=b"<html>ixbrl accounts</html>",
+        headers={"content-type": "application/xhtml+xml"},
+        match_headers={"Accept": "application/xhtml+xml"})
+
+    promote.promote(ch_accounts_seeded, "companies_house_accounts", METADATA_URL,
+                     promoted_by="Jon", settings=settings)
+
+    row = ch_accounts_seeded.execute(
+        "SELECT content_type FROM companies_house_accounts_documents").fetchone()
+    assert row["content_type"] == "application/xhtml+xml"
+
+
+def test_promote_companies_house_accounts_refuses_without_links_document(
+        ch_accounts_seeded, settings, httpx_mock):
+    _allow_document_api_robots(httpx_mock)
+    httpx_mock.add_response(url=METADATA_URL, json={"resources": {}})
+
+    with pytest.raises(promote.PromotionError, match="links.document"):
+        promote.promote(ch_accounts_seeded, "companies_house_accounts", METADATA_URL,
+                         promoted_by="Jon", settings=settings)
+
+    assert ch_accounts_seeded.execute(
+        "SELECT COUNT(*) FROM companies_house_accounts_documents"
+    ).fetchone().values().__iter__().__next__() == 0
+
+
+def test_companies_house_accounts_evidence_table_is_guarded(ch_accounts_seeded):
+    """The fourth trigger, alongside the three in test_evidence_cannot_be_inserted_
+    without_a_promotion / test_every_evidence_table_is_guarded above."""
+    with pytest.raises(db.IntegrityError, match="without a human"):
+        ch_accounts_seeded.execute(
+            "INSERT INTO companies_house_accounts_documents (company_number, document_url, "
+            "source_url, retrieved_at, http_status, source_system, payload_sha256) VALUES "
+            "('03861209', "
+            "'https://document-api.company-information.service.gov.uk/document/sneaky', "
+            "'u', '2026-08-01T00:00:00Z', 200, 'manual', 'hash')")

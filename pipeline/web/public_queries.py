@@ -189,6 +189,17 @@ CAVEATS = {
         "the register covers only HSE-enforced workplaces, so an absence of "
         "notices is not a safety rating."
     ),
+    "hse_convictions": (
+        "Each row is one breach from the Health and Safety Executive's "
+        "public register of convictions, for a defendant whose name exactly "
+        "matches a tracked provider. It is breach level, not case level: the "
+        "hearing date, result, fine and legislation are the breach's own, "
+        "and a case with several breaches produces several rows. This "
+        "stream is never summed with HSE notices — they are different "
+        "instruments. The register publishes a conviction for one year, "
+        "then a further nine on its history register, then removes it, so "
+        "an absence of convictions is not a clean record."
+    ),
     "contract_process": (
         "These are the official notices published under one OCID, grouped by "
         "the lifecycle stage each notice's own OCDS tag names — never a stage "
@@ -377,6 +388,17 @@ CAVEATS = {
         "A payment is linked to a tracked provider only when the council's payee "
         "name exactly matches a known provider name variant. Unmatched rows are "
         "not evidence that no tracked provider was paid."
+    ),
+    "multiple_disadvantage_comparator": (
+        "MHCLG H-CLIC housing-assessment data, not clinical or treatment data. "
+        "Multiple disadvantage means three or more of five recorded flags. "
+        "The five category totals overlap: never sum them to reconstruct the "
+        "qualifying total. Never combine these observations with NDTMS or "
+        "Fingertips treatment figures. The published percentage is an inflow/"
+        "outflow proxy and can exceed 100%; it is not recomputed here. "
+        "Duty outcomes overlap the statutory homelessness totals. "
+        "Published [x] means missing data/non-submission and [z] means not "
+        "applicable; neither is zero."
     ),
     "rough_sleeping_comparator": (
         "This is a comparator, shown here because rough sleeping and substance "
@@ -2962,54 +2984,85 @@ def _sar_payload(conn: sqlite3.Connection) -> dict:
 
 
 def safety(conn: sqlite3.Connection) -> dict:
-    """HSE enforcement notices attributed to a tracked provider (BETA-051).
+    """HSE enforcement notices and convictions attributed to a tracked
+    provider (BETA-051; convictions added JON-43).
 
     Only `provider_key IS NOT NULL` rows — an exact tracked-name match, made
-    by `m33_hse_notices` — reach here; notices served on individuals were
-    excluded at collection. Every field is the register's own text, and the
-    published `result` (which may be an appeal decision or a withdrawal)
-    travels with each notice. Nothing here infers a compliance outcome.
+    by `m33_hse_notices` / `m33_hse_convictions` — reach here; rows against
+    individuals were excluded at collection. Every field is the register's
+    own text. Notices and convictions are two distinct evidence layers, kept
+    in separate keys below and never summed into one "HSE actions" figure:
+    a notice is a point-in-time administrative fact that can be appealed or
+    withdrawn, a conviction is a breach-level court outcome.
     """
-    _public(["hse_enforcement_notices", "providers"])
+    _public(["hse_enforcement_notices", "hse_enforcement_convictions",
+              "providers"])
 
-    if not any(obj["name"] == "hse_enforcement_notices"
-               for obj in catalog.list_objects(conn)):
-        return {"notices": [], "by_provider": [], "by_type": [],
-                "total": 0, "caveat": CAVEATS["hse_notices"]}
+    present = {obj["name"] for obj in catalog.list_objects(conn)}
 
-    notices = _rows(conn, """
-        SELECT h.notice_number, h.recipient_name, h.provider_key,
-               p.canonical_name AS provider_name,
-               h.notice_type, h.issuing_body, h.issue_date, h.compliance_date,
-               h.revised_compliance_date, h.result, h.industry, h.legislation,
-               h.contravention_text, h.local_authority,
-               h.source_url, h.retrieved_at
-        FROM hse_enforcement_notices h
-        LEFT JOIN providers p ON p.provider_key = h.provider_key
-        WHERE h.provider_key IS NOT NULL
-        ORDER BY h.issue_date DESC NULLS LAST, h.notice_number""")
+    if "hse_enforcement_notices" not in present:
+        notices, notices_by_provider, notices_by_type = [], [], []
+    else:
+        notices = _rows(conn, """
+            SELECT h.notice_number, h.recipient_name, h.provider_key,
+                   p.canonical_name AS provider_name,
+                   h.notice_type, h.issuing_body, h.issue_date, h.compliance_date,
+                   h.revised_compliance_date, h.result, h.industry, h.legislation,
+                   h.contravention_text, h.local_authority,
+                   h.source_url, h.retrieved_at
+            FROM hse_enforcement_notices h
+            LEFT JOIN providers p ON p.provider_key = h.provider_key
+            WHERE h.provider_key IS NOT NULL
+            ORDER BY h.issue_date DESC NULLS LAST, h.notice_number""")
 
-    by_provider = _rows(conn, """
-        SELECT h.provider_key, p.canonical_name AS provider_name,
-               COUNT(*) AS notice_count
-        FROM hse_enforcement_notices h
-        LEFT JOIN providers p ON p.provider_key = h.provider_key
-        WHERE h.provider_key IS NOT NULL
-        GROUP BY h.provider_key, p.canonical_name
-        ORDER BY notice_count DESC, p.canonical_name""")
+        notices_by_provider = _rows(conn, """
+            SELECT h.provider_key, p.canonical_name AS provider_name,
+                   COUNT(*) AS notice_count
+            FROM hse_enforcement_notices h
+            LEFT JOIN providers p ON p.provider_key = h.provider_key
+            WHERE h.provider_key IS NOT NULL
+            GROUP BY h.provider_key, p.canonical_name
+            ORDER BY notice_count DESC, p.canonical_name""")
 
-    by_type = _rows(conn, """
-        SELECT h.notice_type, COUNT(*) AS notice_count
-        FROM hse_enforcement_notices h
-        WHERE h.provider_key IS NOT NULL
-        GROUP BY h.notice_type ORDER BY notice_count DESC, h.notice_type""")
+        notices_by_type = _rows(conn, """
+            SELECT h.notice_type, COUNT(*) AS notice_count
+            FROM hse_enforcement_notices h
+            WHERE h.provider_key IS NOT NULL
+            GROUP BY h.notice_type ORDER BY notice_count DESC, h.notice_type""")
+
+    if "hse_enforcement_convictions" not in present:
+        convictions, convictions_by_provider = [], []
+    else:
+        convictions = _rows(conn, """
+            SELECT c.breach_id, c.case_number, c.breach_sequence,
+                   c.defendant_name, c.provider_key,
+                   p.canonical_name AS provider_name,
+                   c.hearing_date, c.result, c.fine_text, c.legislation,
+                   c.source_url, c.retrieved_at
+            FROM hse_enforcement_convictions c
+            LEFT JOIN providers p ON p.provider_key = c.provider_key
+            WHERE c.provider_key IS NOT NULL
+            ORDER BY c.hearing_date DESC NULLS LAST, c.breach_id""")
+
+        convictions_by_provider = _rows(conn, """
+            SELECT c.provider_key, p.canonical_name AS provider_name,
+                   COUNT(*) AS conviction_count
+            FROM hse_enforcement_convictions c
+            LEFT JOIN providers p ON p.provider_key = c.provider_key
+            WHERE c.provider_key IS NOT NULL
+            GROUP BY c.provider_key, p.canonical_name
+            ORDER BY conviction_count DESC, p.canonical_name""")
 
     return {
         "notices": notices,
-        "by_provider": by_provider,
-        "by_type": by_type,
+        "by_provider": notices_by_provider,
+        "by_type": notices_by_type,
         "total": len(notices),
         "caveat": CAVEATS["hse_notices"],
+        "convictions": convictions,
+        "convictions_by_provider": convictions_by_provider,
+        "convictions_total": len(convictions),
+        "convictions_caveat": CAVEATS["hse_convictions"],
     }
 
 
@@ -3036,7 +3089,7 @@ SAFETY_LEGAL_LABELS = {
                     "inspection record with the regulator.",
 }
 
-SAFETY_LEGAL_SOURCES = ("pfd", "sar", "hse", "tribunal", "cqc")
+SAFETY_LEGAL_SOURCES = ("pfd", "sar", "hse", "hse_conviction", "tribunal", "cqc")
 
 _SAFETY_LEGAL_MAX = 2000
 
@@ -3053,6 +3106,7 @@ def safety_legal(conn: sqlite3.Connection, *, source=None, relationship=None,
     """
     _public(["pfd_reports", "pfd_provider_mentions", "sar_documents",
               "sar_provider_mentions", "hse_enforcement_notices",
+              "hse_enforcement_convictions",
               "tribunal_cases", "cqc_locations", "providers"])
 
     present = {obj["name"] for obj in catalog.list_objects(conn)}
@@ -3129,6 +3183,31 @@ def safety_legal(conn: sqlite3.Connection, *, source=None, relationship=None,
                 # The published result may be an appeal decision or a
                 # withdrawal — it travels with the notice, never inferred.
                 "result": r["result"],
+                "source_url": r["source_url"],
+            })
+
+    if "hse_enforcement_convictions" in present:
+        for r in _rows(conn, """
+            SELECT c.breach_id, c.case_number, c.provider_key, p.canonical_name,
+                   c.defendant_name, c.hearing_date, c.result, c.fine_text,
+                   c.source_url
+            FROM hse_enforcement_convictions c
+            LEFT JOIN providers p ON p.provider_key = c.provider_key
+            WHERE c.provider_key IS NOT NULL
+            ORDER BY c.hearing_date DESC NULLS LAST"""):
+            keep({
+                "source": "hse_conviction",
+                "relationship": "matched_to",
+                "date": r["hearing_date"],
+                "entity_key": r["provider_key"],
+                "entity_name": r["canonical_name"] or r["defendant_name"],
+                "entity_type": "provider",
+                "title": f"HSE conviction — breach {r['breach_id']} "
+                         f"(case {r['case_number']})",
+                "detail": "Register text as published. Breach level, not "
+                          "case level — never summed with HSE notices.",
+                "result": f"{r['result']} (fine {r['fine_text']})"
+                          if r["fine_text"] else r["result"],
                 "source_url": r["source_url"],
             })
 
@@ -3220,15 +3299,18 @@ def safety_legal(conn: sqlite3.Connection, *, source=None, relationship=None,
             "sar": "SAR reports carry no structured date or excerpt; this "
                    "stream is a finding aid to the National SAR Library.",
             "hse": CAVEATS["hse_notices"],
+            "hse_conviction": CAVEATS["hse_convictions"],
             "tribunal": "A tribunal case names an organisation as a party. It "
                         "is not a finding against a named provider unless the "
                         "decision itself says so.",
             "cqc": "CQC registration covers only some service types; most "
                    "community drug and alcohol provision is not CQC-registered.",
         },
-        "note": "Five distinct evidence streams. Their counts are shown by "
+        "note": "Six distinct evidence streams. Their counts are shown by "
                 "source and by relationship and are never added together. A "
-                "mention is never a finding of fault.",
+                "mention is never a finding of fault. HSE notices and HSE "
+                "convictions are two of the six, kept separate because a "
+                "notice and a conviction are different instruments.",
     }
 
 
@@ -3923,6 +4005,7 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
               "statutory_homelessness_snapshot",
               "temporary_accommodation_snapshot",
               "temporary_accommodation_breakdowns",
+              "multiple_disadvantage_snapshot",
               "police_recorded_drug_offences"])
 
     authority_row = _one(
@@ -4015,6 +4098,33 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         FROM police_recorded_drug_offences WHERE ons_code = %s
         ORDER BY quarter_start, offence_subgroup""", (ons_code,))
 
+    # Explicit projection keeps raw missing-value markers and source identity
+    # beside each metric without exposing future warehouse-only columns.
+    multiple_disadvantage = _rows(conn, """
+        SELECT quarter_start, quarter_label,
+               md_pct, md_pct_text,
+               assessed_md_total, assessed_md_total_text,
+               assessed_domestic_abuse_total, assessed_domestic_abuse_total_text,
+               assessed_mental_health_total, assessed_mental_health_total_text,
+               assessed_substance_dependency_total, assessed_substance_dependency_total_text,
+               assessed_homelessness_rough_sleeping_total, assessed_homelessness_rough_sleeping_total_text,
+               assessed_criminal_justice_total, assessed_criminal_justice_total_text,
+               prevention_secured_md_total, prevention_secured_md_total_text,
+               prevention_secured_domestic_abuse_total, prevention_secured_domestic_abuse_total_text,
+               prevention_secured_mental_health_total, prevention_secured_mental_health_total_text,
+               prevention_secured_substance_dependency_total, prevention_secured_substance_dependency_total_text,
+               prevention_secured_homelessness_rough_sleeping_total, prevention_secured_homelessness_rough_sleeping_total_text,
+               prevention_secured_criminal_justice_total, prevention_secured_criminal_justice_total_text,
+               relief_secured_md_total, relief_secured_md_total_text,
+               relief_secured_domestic_abuse_total, relief_secured_domestic_abuse_total_text,
+               relief_secured_mental_health_total, relief_secured_mental_health_total_text,
+               relief_secured_substance_dependency_total, relief_secured_substance_dependency_total_text,
+               relief_secured_homelessness_rough_sleeping_total, relief_secured_homelessness_rough_sleeping_total_text,
+               relief_secured_criminal_justice_total, relief_secured_criminal_justice_total_text,
+               source_url, retrieved_at, payload_sha256
+        FROM multiple_disadvantage_snapshot WHERE ons_code = %s
+        ORDER BY quarter_start""", (ons_code,))
+
     return {
         "authority": authority_row,
         "coverage": {
@@ -4028,6 +4138,9 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "treatment": treatment,
         "contracts": contracts_held,
         "comparators": {
+            "multiple_disadvantage": {
+                "rows": multiple_disadvantage,
+                "caveat": CAVEATS["multiple_disadvantage_comparator"]},
             "rough_sleeping": {"rows": rough_sleeping,
                                 "caveat": CAVEATS["rough_sleeping_comparator"]},
             "statutory_homelessness": {

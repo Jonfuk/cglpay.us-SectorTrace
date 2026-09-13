@@ -212,6 +212,42 @@ anyone using it.
   publishes. A company whose PSC register is redacted answers with a
   statement: `psc_register_statement` review items mean the absence of rows
   is a redaction, not a finding.
+- **Charge status (`company_charges.status`) is Companies House's own word,
+  never a boolean (JON-36).** `outstanding`, `satisfied`, `part-satisfied` and
+  whatever else the register publishes are kept verbatim. `company_charge_dates`
+  keeps the register's own per-charge date field names the same way
+  `company_insolvency_case_dates` keeps its own — `created_on`, `delivered_on`,
+  `satisfied_on` and so on are distinct published facts, not stages of one
+  invented lifecycle.
+- **The four Companies House streams (company, filing-history, insolvency-cases,
+  charges) are a change-notification mechanism only.** No stream event's own
+  payload is ever the source of a written row — a matching event only ever
+  triggers the same authoritative REST fetch this module already makes for
+  that company. `company_stream_events` records the triggering notification's
+  own exact bytes separately from whatever REST fetch it caused.
+- **The streaming API's timepoint retention window is undocumented by
+  Companies House.** A checkout left un-run longer than that window gets a
+  416, which becomes a `companies_house_stream_cursor_stale` review item and a
+  cursor reset to "now" — never a silent backfill or a guessed replacement
+  timepoint. Any change published during the gap is unrecoverable through this
+  mechanism, and that gap is not detectable after the fact from the data
+  alone; the review item is the only record of it.
+- **On a 429, the affected stream stops for that run rather than waiting.**
+  Companies House documents a mandatory 60-second wait before reconnecting;
+  this pipeline does not hold a foreground run open for it. The next scheduled
+  run resumes from the last checkpointed timepoint.
+- **`companies_house_accounts_candidates`/`_documents` are a fourth,
+  structurally separate evidence layer from `charity_accounts_documents`
+  (Module 3) and must never be merged, reconciled or read as duplicates of
+  it.** A charity's own accounts filed with the Charity Commission and its
+  trading subsidiary's statutory accounts filed with Companies House are
+  different legal entities' filings under different regimes; the fact that
+  both may describe entities behind the same provider is not license to
+  combine their figures. A filing tagged `accounts` by Companies House's own
+  category is a pointer nobody has opened, exactly like the m09/m10/m15
+  candidates it copies the discipline from — it requires the same human
+  promotion (`pipeline/promote.py`) before it is evidence, and this module
+  does not extract or compute any figure from the promoted document.
 
 ### CQC (Module 5)
 
@@ -979,6 +1015,83 @@ every other section on the page already uses, not a missing section.*
   than one sheet name would match after stripping is refused rather than
   guessed at.
 
+### Multiple Disadvantage Detailed Local Authority Data (Module 37)
+
+*Surfaced in the public authority page's Context view alongside Modules
+29–31, with published text, duty-stage categories and provenance. See
+`docs/m30-multiple-disadvantage-feasibility.md` for the source verification
+this module was built from.*
+
+- **This is a comparator, not sector evidence, and it is never combined
+  with the sector's own evidence** — the same rule as Modules 29-31, for
+  the same reason (documented overlap between the homelessness and
+  substance-misuse populations).
+- **This is H-CLIC housing-assessment administrative data, not clinical or
+  treatment data, despite one column reading "substance dependency".** The
+  flag is a support-need/referral checkbox MHCLG derives from existing
+  H-CLIC fields at homelessness assessment — "Drug dependency needs" or
+  "Alcohol dependency needs" as a recorded support need — not an NDTMS
+  treatment episode or a clinical diagnosis. **Never read this module's
+  rows against this pipeline's own NDTMS/Fingertips substance-misuse
+  figures (Modules 7, 12, 27)** — the word "substance" appearing in a
+  column header here is exactly the kind of coincidence the project's
+  first CAVEATS rule (no arithmetic across evidence layers) exists to
+  guard against.
+- **The five disadvantage-category totals are not mutually exclusive, and
+  summing them wildly exceeds the qualifying total — do not reassemble one
+  from the other.** Qualifying for "multiple disadvantage" requires three
+  or more of five flags (homelessness/rough sleeping, substance dependence,
+  mental health, domestic abuse, criminal justice contact), so a single
+  qualifying household is counted in at least three of the five category
+  columns at once. Confirmed against the January-March 2026 edition's own
+  England row: the qualifying total is 7,340, but its five category
+  columns sum to 67,650 — over nine times the total. Each category column
+  answers "how many multiple-disadvantage households have this flag among
+  their three-plus", never "households whose only disadvantage is this
+  one."
+- **`md_pct` is MHCLG's own published metric and this pipeline never
+  recomputes it.** Its own footnote states it can legitimately exceed
+  100%: it is a proxy of inflow and outflow across the quarter, not a
+  simple ratio of the two totals stored beside it, and those two totals
+  should not be divided against each other to reproduce or check it.
+- **A duty-outcome total here is a subset of Module 30's own Table A1
+  total for the same quarter, not an independent count.** Presenting the
+  two side by side as a proportion is exactly the source's own published
+  metric (`md_pct`); computing a different proportion by dividing this
+  module's total by Module 30's own stored `total_owed_duty` would
+  silently recompute a rate the source already publishes, from two
+  independently-fetched, independently-revised tables that may not be
+  from the same edition at read time.
+- **`Multiple_Disadvantage_values` (Table 1)'s other three columns are
+  deliberately not read.** Confirmed by comparing real editions: they
+  exactly duplicate the qualifying total already stored from each of the
+  three stage sheets (`assessed_md_total`, `prevention_secured_md_total`,
+  `relief_secured_md_total`). Reading them again would not be additional
+  coverage.
+- **`[x]` (missing data, non-submission) and `[z]` (not applicable) are
+  kept verbatim in each field's paired `_text` column with the numeric
+  column `NULL`.** Neither means zero. This source publishes no `[n]`/`[c]`
+  equivalent (confirmed by scanning every cell of all three currently-
+  published editions) — unlike Module 30's Table A1, there is **no
+  small-number-suppression marker in this file at all**, so genuine
+  single-digit local-authority counts are published as published, not
+  rounded or withheld.
+- **England/region totals are rounded to the nearest 10; local-authority
+  figures are not.** The source states this itself ("Total figures are
+  presented rounded to the nearest 10 households... Totals may not equal
+  the sum of components because of rounding") — do not expect an
+  authority's own exact figures to sum to a rounded regional total.
+- **This is a very recently launched product (13 August 2026) with three
+  quarters of history, all released at once.** There is no earlier
+  edition to discover beyond what the evergreen page currently attaches —
+  unlike Modules 7/27's own backfill discovery, no collection-walk is
+  applicable here because MHCLG has not yet published anything before its
+  own launch date.
+- **A local authority code not in this pipeline's `authorities` table is
+  logged to `review_queue` as `multiple_disadvantage_unmatched_authority`,
+  not silently dropped** — the same reorganisation-reconciliation gap
+  Modules 29-31 have, unrelated to this module's own parsing.
+
 ### HSE enforcement notices (Module 33)
 
 *Surfaced through `/api/v1/safety`. Only notices whose recipient name exactly
@@ -1008,6 +1121,56 @@ rest are collected but not served.*
   The result parser is written to HSE's documented notice-list structure and
   is exercised by a representative fixture; the first real run should be
   watched by a person, per the reduced-testing policy for a new source.
+
+### HSE convictions (Module 33)
+
+*Surfaced through `/api/v1/safety` as a stream distinct from HSE notices —
+never summed with them, never with a combined "HSE actions" total. Only
+breaches whose defendant name exactly matches a tracked provider
+(`provider_key IS NOT NULL`) are published.*
+
+- **Breach level, not case level.** HSE prosecutes a "Case" against a
+  defendant; each separate failure to comply within it is a "Breach", the
+  register's own unit. This module collects the breach list — one row per
+  breach, several rows per case where a case carries several breaches — and
+  does not fetch the case-detail page, so address, industry, HSE division and
+  total case costs are not collected. Grouping to a per-case view means
+  grouping on `case_number` yourself; this pipeline does not do it for you.
+- **An absence is not a clean record.** The register publishes a conviction
+  for one year, then moves it to the conviction-history register for a
+  further nine, then removes it. A defendant with no rows here may have a
+  conviction older than that window, may have been prosecuted by a local
+  authority rather than HSE, or the case may simply not have reached the
+  register's nine-week post-conviction publication delay yet.
+- **Individuals are excluded, at parse time** — the same organisation test
+  `m33_hse_notices` applies, because the register lists breaches against
+  named defendants as well as organisations.
+- **Exact name match only**, same discipline as Modules 4, 18 and the notices
+  half of Module 33. A near-miss is a `review_queue` item, never a stored
+  attribution.
+- **The defendant-name search parameter is not confirmed against the live
+  register.** This module reuses the notices collector's `SF=CN`
+  contains-match convention by analogy — both registers live under
+  `resources.hse.gov.uk` and share the same `SN`/`ST`/`SF`/`EO`/`SV` query
+  grammar, confirmed by comparing archived search URLs from both — but no
+  archived capture shows the exact field code the live defendant-name search
+  form submits, because it is built server-side after a POST step. A wrong
+  code returns no rows rather than the wrong ones, so this cannot cause a
+  false attribution, but it does mean a zero-conviction result cannot yet be
+  read as "this provider has none" — only as "the first live run has not yet
+  confirmed the search works."
+- **The live-fetch path itself has not been validated.**
+  `resources.hse.gov.uk` was unreachable (connection timeout) from the
+  environment this module was prepared in, while `www.hse.gov.uk` answered
+  normally; the parser was built and tested against real HTML retrieved from
+  the Wayback Machine's archived captures of `breach_list.asp`, not a live
+  fetch. The first real run should be watched by a person, per the reduced-
+  testing policy for a new source — more so than the notices collector,
+  given the unconfirmed search parameter above.
+- **Fine is stored as the register's own display text**, not parsed to a
+  number — "300,000.00" verbatim, including the thousands separator. This
+  pipeline does not sum, average or compare fines across breaches or
+  providers.
 
 ---
 
