@@ -84,8 +84,10 @@ UNPUBLISHED = (
     "frontend-redesign-plan.md",
     "frontend-redesign-progress.md",
     "m32-sab-site-crawl.md",
+    "m15-alaveteli-feed-feasibility.md",
     "mysociety-access-request.md",
     "m34-icb-board-papers.md",
+    "ohid-ndtms-contextual-indicators.md",
     "public-portal-ui-spec.md",
     "public-ui-refinement-backlog.md",
     "review-queue-improvements.md",
@@ -93,6 +95,7 @@ UNPUBLISHED = (
     "unraid-document-worker.md",
     "upgrade-audit-prompt.md",
     "upgrade-roadmap.md",
+    "rough-sleeping-data-framework.md",
 )
 
 # Whole directories, including the data files beside their write-ups.
