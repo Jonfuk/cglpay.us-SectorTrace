@@ -167,6 +167,20 @@ LICENCES: dict[str, Licence] = {
         caution="CC0 does not clear third-party employer or ATS rights. Shadow "
                 "payloads remain operator-only and are not republished wholesale.",
     ),
+    "three_sixty_giving_varies": Licence(
+        id="three_sixty_giving_varies",
+        name="Varies by publisher (predominantly CC BY 4.0)",
+        url=None,
+        attribution="Grants data published by individual funders using the "
+                    "360Giving Data Standard, via the 360Giving API.",
+        caution="Each grant carries its own licence field (CC BY 4.0, OGL "
+                "v3.0, CC BY-SA 4.0 or CC0 seen live — counted directly "
+                "against the 360Giving Data Registry on 2026-09-12: 702, "
+                "123, 36 and 22 datasets respectively). Stored per row in "
+                "data_license_name/data_license_url; check the row before "
+                "republishing rather than assuming one licence for the "
+                "whole table.",
+    ),
 }
 
 # Read from docs/SOURCES.md, one row per module. A new module belongs here on
@@ -214,6 +228,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m36_govuk_publications": "ogl_v3",
     "m37_multiple_disadvantage": "ogl_v3",
     "m38_police_recorded_crime": "ogl_v3",
+    "m39_360giving": "three_sixty_giving_varies",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
