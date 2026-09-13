@@ -532,7 +532,7 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "incident detail are held in restricted_ tables.",
     ),
     Dataset(
-        "police-recorded-crime-drug-offences", "m36_police_recorded_crime",
+        "police-recorded-crime-drug-offences", "m38_police_recorded_crime",
         "Police recorded crime — drug offences (Community Safety Partnership)",
         "Home Office",
         "https://www.gov.uk/government/statistical-data-sets/"

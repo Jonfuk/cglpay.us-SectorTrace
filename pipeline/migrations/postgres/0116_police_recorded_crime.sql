@@ -1,4 +1,4 @@
--- Module 36: Police recorded crime, drug offences (Home Office, CSP level).
+-- Module 38: Police recorded crime, drug offences (Home Office, CSP level).
 --
 -- One row per (authority, financial-year quarter, drug-offence subgroup) --
 -- e.g. "Possession of drugs" and "Trafficking of drugs" stay separate rows

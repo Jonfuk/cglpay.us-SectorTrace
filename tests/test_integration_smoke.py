@@ -545,6 +545,27 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "directory and crawl parsers have not yet been validated against "
               "the real sites -- see the module docstring.",
     ),
+    Smoke(
+        module="m38_police_recorded_crime",
+        produces=("police_recorded_drug_offences",),
+        signal=(("police_recorded_drug_offences", "csp_name"),
+                ("police_recorded_drug_offences", "offence_count_text")),
+        limit=None,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match CSP names against",
+        note="Ignores --limit, like m29: the current CSP-level file is one "
+              "fetch and --since only filters which financial-year sheets "
+              "are written, not how much of the fetched workbook is read. "
+              "offence_count_text is the signal, not the numeric column, for "
+              "the same reason as m29/m30's own smoke specs -- an "
+              "unparseable published cell leaves offence_count NULL "
+              "correctly while offence_count_text proves the row was "
+              "actually read. Most current CSPs are exact-matched to the "
+              "authorities table, so a real run should write rows for at "
+              "least some of them; a run producing only review_queue "
+              "entries here would mean the whole current edition's naming "
+              "had drifted, which is itself worth surfacing.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

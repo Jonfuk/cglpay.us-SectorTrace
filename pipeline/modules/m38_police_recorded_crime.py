@@ -1,4 +1,4 @@
-"""Module 36 -- Police recorded crime, drug offences (Home Office, CSP level).
+"""Module 38 -- Police recorded crime, drug offences (Home Office, CSP level).
 
 JON-34's feasibility document (`docs/crime-data-area-level-context-feasibility.md`)
 found that `data.police.uk` -- the site originally proposed as a crime
@@ -344,14 +344,14 @@ def build_authority_lookup(conn) -> dict[str, str]:
 
 
 @register_module(
-    "m36_police_recorded_crime", supports_since=True,
+    "m38_police_recorded_crime", supports_since=True,
     since_note="filters which financial years are written; the fetch itself "
                "always reads the whole current CSP-level file",
     depends_on=("m00_geography",),
     depends_note="authority names come from the authorities table",
 )
 def run(ctx: ModuleContext) -> None:
-    module_name = "m36_police_recorded_crime"
+    module_name = "m38_police_recorded_crime"
     conn = ctx.conn
     since_year = ctx.since_year()
 
@@ -376,7 +376,7 @@ def run(ctx: ModuleContext) -> None:
                     "titles_seen": [a.get("title") for a in attachments],
                     "note": "no Community Safety Partnership open data attachment "
                             "found; the page's shape may have changed, see "
-                            "CSP_TITLE_RE in m36_police_recorded_crime",
+                            "CSP_TITLE_RE in m38_police_recorded_crime",
                 }))
             log.info("police_recorded_crime.run_complete", rows=0)
             return
@@ -425,7 +425,8 @@ def run(ctx: ModuleContext) -> None:
                 conn.commit()
 
         try:
-            for sheet_name, cells in iter_csp_sheet_rows(file_result.body):
+            for sheet_name, cells in ctx.track(
+                    iter_csp_sheet_rows(file_result.body), "CSP workbook rows"):
                 if sheet_name != raw_sheet:
                     flush()
                     raw_sheet = sheet_name

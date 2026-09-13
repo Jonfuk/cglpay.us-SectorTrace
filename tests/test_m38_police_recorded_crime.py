@@ -7,7 +7,7 @@ from odf.opendocument import OpenDocumentSpreadsheet
 from odf.table import Table, TableCell, TableRow
 from odf.text import P
 
-from pipeline.modules import m36_police_recorded_crime as prc
+from pipeline.modules import m38_police_recorded_crime as prc
 
 # --- discovering the current CSP-level attachment ---------------------------
 

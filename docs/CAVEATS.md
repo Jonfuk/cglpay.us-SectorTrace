@@ -1051,7 +1051,7 @@ on the public portal.*
 
 ---
 
-### Police recorded crime — drug offences (Module 36)
+### Police recorded crime — drug offences (Module 38)
 
 *Surfaced on the public authority page (BETA-017) as a fourth "Comparators"
 table alongside Modules 29-31, below their own caveat.*

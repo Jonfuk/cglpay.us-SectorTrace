@@ -572,7 +572,7 @@ function renderComparators(container, data) {
       + 'these populations and contexts are widely documented to overlap.',
       noData('comparators',
         './start.sh run m29_rough_sleeping m30_statutory_homelessness '
-        + 'm31_temporary_accommodation m36_police_recorded_crime')));
+        + 'm31_temporary_accommodation m38_police_recorded_crime')));
     return;
   }
 
@@ -675,6 +675,6 @@ function renderPoliceRecordedCrime(rows, caveat) {
       { title: 'Community Safety Partnership', field: 'csp_name', width: 220 },
     ], rows, { height: Math.min(300, 60 + rows.length * 32) }),
     provenanceFromRows(rows, {
-      module: 'm36_police_recorded_crime', tables: ['police_recorded_drug_offences'],
+      module: 'm38_police_recorded_crime', tables: ['police_recorded_drug_offences'],
     }) || el('span', {}));
 }

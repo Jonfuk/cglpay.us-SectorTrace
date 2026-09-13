@@ -3976,7 +3976,7 @@ def authority(conn: sqlite3.Connection, ons_code: str) -> dict:
         "caveats": contract_payload["caveats"],
     }
 
-    # Comparators (Modules 29-31, 36): rough sleeping, statutory homelessness,
+    # Comparators (Modules 29-31, 38): rough sleeping, statutory homelessness,
     # temporary accommodation and police recorded crime (drug offences),
     # requested and built specifically to sit beside this authority's own
     # substance-misuse evidence — never combined with it, never a ratio,
