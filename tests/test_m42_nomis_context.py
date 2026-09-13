@@ -9,7 +9,7 @@ from pipeline.registry import ModuleContext
 
 def _allow_robots(httpx_mock):
     httpx_mock.add_response(
-        url=re.compile(r"https://www\\.nomisweb\\.co\\.uk/robots\\.txt"),
+        url=re.compile(r"https://www\.nomisweb\.co\.uk/robots\.txt"),
         status_code=200, text="", is_reusable=True,
     )
 
@@ -56,7 +56,7 @@ def test_run_stores_resident_and_workplace_rows(conn, settings, httpx_mock):
     for dataset_id in ("ASHER", "ASHE"):
         httpx_mock.add_response(
             url=re.compile(
-                rf"https://www\\.nomisweb\\.co\\.uk/api/v01/dataset/{dataset_id}\\.data\\.csv.*"
+                rf"https://www\.nomisweb\.co\.uk/api/v01/dataset/{dataset_id}\.data\.csv.*"
             ),
             text=_csv(
                 "E06000001,Example,7,Total,2,Median,6,Hourly pay - excluding overtime,"
@@ -83,7 +83,7 @@ def test_run_stores_resident_and_workplace_rows(conn, settings, httpx_mock):
 def test_non_numeric_value_is_quarantined_and_not_zero(conn, settings, httpx_mock):
     _allow_robots(httpx_mock)
     httpx_mock.add_response(
-        url=re.compile(r"https://www\\.nomisweb\\.co\\.uk/api/v01/dataset/ASHER\\.data\\.csv.*"),
+        url=re.compile(r"https://www\.nomisweb\.co\.uk/api/v01/dataset/ASHER\.data\.csv.*"),
         text=_csv(
             "E06000001,Example,7,Total,2,Median,6,Hourly pay - excluding overtime,"
             "2024,not-a-number,, ,0,1",
@@ -121,7 +121,7 @@ def test_failed_source_is_reviewed_and_does_not_become_empty_evidence(
         conn, settings, httpx_mock):
     _allow_robots(httpx_mock)
     httpx_mock.add_response(
-        url=re.compile(r"https://www\\.nomisweb\\.co\\.uk/api/v01/dataset/ASHER\\.data\\.csv.*"),
+        url=re.compile(r"https://www\.nomisweb\.co\.uk/api/v01/dataset/ASHER\.data\.csv.*"),
         status_code=503, text="unavailable", is_reusable=True,
     )
     original = nomis.DATASETS
