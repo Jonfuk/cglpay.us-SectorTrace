@@ -55,6 +55,15 @@ LICENCES: dict[str, Licence] = {
         attribution="Contains public sector information licensed under the Open "
                     "Government Licence v3.0.",
     ),
+    "nomis_ogl_v3": Licence(
+        id="nomis_ogl_v3",
+        name="Open Government Licence v3.0 (Nomis/ONS data)",
+        url=OGL_URL,
+        attribution="Contains Office for National Statistics data accessed via Nomis "
+                    "under the Open Government Licence v3.0.",
+        caution="Nomis is a delivery service for ONS data; retain the dataset, "
+                "reference period and geography definition with any reuse.",
+    ),
     "ogl_v3_os": Licence(
         id="ogl_v3_os",
         name="Open Government Licence v3.0 (contains OS data)",
@@ -229,6 +238,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m37_multiple_disadvantage": "ogl_v3",
     "m38_police_recorded_crime": "ogl_v3",
     "m39_360giving": "three_sixty_giving_varies",
+    "m42_nomis_context": "nomis_ogl_v3",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
