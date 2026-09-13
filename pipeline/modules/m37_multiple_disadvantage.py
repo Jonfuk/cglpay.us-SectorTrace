@@ -1,4 +1,4 @@
-"""Module 36 — Multiple Disadvantage Detailed Local Authority Data.
+"""Module 37 — Multiple Disadvantage Detailed Local Authority Data.
 
 JON-39's own feasibility pass
 (`docs/m30-multiple-disadvantage-feasibility.md`) verified this live: it is
@@ -24,7 +24,7 @@ housing-assessment administrative data, not clinical or treatment data,
 despite one column reading "substance dependency."** The flag is a
 support-need/referral checkbox recorded by a housing officer at
 homelessness assessment, not an NDTMS treatment episode or a diagnosis —
-see `docs/CAVEATS.md`'s Module 36 entry, and never read this module's rows
+see `docs/CAVEATS.md`'s Module 37 entry, and never read this module's rows
 against this pipeline's own NDTMS/Fingertips figures (Modules 7, 12, 27).
 
 Four sheets are read from each edition's workbook:
@@ -223,14 +223,14 @@ def _read_sheet_columns(
 
 
 @register_module(
-    "m36_multiple_disadvantage", supports_since=True,
+    "m37_multiple_disadvantage", supports_since=True,
     since_note="filters which quarters are written by the quarter's calendar "
                "year; the fetch itself always reads the whole attachment list",
     depends_on=("m00_geography",),
     depends_note="authority names come from the authorities table",
 )
 def run(ctx: ModuleContext) -> None:
-    module_name = "m36_multiple_disadvantage"
+    module_name = "m37_multiple_disadvantage"
     conn = ctx.conn
     since_year = ctx.since_year()
 
@@ -247,7 +247,7 @@ def run(ctx: ModuleContext) -> None:
             raise StatutoryHomelessnessParseError(
                 "No Multiple Disadvantage local-authority-level files found "
                 "— the GOV.UK title pattern may have changed. Check "
-                "MD_TITLE_RE in m36_multiple_disadvantage.")
+                "MD_TITLE_RE in m37_multiple_disadvantage.")
         log.info("multiple_disadvantage.publications_discovered", count=len(publications))
 
         if ctx.limit:

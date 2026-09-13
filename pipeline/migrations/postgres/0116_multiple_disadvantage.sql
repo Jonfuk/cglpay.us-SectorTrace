@@ -1,4 +1,4 @@
--- Module 36: Multiple Disadvantage Detailed Local Authority Data.
+-- Module 37: Multiple Disadvantage Detailed Local Authority Data.
 --
 -- One row per (authority, quarter): MHCLG's own published percentage of
 -- duties owed where homelessness was prevented or relieved for households
@@ -9,7 +9,7 @@
 --
 -- The five category columns within one stage are NOT mutually exclusive
 -- and sum to several times the stage's own qualifying total -- see
--- docs/CAVEATS.md's Module 36 entry. Every numeric column has a paired
+-- docs/CAVEATS.md's Module 37 entry. Every numeric column has a paired
 -- `_text` column holding the cell verbatim, because MHCLG's own [x]/[z]
 -- placeholders are common and neither means zero.
 --

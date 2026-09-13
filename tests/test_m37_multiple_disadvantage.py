@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from pipeline.modules import m30_statutory_homelessness as hclic
-from pipeline.modules import m36_multiple_disadvantage as md
+from pipeline.modules import m37_multiple_disadvantage as md
 
 # Real header text and real England-row totals, downloaded and read directly
 # from the January-March 2026 edition
@@ -213,7 +213,7 @@ def test_extracted_values_match_the_real_published_adur_row_by_position():
 
 
 def test_the_five_categories_do_not_sum_to_the_qualifying_total():
-    """Documents the double-counting caveat (docs/CAVEATS.md's Module 36
+    """Documents the double-counting caveat (docs/CAVEATS.md's Module 37
     entry) against the real published England row: the five categories sum
     to several times the qualifying total, because qualifying for
     'multiple disadvantage' requires three or more of the five flags.

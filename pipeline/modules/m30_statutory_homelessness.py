@@ -307,7 +307,7 @@ def parse_quarter_title(
     return None — see `TITLE_RE`).
 
     `title_re` defaults to this module's own `TITLE_RE` but is a parameter
-    rather than a hardcoded global so Module 36 (Multiple Disadvantage,
+    rather than a hardcoded global so Module 37 (Multiple Disadvantage,
     which shares this fetch — see `discover_publications`) can pass its own
     `MD_TITLE_RE` through the same quarter/year/label parsing instead of
     duplicating it. Both regexes must keep the same three capture groups
@@ -332,7 +332,7 @@ def discover_publications(
 
     `title_re` lets a sibling module reuse this one content-API fetch
     against its own attachment title convention rather than duplicating the
-    fetch-and-group-by-quarter logic — Module 36's Multiple Disadvantage
+    fetch-and-group-by-quarter logic — Module 37's Multiple Disadvantage
     files live on this exact page (confirmed live; see
     `docs/m30-multiple-disadvantage-feasibility.md`) and share this
     module's "(revised)" convention, so passing `MD_TITLE_RE` here is the

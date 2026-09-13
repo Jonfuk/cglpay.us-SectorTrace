@@ -516,7 +516,7 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "own evidence.",
     ),
     Dataset(
-        "multiple-disadvantage", "m36_multiple_disadvantage",
+        "multiple-disadvantage", "m37_multiple_disadvantage",
         "Multiple Disadvantage Detailed Local Authority Data",
         "Ministry of Housing, Communities and Local Government",
         "https://www.gov.uk/government/collections/homelessness-statistics",
