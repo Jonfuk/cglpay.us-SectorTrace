@@ -86,6 +86,7 @@ _STATED_CADENCE_DAYS: dict[str, int] = {
     "gender-pay-gap": 365,          # "Annual, by snapshot date"
     "statutory-pay-rates": 365,     # "Annual, each April"
     "ashe-earnings": 365,           # "Annual"
+    "nomis-labour-market-context": 365,           # "Annual (ASHE)"
     "skills-for-care": 365,         # "Annual"
     "workforce-census": 365,        # "Annual"
     "ndtms-annual": 365,            # "Annual"
@@ -615,6 +616,21 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "provider's grants here are a floor over what funders chose to "
         "publish, not its total grant income, and are never summed with "
         "procurement or public health grant figures from another module.",
+    ),
+    Dataset(
+        "nomis-labour-market-context", "m42_nomis_context",
+        "Nomis labour-market context (ASHE)",
+        "Office for National Statistics, delivered through Nomis",
+        "https://www.nomisweb.co.uk/datasets/asher",
+        "sector-context", "England — local authority resident and workplace analysis",
+        "Annual (ASHE)",
+        ("nomis_labour_market_observations",),
+        "Headline ASHE observations from Nomis for local-authority resident and "
+        "workplace analysis: median hourly pay excluding overtime and total hours "
+        "worked. This is labour-market context, not a provider's advertised pay "
+        "and not an occupation/industry local-authority comparator. Nomis "
+        "geography and reference-period definitions travel with each row; "
+        "APSNEW is deferred pending a named variable slice.",
     ),
 )
 

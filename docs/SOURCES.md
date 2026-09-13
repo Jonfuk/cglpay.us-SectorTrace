@@ -80,6 +80,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m37_multiple_disadvantage` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `multiple_disadvantage_snapshot` | Open Government Licence v3.0 |
 | `m38_police_recorded_crime` | Home Office | Comparator (never combined) | Quarterly | `police_recorded_drug_offences` | Open Government Licence v3.0 |
 | `m39_360giving` | 360Giving (multiple funders, via the 360Giving API) | Public finance | Ad hoc | `three_sixty_giving_grants` | Varies by publisher (predominantly CC BY 4.0) |
+| `m42_nomis_context` | Office for National Statistics, delivered through Nomis | Sector context | Annual (ASHE) | `nomis_labour_market_observations` | Open Government Licence v3.0 (Nomis/ONS data) |
 
 <!-- END GENERATED: source-capability-matrix -->
 
@@ -510,6 +511,17 @@ invisible here.
 | Key | None |
 | Rate limit | Default |
 | Notes | Median gross hourly pay **excluding overtime**, all employees, all working patterns, UK and England, every published tax year of the version the API serves. Pinned dimension codes are queried against the version's own options (a code the version no longer serves is a review item); labels come from the options response. **Known access shape:** the observations endpoint answered 502 for every ASHE query at verification on 2026-08-15 (a cpih01 query answered), and the API's ASHE versions lag the publication — so this module currently fails loudly against the live API rather than collecting nothing quietly. The phase gate applies: an ASHE-versus-adverts statement is **side-by-side**, never a ratio |
+
+## Module 42 — Nomis labour-market context
+
+| | |
+| --- | --- |
+| Source | Office for National Statistics ASHE datasets, delivered through Nomis |
+| Endpoints | `https://www.nomisweb.co.uk/api/v01/dataset/ASHER.data.csv` (resident) and `.../ASHE.data.csv` (workplace), with `geography=TYPE424`, total sex, median item, hourly pay excluding overtime and total hours worked |
+| Licence | OGL v3.0 for the ONS data; Nomis terms and source definitions remain relevant |
+| Key | `dataset_id + geography_code + sex + item + pay + time` |
+| Rate limit | Default; serial requests only |
+| Notes | Headline local-authority context, not provider pay. The M42 slice retains both resident and workplace analysis, full published ASHE periods, labels/status/confidence and exact response provenance. Nomis does not provide local-authority occupation/industry earnings, so m21 remains the direct ONS path for those slices. APSNEW is explicitly deferred until a named variable is approved. |
 
 ## Module 22 — Provider career and reward pages
 
