@@ -1,6 +1,6 @@
-"""Module 36: 360Giving grants (received and made) for tracked providers.
+"""Module 39: 360Giving grants (received and made) for tracked providers.
 
-Feasibility: docs/m36-360giving-grantnav-feasibility.md. The fixtures below
+Feasibility: docs/m39-360giving-grantnav-feasibility.md. The fixtures below
 are shaped from real, live-verified api.threesixtygiving.org responses
 (Change Grow Live's own grants), not invented ones -- including the two
 findings that matter for parsing: the same organisation is filed under a
@@ -14,7 +14,7 @@ import json
 import pytest
 
 from pipeline import providers
-from pipeline.modules import m36_360giving as tsg
+from pipeline.modules import m39_360giving as tsg
 from pipeline.registry import ModuleContext
 
 API = "https://api.threesixtygiving.org/api/v1"
@@ -218,7 +218,7 @@ def test_run_reconciles_by_both_identifier_schemes_and_paginates(httpx_mock, set
     # that is the expected outcome for an identifier 360Giving has never
     # seen, not a fault.
     review_items = conn.execute(
-        "SELECT * FROM review_queue WHERE module = 'm36_360giving'").fetchall()
+        "SELECT * FROM review_queue WHERE module = 'm39_360giving'").fetchall()
     assert not review_items
 
 
@@ -246,7 +246,7 @@ def test_a_non_404_client_error_is_a_review_item(httpx_mock, settings, conn):
     tsg.run(ctx)
 
     review_items = conn.execute(
-        "SELECT * FROM review_queue WHERE module = 'm36_360giving' "
+        "SELECT * FROM review_queue WHERE module = 'm39_360giving' "
         "AND item_type = 'three_sixty_giving_org_unavailable'").fetchall()
     assert len(review_items) == 1
     assert review_items[0]["raw_value"] == "GB-CHC-1079327"

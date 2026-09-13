@@ -190,7 +190,7 @@ const MODULE_LICENCES = {
   m33_hse_notices: 'hse_notices',
   m34_icb_board_papers: 'ogl_v3',
   m35_open_jobs: 'open_jobs_cc0',
-  m36_360giving: 'three_sixty_giving_varies',
+  m39_360giving: 'three_sixty_giving_varies',
 };
 
 export function licenceFor(module) {

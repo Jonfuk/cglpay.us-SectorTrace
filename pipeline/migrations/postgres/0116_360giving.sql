@@ -1,6 +1,6 @@
--- Module 36: 360Giving grants (received and made) for tracked providers.
+-- Module 39: 360Giving grants (received and made) for tracked providers.
 --
--- Feasibility: docs/m36-360giving-grantnav-feasibility.md. Scoped to the
+-- Feasibility: docs/m39-360giving-grantnav-feasibility.md. Scoped to the
 -- tracked providers' own charity/company numbers via provider_identifiers --
 -- the same lookup m03/m04 already do against their own sources -- rather
 -- than the API's full 454,270-organisation universe. This is reconciliation
@@ -11,7 +11,7 @@
 -- 'finance' evidence layer, but are never summed with m01 contract value or
 -- m11 public health grant allocations: different populations, different
 -- reference periods, a different publisher for every row. See
--- docs/CAVEATS.md, "360Giving grants (Module 36)".
+-- docs/CAVEATS.md, "360Giving grants (Module 39)".
 --
 -- direction distinguishes a grant a provider received from one it made,
 -- rather than two near-identical tables -- the ticket's own two-sided ask

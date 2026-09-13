@@ -6,7 +6,7 @@ against commit `55fde50` with a clean tree. JON-6 is labelled `Post-V1` /
 terms, provenance requirements, an integration approach and draft acceptance
 criteria before implementation — not an implementation. The ticket's earlier
 numeric ranking is superseded by a module audit that renamed this a distinct
-module, proposed `m36_360giving` (numbering to be confirmed at build time,
+module, proposed `m39_360giving` (numbering to be confirmed at build time,
 not reserved here) supporting `m03_charity_finance` and `m23_sector_universe`.
 
 Every factual claim below was checked live on 2026-09-12 against

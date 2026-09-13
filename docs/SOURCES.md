@@ -75,7 +75,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
-| `m36_360giving` | 360Giving (multiple funders, via the 360Giving API) | Public finance | Ad hoc | `three_sixty_giving_grants` | Varies by publisher (predominantly CC BY 4.0) |
+| `m39_360giving` | 360Giving (multiple funders, via the 360Giving API) | Public finance | Ad hoc | `three_sixty_giving_grants` | Varies by publisher (predominantly CC BY 4.0) |
 
 <!-- END GENERATED: source-capability-matrix -->
 
@@ -600,7 +600,7 @@ public `querydata`/`public/query` responses. The legacy HTML flow below remains 
 | Rate limit | Default (2s/host, conditional requests). 42 distinct hosts, so concurrency across ICBs never raises any one site's request rate |
 | Notes | **Discovery, not extraction, and an ICB is not a commissioner of drug and alcohol treatment** — local authorities are, from the public health grant. A substance-misuse mention in a board pack is context for a person, never a figure, and is never attributed to an LA or added to anything (see `docs/CAVEATS.md`, "ICB board papers (Module 34)"). **Every** Board and committee document is captured, archived and text-indexed regardless of subject; `subject_hits` (substance-misuse + workforce term frequency) and tracked-provider mentions only rank the review worklist, and `subject_hits = 0` means "not surfaced this run", not "irrelevant". Nothing reaches `icb_board_papers` without a person promoting it. `--since` is honoured against the meeting date parsed from a document's link text, so a multi-year back-catalogue is fetched once; the full listing is still walked every run to notice additions. Officer names and incident detail live only in `restricted_icb_paper_snippets`. Not surfaced on the public portal. **Parsers written to the observed structure and exercised by fixtures; first real run to be watched by a person, per the reduced-testing policy for a new source.** |
 
-## Module 36 — 360Giving grants
+## Module 39 — 360Giving grants
 
 | | |
 | --- | --- |
@@ -609,7 +609,7 @@ public `querydata`/`public/query` responses. The legacy HTML flow below remains 
 | Licence | Recorded `three_sixty_giving_varies` — per grant, predominantly CC BY 4.0, with OGL v3.0, CC BY-SA 4.0 and CC0 also live (counted directly against the 360Giving Data Registry, 2026-09-12) |
 | Key | None |
 | Rate limit | Default (2s/host) — comfortably under the only published figure found, the older API's stated 2 requests/second |
-| Notes | Feasibility: [`m36-360giving-grantnav-feasibility.md`](m36-360giving-grantnav-feasibility.md). Scoped to the tracked providers' own `charity_number`/`company_number` in `provider_identifiers`, not the API's full ~450,000-organisation universe — the same identifier-based reconciliation `m03`/`m04` already do against their own sources. No date or incremental filter exists on any endpoint, so a run re-fetches each tracked provider's own grants in full. See `docs/CAVEATS.md`, "360Giving grants (Module 36)", for what this data is not: never summed with `m01`/`m11`/`m13` finance figures, a floor over voluntary publication, and a source that itself carries inconsistent date formats and at least one observed publisher data-entry error, both kept verbatim. |
+| Notes | Feasibility: [`m39-360giving-grantnav-feasibility.md`](m39-360giving-grantnav-feasibility.md). Scoped to the tracked providers' own `charity_number`/`company_number` in `provider_identifiers`, not the API's full ~450,000-organisation universe — the same identifier-based reconciliation `m03`/`m04` already do against their own sources. No date or incremental filter exists on any endpoint, so a run re-fetches each tracked provider's own grants in full. See `docs/CAVEATS.md`, "360Giving grants (Module 39)", for what this data is not: never summed with `m01`/`m11`/`m13` finance figures, a floor over voluntary publication, and a source that itself carries inconsistent date formats and at least one observed publisher data-entry error, both kept verbatim. |
 
 ## Viability checks
 

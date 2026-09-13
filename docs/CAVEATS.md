@@ -1051,9 +1051,9 @@ on the public portal.*
 
 ---
 
-### 360Giving grants (Module 36)
+### 360Giving grants (Module 39)
 
-*Feasibility and access-term detail: `docs/m36-360giving-grantnav-feasibility.md`.
+*Feasibility and access-term detail: `docs/m39-360giving-grantnav-feasibility.md`.
 Reads only `api.threesixtygiving.org`, a separate and newer API from
 GrantNav's own retired bulk endpoints — do not extend this module toward
 GrantNav's HTML search, which `robots.txt` disallows.*

@@ -546,7 +546,7 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "the real sites -- see the module docstring.",
     ),
     Smoke(
-        module="m36_360giving",
+        module="m39_360giving",
         produces=("three_sixty_giving_grants",),
         signal=(("three_sixty_giving_grants", "amount_awarded"),
                 ("three_sixty_giving_grants", "counterparty_name"),
@@ -557,7 +557,7 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
                            "on file, so there is no 360Giving org id to look up",
         limit=None,
         note="Ignores --limit: already bounded to the tracked providers' own "
-              "identifiers (docs/m36-360giving-grantnav-feasibility.md), not a "
+              "identifiers (docs/m39-360giving-grantnav-feasibility.md), not a "
               "corpus-wide crawl -- roughly 13 providers x up to 2 identifier "
               "schemes x 2 directions, not thousands of pages. Verified live "
               "2026-09-12 that Change Grow Live has 21 real grants received "

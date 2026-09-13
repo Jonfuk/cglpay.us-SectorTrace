@@ -1,6 +1,6 @@
-"""Module 36 — 360Giving grants (received and made) for tracked providers.
+"""Module 39 — 360Giving grants (received and made) for tracked providers.
 
-Feasibility: `docs/m36-360giving-grantnav-feasibility.md`. That document
+Feasibility: `docs/m39-360giving-grantnav-feasibility.md`. That document
 verified live that "GrantNav" and "the 360Giving API" are not the same
 thing: GrantNav's documented bulk endpoints are gone and its `/search` is
 both robots-disallowed and unreliable, while `api.threesixtygiving.org` is a
@@ -172,15 +172,15 @@ def _fetch_direction(client: PipelineHTTPClient, conn, module_name: str, *,
 
 
 @register_module(
-    "m36_360giving", supports_since=False,
+    "m39_360giving", supports_since=False,
     since_note="the API has no date or incremental filter on any endpoint "
-               "(verified live; docs/m36-360giving-grantnav-feasibility.md "
+               "(verified live; docs/m39-360giving-grantnav-feasibility.md "
                "§3) — every run re-fetches each tracked provider's own "
                "grants in full, a bounded provider-scoped re-pull rather "
                "than a corpus-wide crawl",
 )
 def run(ctx: ModuleContext) -> None:
-    module_name = "m36_360giving"
+    module_name = "m39_360giving"
     conn = ctx.conn
     providers.seed_providers(conn, commit=not ctx.dry_run)
 

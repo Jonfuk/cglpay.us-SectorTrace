@@ -544,7 +544,7 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         operator_only=True,
     ),
     Dataset(
-        "360giving-grants", "m36_360giving",
+        "360giving-grants", "m39_360giving",
         "360Giving grants received and made",
         "360Giving (multiple funders, via the 360Giving API)",
         "https://www.360giving.org/",
