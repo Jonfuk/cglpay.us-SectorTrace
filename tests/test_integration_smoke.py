@@ -497,7 +497,7 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "spec above.",
     ),
     Smoke(
-        module="m36_multiple_disadvantage",
+        module="m37_multiple_disadvantage",
         produces=("multiple_disadvantage_snapshot",),
         signal=(("multiple_disadvantage_snapshot", "quarter_label"),
                 ("multiple_disadvantage_snapshot", "assessed_md_total_text")),

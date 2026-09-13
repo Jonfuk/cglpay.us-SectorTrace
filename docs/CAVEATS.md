@@ -979,7 +979,7 @@ every other section on the page already uses, not a missing section.*
   than one sheet name would match after stripping is refused rather than
   guessed at.
 
-### Multiple Disadvantage Detailed Local Authority Data (Module 36)
+### Multiple Disadvantage Detailed Local Authority Data (Module 37)
 
 *Not yet surfaced on the public authority page's "Comparators" section
 (BETA-017) alongside Modules 29-31 — collected and catalogued, but the

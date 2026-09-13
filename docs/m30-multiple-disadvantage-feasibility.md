@@ -300,9 +300,9 @@ not something decided here (see §7).
    `read_workbook_sheet`.
 2. **A new module and new table(s)**, not a change to
    `statutory_homelessness_snapshot`'s schema — per §6's shape argument. A
-   candidate module number is `m36` (next free after `m35_open_jobs`) and a
-   candidate migration number is `0116` (next free after `0115`), both to be
-   confirmed at build time.
+   candidate module number is `m37` (next free after `m35_open_jobs`; `m36`
+   went to a different PR) and a candidate migration number is `0116` (next
+   free after `0115`), both to be confirmed at build time.
 3. **`read_workbook_sheet` (already shared between `m30`/`m31`) can be
    reused as-is** for the four new sheet names
    (`Multiple_Disadvantage_values`, `A_Multiple_Disadvantage`,
