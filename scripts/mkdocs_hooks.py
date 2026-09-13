@@ -378,3 +378,18 @@ def on_post_build(config) -> None:
             )
 
     for script in site_dir.rglob("*.js"):
+        text = script.read_text(encoding="utf-8", errors="ignore")
+        found = set(_SCRIPT_REMOTE_URL_RE.findall(text)) - _ALLOWED_OFFSITE
+        for url in sorted(found):
+            log.warning(
+                "%s references %s; scripts here must not reach off-site",
+                script.relative_to(site_dir).as_posix(), url,
+            )
+
+    for page in site_dir.rglob("*.html"):
+        text = page.read_text(encoding="utf-8", errors="ignore")
+        for attr, url in _HTML_REMOTE_ASSET_RE.findall(text):
+            log.warning(
+                "%s loads %s via %s",
+                page.relative_to(site_dir).as_posix(), url, attr,
+            )
