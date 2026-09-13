@@ -42,9 +42,10 @@ def client(conn, limited_settings):
         # PostgreSQL instance. Under `pytest -n auto` that instance serves
         # every xdist worker's schema at once, and 10s was observed to be
         # tight enough to produce a spurious httpx.ReadTimeout under that
-        # contention (CI runs 34664126213, 34727129292, 34727131516) with no
-        # code change involved -- confirmed by the identical failure on a
-        # `beta` push that never touched this file. 30s matches the timeout
+        # contention (CI runs 34664126213 on beta itself, 34695034392 on this
+        # PR, and 34727129292/34727131516 on other branches) with no code
+        # change involved -- the same flake reproduces on multiple branches
+        # that never touch this file. 30s matches the timeout
         # test_export_completeness.py already uses for its own real-query
         # round trip.
         with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}",
