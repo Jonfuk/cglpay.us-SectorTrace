@@ -72,6 +72,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m30_statutory_homelessness` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `statutory_homelessness_snapshot` | Open Government Licence v3.0 |
 | `m31_temporary_accommodation` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `temporary_accommodation_snapshot`, `temporary_accommodation_breakdowns` | Open Government Licence v3.0 |
 | `m32_sab_site_reviews` | Safeguarding Adults Boards' own websites | Safety & safeguarding | Ad hoc | `sab_site_crawls`, `safeguarding_adults_boards` | Varies by authority |
+| `m33_hse_convictions` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_convictions` | HSE public register — Crown copyright / OGL v3.0 |
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
@@ -209,7 +210,7 @@ one as constructed wherever it appears.
 | Key | **`COMPANIES_HOUSE_API_KEY`** — free registration. HTTP basic auth, key as username |
 | Rate limit | Default (the API's own documented limit is 600 requests / 5 minutes) |
 | Personal data | Officers are named. Stored only in `restricted_company_officers` |
-| Also collects | **Insolvency cases** (`/company/{n}/insolvency`), **People with Significant Control** (`/company/{n}/persons-with-significant-control`, Phase 15/G3), and a **disqualified-director check** (`/search/disqualified-officers`) — see below |
+| Also collects | **Insolvency cases** (`/company/{n}/insolvency`), **People with Significant Control** (`/company/{n}/persons-with-significant-control`, Phase 15/G3), a **disqualified-director check** (`/search/disqualified-officers`), **charges** (`/company/{n}/charges`, JON-36) — see below |
 
 **Insolvency.** Fetched only where the company profile publishes
 `links.insolvency` or `has_insolvency_history`, so a company with no case
@@ -246,6 +247,55 @@ of birth Companies House publishes with it) lives only in
 `restricted_company_psc`. A company whose register is redacted answers with a
 statement rather than a list — recorded as a review item, because the absence
 of PSCs is then a redaction, not a finding.
+
+**Charges (JON-36).** A registered charge (mortgage, debenture and the like)
+against a company, fetched per company the same way insolvency is, gated on
+the profile's own `links.charges`. `status` is stored in Companies House's own
+vocabulary (`outstanding`/`satisfied`/`part-satisfied`/…), never collapsed to
+a boolean. Public register data — not personal data the way an officer's date
+of birth is — so it lives in the public `company_charges`/`company_charge_dates`
+tables, the latter keeping the register's own per-charge date field names.
+
+### Streaming discovery (JON-36) — extension of Module 4
+
+| | |
+| --- | --- |
+| Source | Companies House **Streaming API** |
+| Endpoint | `https://stream.companieshouse.gov.uk` |
+| Streams used | `/companies`, `/filings`, `/insolvency-cases`, `/charges` — the four the ticket names. **Not used**: `/officers`, `/persons-with-significant-control`, `/disqualified-officers`, `/company-exemptions`, `/persons-with-significant-control-statements` |
+| Licence | OGL v3.0, same as the REST API |
+| Key | **`COMPANIES_HOUSE_STREAMING_API_KEY`** — a *separate* registered application from `COMPANIES_HOUSE_API_KEY`; Companies House states the two key types are not interchangeable. HTTP basic auth, key as username. Off by default (`COMPANIES_HOUSE_STREAMING_ENABLED`) |
+| Shape | A single long-lived HTTP connection per stream, newline-delimited JSON, not a normal request/response — `pipeline.http.PipelineHTTPClient.stream_events` is the bespoke consumption method this required |
+| Resumption | Each event carries a `timepoint`; reconnecting with `?timepoint=<n>` resumes after it. Checkpointed per stream in `module_cursors` (`m04_companies:stream:<name>`) |
+| Errors | `416` = the timepoint is no longer held (retention window undocumented by Companies House) — cursor resets to "now" and a review item records the gap, never a guessed replacement. `429` = must wait 60s before reconnecting; this pipeline stops that stream for the run rather than holding a foreground run open, and relies on the next scheduled run. Other transient failures: ~10s backoff, bounded reconnects |
+| Document API | `https://document-api.company-information.service.gov.uk` — a separate host serving the actual filing bytes a filing-history item's `document_url` points at. Metadata first (`GET /document/{id}`), then content negotiation on `links.document` (`Accept: application/pdf`, falling back to `application/xhtml+xml` for iXBRL accounts when PDF isn't offered) |
+
+This is an **extension of Module 4, not a new module** — same reasoning as the
+insolvency/PSC/disqualified-officer additions above: same API family, same
+key(s), same client. The four streams are a change-notification mechanism
+only; no event's own payload is written to a table, only the authoritative
+REST fetch it triggers. See the `m04_companies` module docstring and
+`docs/CAVEATS.md`'s Module 4 section.
+
+**Statutory accounts, discovered via the filing-history stream.** A filing
+tagged `category = 'accounts'` seeds a candidate
+(`companies_house_accounts_candidates`) rather than evidence — the same
+discovery-until-promoted discipline `pipeline/promote.py` already applies to
+m09/m10/m15's candidates, extended with a fourth kind
+(`companies_house_accounts`). This is a structurally separate evidence layer
+from Module 3's `charity_commission_filed_accounts`: a charity's Charity
+Commission accounts and its trading subsidiary's Companies House accounts are
+different legal entities' filings under different regimes, never merged or
+reconciled. This module retrieves and archives the promoted document; it does
+not extract or compute any figure from it.
+
+**Limitation, stated plainly.** Companies House's real event volume across
+~5.5M companies means a bounded per-invocation catch-up run only as often as
+`m04_companies`'s normal schedule will not keep pace in any meaningful sense.
+The intended shape is a second, more frequent scheduled invocation
+(`pipeline run m04_companies --stream-only`) alongside the slower full sweep;
+wiring that cadence into a deployment's cron/systemd-timer configuration is a
+deploy-time follow-up this ticket does not itself ship.
 
 ## Module 5 — CQC
 
@@ -588,6 +638,17 @@ public `querydata`/`public/query` responses. The legacy HTML flow below remains 
 | Key | None |
 | Rate limit | Default (`resources.hse.gov.uk` serves no robots.txt) |
 | Notes | One organisation-name search per tracked-provider name variant. Notices served on **individuals are excluded at parse time**; a notice is attributed to a provider (`provider_key` set) only on an exact normalised name match, the same discipline as Modules 4 and 18, and a near-miss is a `review_queue` item. Every field is stored verbatim, including `result` — a notice can be appealed, affirmed, modified, cancelled or withdrawn after issue, and this pipeline never infers compliance. **The live-fetch parser is written to the register's documented structure and exercised by a representative fixture; not yet validated against real HSE HTML — first run to be watched by a person.** Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety` |
+
+## Module 33 — HSE convictions
+
+| | |
+| --- | --- |
+| Source | Health and Safety Executive public register of convictions |
+| Endpoints | `https://resources.hse.gov.uk/convictions/breach/breach_list.asp` (defendant-name contains-search, breach level) |
+| Licence | Crown copyright; HSE content is generally OGL v3.0 — recorded as `hse_convictions` in `pipeline/licences.py` |
+| Key | None |
+| Rate limit | Default |
+| Notes | Sibling to Module 33's notices collector, sharing its organisation/individual test and exact-match discipline (`m33_hse_convictions` imports `is_organisation`/`name_matches` from `m33_hse_notices` rather than duplicating them). Collects the register's **breach list**, not the case file: one row per breach (`hse_enforcement_convictions`), keyed on the register's own breach id, carrying hearing date, result, fine and the Act/Regulation section — not the case-level address, industry or HSE division, which sit behind a separate `case_details.asp` fetch this module does not make. **The register's own retention window is not this pipeline's**: a conviction is published for one year, then for a further nine on the conviction-history register, then not at all — an absence here is not a clean record. **The defendant-name search field code is not confirmed against the live register**: HSE's standard/advanced search forms build their field dropdown after a POST step no archived capture shows, so this module reuses the notices collector's confirmed `SF=CN` convention on the (evidenced but not proven) assumption the two registers share a query engine. A wrong field code returns no rows, not wrong ones, but does mean an empty result is not yet trustworthy as "no convictions" until confirmed live. **The live-fetch path itself is unvalidated**: `resources.hse.gov.uk` timed out from the environment this module was written in (`www.hse.gov.uk` answered normally), so the parser was built and tested against real HTML pulled from the Wayback Machine's archived captures of `breach_list.asp`, not a live fetch — first run to be watched by a person, more so than Module 33's notices collector given the unconfirmed search parameter above. Only `provider_key IS NOT NULL` rows are published, through `/api/v1/safety`, kept as a distinct `hse_conviction` stream from notices (never summed with them) |
 
 ## Module 34 — Integrated Care Board governance documents
 
