@@ -85,8 +85,8 @@ _STATED_CADENCE_DAYS: dict[str, int] = {
     "council-spend": 30,            # "Monthly, per authority"
     "gender-pay-gap": 365,          # "Annual, by snapshot date"
     "statutory-pay-rates": 365,     # "Annual, each April"
-    "ashe-earnings": 365,
-    "nomis-labour-market-context": 365,           # "Annual"
+    "ashe-earnings": 365,           # "Annual"
+    "nomis-labour-market-context": 365,           # "Annual (ASHE)"
     "skills-for-care": 365,         # "Annual"
     "workforce-census": 365,        # "Annual"
     "ndtms-annual": 365,            # "Annual"
