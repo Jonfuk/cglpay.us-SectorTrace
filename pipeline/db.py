@@ -103,18 +103,20 @@ def applied_migrations(conn) -> set[str]:
     return {row["filename"] for row in conn.execute("SELECT filename FROM schema_migrations")}
 
 
-# The PostgreSQL extensions the warehouse requires. Each backs a plan that is
-# now the only implementation, its SQLite/Python fallback removed with the
-# SQLite backend (performance.md Phase 1):
+# PostgreSQL extensions the warehouse uses where the server provides them.
+# Each backs a feature with a pure-Python or plain-SQL fallback:
 #
-#   * vector   — pgvector/HNSW is the only semantic-search path (pipeline/nlp).
-#   * pg_trgm  — the operator's fuzzy-name search and the portal's contract
-#                text filter, through GIN indexes.
-#   * postgis  — a geometry column and spatial index on `authorities`.
+#   * vector   — an ANN index for semantic search; without it the search does
+#                an exact cosine sweep in Python (pipeline/nlp).
+#   * pg_trgm  — fuzzy-name ranking and the portal's contract text filter;
+#                without it those paths use LIKE / difflib.
+#   * postgis  — a geometry column and spatial index on `authorities`; without
+#                it geometry_geojson remains the source for shapely exports.
 #
-# They are mandatory: `ensure_extensions` fails the migrate clearly if the
-# server cannot provide one, rather than degrading silently to a path that no
-# longer exists.
+# Absence is a degraded capability, not a failed migration. This matters for
+# managed PostgreSQL, where the server may not carry an extension or the
+# application role may not be allowed to create it. The feature that uses it
+# reports the fallback through the capability and health surfaces.
 WAREHOUSE_EXTENSIONS = ("vector", "pg_trgm", "postgis")
 
 
@@ -129,37 +131,37 @@ def has_extension(conn, name: str) -> bool:
 
 
 def ensure_extensions(conn, names: Sequence[str] = WAREHOUSE_EXTENSIONS) -> list[str]:
-    """`CREATE EXTENSION IF NOT EXISTS` for each of `names`, then require it.
+    """Best-effort `CREATE EXTENSION IF NOT EXISTS` for each of `names`.
 
-    The extensions are mandatory now that their fallbacks are gone, so absence
-    is fatal. But a `CREATE EXTENSION` that *fails* is not the same as an
-    absent extension: a managed server (Railway) may forbid the role from
-    creating one that is already installed, and that is fine. So each name is
-    created best-effort — the refusal swallowed, the transaction rolled back —
-    and then checked with `has_extension`. Only a name that is genuinely not
-    present afterwards raises, and it raises naming all of them together rather
-    than failing on the first.
+    A managed server may not carry an extension, or may refuse the create for
+    the application role. That is a degraded capability, not a migration
+    failure: extension-backed migrations guard their DDL and the affected
+    feature uses its documented fallback. Each statement runs in its own
+    transaction (`with conn:`) so one refusal does not poison the next.
 
-    Each statement runs in its own transaction (`with conn:`) so one refusal
-    does not poison the next.
+    Returns the names whose create statements completed without error. The
+    health and capability surfaces separately report what is actually
+    installed, including extensions that were already present but could not be
+    re-created by this role.
     """
     from pipeline.catalog import quote
 
+    present: list[str] = []
     for name in names:
         try:
             with conn:
                 conn.execute(f"CREATE EXTENSION IF NOT EXISTS {quote(name)}")
-        except Exception:  # noqa: BLE001 - a refusal is not absence; has_extension decides
+        except Exception as error:  # noqa: BLE001 - a missing extension is not fatal
             conn.rollback()
+            import structlog
 
-    missing = [name for name in names if not has_extension(conn, name)]
-    if missing:
-        raise RuntimeError(
-            "required PostgreSQL extension(s) not available: "
-            f"{', '.join(missing)}. pgvector (vector), pg_trgm and PostGIS are "
-            "mandatory — install them on the server or use the image in "
-            "deploy/postgres/Dockerfile (performance.md Phase 1).")
-    return list(names)
+            structlog.get_logger().warning(
+                "db.extension_unavailable", extension=name,
+                error=f"{type(error).__name__}: {error}",
+                note="the feature this backs will use its fallback path")
+            continue
+        present.append(name)
+    return present
 
 
 def reader_role(settings: Settings | None = None) -> str | None:
@@ -254,10 +256,10 @@ def apply_migrations(conn, migrations_dir: Path | None = None, *,
     if migrations_dir is None:
         migrations_dir = (settings or get_settings()).migrations_dir / "postgres"
 
-    # Before any migration that references an extension can run. The three
-    # required extensions are created (or confirmed present) here, and a server
-    # that cannot provide one fails the migrate clearly rather than running on
-    # into DDL that assumes it.
+    # Give extension-backed migrations the opportunity to provision their
+    # accelerators. A server that cannot provide one still migrates: those
+    # migrations guard their DDL, and the affected query path reports its
+    # fallback rather than making the whole service unstartable.
     ensure_extensions(conn)
 
     already = applied_migrations(conn)

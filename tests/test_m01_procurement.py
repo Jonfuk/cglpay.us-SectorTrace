@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from pipeline import db, notice_urls
+from pipeline.authority_names import build_authority_lookup, normalise_authority_name
 from pipeline.http import PipelineHTTPClient
 from pipeline.modules import m01_procurement as proc
 from pipeline.registry import ModuleContext
@@ -64,23 +65,35 @@ def _apply_release_write(conn, bundle: "proc.ReleaseWrite | None") -> int:
     ("City of London Corporation", "london corporation"),
 ])
 def test_normalise_authority_name(raw, expected):
-    assert proc._normalise_authority_name(raw) == expected
+    assert normalise_authority_name(raw) == expected
+
+
+@pytest.mark.parametrize("raw,expected", [
+    ("Bristol, City of", "bristol"),
+    ("Herefordshire, County of", "herefordshire"),
+    ("Kingston upon Hull, City of", "kingston upon hull"),
+])
+def test_normalise_authority_name_handles_comma_suffix_forms(raw, expected):
+    # These three ONS names take a "<name>, City of"/"<name>, County of"
+    # form; a source that sends the plain form must still match them. See
+    # docs/mysociety-identifier-mappings-feasibility.md S5.
+    assert normalise_authority_name(raw) == expected
 
 
 def test_match_buyer_exact_normalised_match(conn):
     _seed_authority(conn, "E06000061", "West Northamptonshire")
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     assert proc._match_buyer("West Northamptonshire Council", lookup) == "E06000061"
 
 
 def test_match_buyer_falls_back_to_overrides(conn, monkeypatch):
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     monkeypatch.setitem(proc.BUYER_NAME_OVERRIDES, "Some Odd Council Name", "E06000099")
     assert proc._match_buyer("Some Odd Council Name", lookup) == "E06000099"
 
 
 def test_match_buyer_returns_none_when_unmatched(conn):
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     assert proc._match_buyer("Totally Unknown Body Ltd", lookup) is None
 
 
@@ -92,7 +105,7 @@ def test_match_buyer_resolves_retired_authority(conn):
         "VALUES ('E10000021', 'Northamptonshire', 'county', '2015-01-01', '2021-04-01', 'x', 'x', "
         "'https://example.com', '2020-01-01T00:00:00Z', 200, 'test', 'abc')"
     )
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     assert proc._match_buyer("Northamptonshire County Council", lookup) == "E10000021"
 
 
@@ -255,7 +268,7 @@ def test_iter_supplier_rows_multi_lot_multi_supplier():
 def test_process_release_against_real_fts_fixture(conn):
     release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
     _seed_authority(conn, "E06000061", "West Northamptonshire")
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
 
     class _FakeResult:
         url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
@@ -600,7 +613,7 @@ def test_process_csv_release_row_records_amount_parse_failure(conn):
 
     bundle = proc._process_csv_release_row(
         "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(),
-        proc._build_authority_lookup(conn))
+        build_authority_lookup(conn))
     written = _apply_release_write(conn, bundle)
 
     # The release is still kept -- that is the point of NULL over discarding.
@@ -671,7 +684,7 @@ def test_process_csv_release_row_matches_and_persists(conn):
         payload_sha256 = "deadbeef"
 
     bundle = proc._process_csv_release_row(
-        "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), proc._build_authority_lookup(conn))
+        "m01_procurement", proc.SOURCE_CF_CSV, row, _FakeResult(), build_authority_lookup(conn))
     written = _apply_release_write(conn, bundle)
     assert written == 1
 
@@ -767,7 +780,7 @@ def test_walk_and_process_csv_archive_end_to_end(httpx_mock, settings, conn):
         matched = proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
             "m01_procurement:cf_csv", proc.WINDOW_START,
-            proc._build_authority_lookup(conn), None, False, settings,
+            build_authority_lookup(conn), None, False, settings,
         )
 
     assert matched == 1
@@ -816,7 +829,7 @@ def test_walk_and_process_csv_archive_skips_robots_disallowed_file(httpx_mock, s
         matched = proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
             "m01_procurement:cf_csv", proc.WINDOW_START,
-            proc._build_authority_lookup(conn), None, False, settings,
+            build_authority_lookup(conn), None, False, settings,
         )
 
     assert matched == 1
@@ -838,7 +851,7 @@ def test_process_release_records_a_channel_sighting(conn):
     """
     release = json.loads((FIXTURES / "fts_release_award_sample.json").read_text())
     _seed_authority(conn, "E06000061", "West Northamptonshire")
-    lookup = proc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
 
     class _FakeResult:
         url = "https://www.find-tender.service.gov.uk/api/1.0/ocdsReleasePackages?x=1"
@@ -1348,7 +1361,7 @@ def test_walk_and_process_csv_archive_records_a_collection_attempt_per_month(htt
         proc._walk_and_process_csv_archive(
             client, conn, "m01_procurement", proc.SOURCE_CF_CSV,
             "m01_procurement:cf_csv", proc.WINDOW_START,
-            proc._build_authority_lookup(conn), None, False, settings,
+            build_authority_lookup(conn), None, False, settings,
         )
 
     attempt = conn.execute(

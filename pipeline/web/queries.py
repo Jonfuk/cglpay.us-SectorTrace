@@ -257,6 +257,7 @@ SCHEMA_DESCRIPTIONS = {
     "ndtms_la_statistics": "NDTMS modelled local-authority estimates.",
     "cqc_locations": "CQC-registered locations for tracked providers.",
     "hse_enforcement_notices": "HSE enforcement notices matched to a provider.",
+    "hse_enforcement_convictions": "HSE convictions register, breach level, matched to a provider.",
     "pfd_reports": "Coroners' Prevention of Future Deaths reports (metadata).",
     "pfd_provider_mentions": "A provider mentioned in a PFD report; `mention_type` distinguishes recipient from body text.",
     "sar_documents": "Safeguarding Adult Review documents from the National SAR Library.",

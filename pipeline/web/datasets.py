@@ -467,6 +467,22 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "notices is not a safety rating.",
     ),
     Dataset(
+        "hse-enforcement-convictions", "m33_hse_convictions",
+        "HSE convictions",
+        "Health and Safety Executive",
+        "https://resources.hse.gov.uk/convictions/",
+        "safety", "Great Britain — HSE-prosecuted cases",
+        "Continuous",
+        ("hse_enforcement_convictions",),
+        "Breach-level entries from the public register of convictions, "
+        "matched to a tracked provider by exact name only; individuals "
+        "excluded. A distinct stream from HSE notices, never summed with "
+        "them. Breach level, not case level — address, industry and HSE "
+        "division are not collected. The register carries a conviction for "
+        "one year and a further nine on its history register before "
+        "removal, so an absence is not a clean record.",
+    ),
+    Dataset(
         "sab-site-reviews", "m32_sab_site_reviews",
         "SARs on Safeguarding Adults Board websites",
         "Safeguarding Adults Boards' own websites",
@@ -556,6 +572,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "This dataset is disabled by default and excluded from all public "
         "catalogue, query and export projections until separately approved.",
         operator_only=True,
+    ),
+    Dataset(
+        "govuk-publications", "m36_govuk_publications",
+        "GOV.UK publication discovery (DHSC and OHID)",
+        "GOV.UK Search API and Content API (Government Digital Service)",
+        "https://www.gov.uk/api/search.json",
+        "accountability", "England — national (DHSC and OHID)",
+        "Continuous",
+        ("govuk_publication_documents", "govuk_document_candidates"),
+        "Discovery, not extraction: every file attachment on a DHSC or OHID "
+        "publication matching a substance misuse keyword is a candidate a "
+        "person confirms before it becomes evidence. A search hit is not "
+        "proof of relevance — 'alcohol' matches licensing guidance as often "
+        "as treatment policy.",
     ),
 )
 
