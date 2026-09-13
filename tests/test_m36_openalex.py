@@ -5,9 +5,8 @@ import json
 import re
 from pathlib import Path
 
-from pipeline.registry import ModuleContext
-
 from pipeline.modules import m36_openalex
+from pipeline.registry import ModuleContext
 
 FIXTURE = Path(__file__).parent / "fixtures" / "openalex_works.json"
 
