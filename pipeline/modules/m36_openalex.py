@@ -17,10 +17,10 @@ import json
 from typing import Any
 
 import structlog
-
-from pipeline import db
 from pipeline.http import PipelineHTTPClient
 from pipeline.registry import ModuleContext, register_module
+
+from pipeline import db
 
 log = structlog.get_logger()
 
@@ -34,10 +34,7 @@ DEFAULT_QUERY_TERMS = (
     "public health service evaluation",
     "local authority public health evaluation",
 )
-WORK_SELECT = ",".join((
-    "id", "doi", "title", "publication_date", "type", "primary_topic",
-    "topics", "grants", "open_access", "updated_date", "authorships",
-))
+WORK_SELECT = "id,doi,title,publication_date,type,primary_topic,topics,grants,open_access,updated_date,authorships"
 
 
 def _json(value: Any) -> str:
@@ -99,7 +96,7 @@ def _candidate(conn: Any, work_id: str, relationship_type: str,
                object_type: str, object_id: str, evidence: dict[str, Any],
                source: dict[str, Any]) -> None:
     candidate_id = hashlib.sha256(
-        f"{work_id}|{relationship_type}|{object_type}|{object_id}".encode("utf-8")
+        f"{work_id}|{relationship_type}|{object_type}|{object_id}".encode()
     ).hexdigest()
     db.upsert(conn, "openalex_relationship_candidates", {
         "candidate_id": candidate_id,
@@ -264,7 +261,7 @@ def collect(ctx: ModuleContext, *, http: Any | None = None) -> dict[str, int]:
                     payload = json.loads(result.body.decode("utf-8"))
                     works = payload["results"]
                     if not isinstance(works, list):
-                        raise ValueError("results is not a list")
+                        raise TypeError("results is not a list")
                 except (ValueError, KeyError, UnicodeDecodeError, TypeError) as exc:
                     db.record_parse_failure(ctx.conn, SOURCE_SYSTEM, "results",
                                             result.body[:2000].decode("utf-8", "replace"),
