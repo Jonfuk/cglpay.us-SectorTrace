@@ -17,10 +17,10 @@ import json
 from typing import Any
 
 import structlog
-from pipeline.http import PipelineHTTPClient
-from pipeline.registry import ModuleContext, register_module
 
 from pipeline import db
+from pipeline.http import PipelineHTTPClient
+from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
 
