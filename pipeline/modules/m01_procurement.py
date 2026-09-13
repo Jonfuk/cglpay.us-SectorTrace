@@ -75,6 +75,7 @@ from datetime import date, timedelta
 import structlog
 
 from pipeline import collection, db
+from pipeline.authority_names import build_authority_lookup, normalise_authority_name
 from pipeline.buyer_name_overrides import BUYER_NAME_OVERRIDES
 from pipeline.config import Settings
 from pipeline.http import PipelineHTTPClient, RobotsDisallowed
@@ -131,20 +132,6 @@ PSR_SI_ID = "2023/1348"  # The Health Care Services (Provider Selection Regime) 
 _KEYWORDS_LOWER = [k.lower() for k in SUBSTANCE_MISUSE_KEYWORDS]
 _DIRECT_AWARD_RE = re.compile(r"\bdirect award\D{0,10}?(\d)\b|\bda\s?-?\s?(\d)\b", re.IGNORECASE)
 
-_COUNCIL_SUFFIX_RE = re.compile(
-    r"\b(metropolitan borough council|metropolitan district council|"
-    r"county council|city council|borough council|district council|"
-    r"unitary authority|royal borough of|london borough of|city of|council)\b",
-    re.IGNORECASE,
-)
-
-
-def _normalise_authority_name(name: str) -> str:
-    text = name.lower().replace("&", "and")
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    text = _COUNCIL_SUFFIX_RE.sub(" ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
 
 def _normalise_supplier_name(name: str) -> str:
     text = re.sub(r"[^\w\s]", "", name.lower())
@@ -173,15 +160,8 @@ def _seed_supplier_aliases(conn) -> None:
             }, natural_key=["alias_raw"])
 
 
-def _build_authority_lookup(conn) -> dict[str, str]:
-    lookup: dict[str, str] = {}
-    for row in conn.execute("SELECT ons_code, name FROM authorities ORDER BY ons_code"):
-        lookup.setdefault(_normalise_authority_name(row["name"]), row["ons_code"])
-    return lookup
-
-
 def _match_buyer(raw_name: str, authority_lookup: dict[str, str]) -> str | None:
-    normalised = _normalise_authority_name(raw_name)
+    normalised = normalise_authority_name(raw_name)
     if normalised in authority_lookup:
         return authority_lookup[normalised]
     if raw_name.strip() in BUYER_NAME_OVERRIDES:
@@ -1505,7 +1485,7 @@ def run(ctx: ModuleContext) -> None:
     _seed_supplier_aliases(conn)
     if not ctx.dry_run:
         conn.commit()
-    authority_lookup = _build_authority_lookup(conn)
+    authority_lookup = build_authority_lookup(conn)
 
     # ctx.source ("api" | "csv" | "kag" | "all", set by --api/--csv/--kag/--all
     # on the CLI, "csv" by default) scopes this run to one channel below (or,

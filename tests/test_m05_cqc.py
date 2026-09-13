@@ -7,6 +7,7 @@ import httpx
 import pytest
 
 from pipeline import cqc_bulk, db, providers
+from pipeline.authority_names import build_authority_lookup, normalise_authority_name
 from pipeline.modules import m05_cqc as cqc
 from pipeline.registry import ModuleContext
 
@@ -147,8 +148,22 @@ def test_prioritise_accepts_a_custom_priority_order():
 
 def test_local_authority_resolves_to_ons_code(conn):
     _seed_authority(conn, "E08000034", "Kirklees")
-    lookup = cqc._build_authority_lookup(conn)
-    assert lookup[cqc._normalise_authority_name("Kirklees")] == "E08000034"
+    lookup = build_authority_lookup(conn)
+    assert lookup[normalise_authority_name("Kirklees")] == "E08000034"
+
+
+@pytest.mark.parametrize("ons_name,cqc_name", [
+    ("Bristol, City of", "Bristol"),
+    ("Herefordshire, County of", "Herefordshire"),
+    ("Kingston upon Hull, City of", "Kingston upon Hull"),
+])
+def test_local_authority_resolves_comma_suffix_ons_names(conn, ons_name, cqc_name):
+    # These three authorities carry a "<name>, City of"/"<name>, County of"
+    # ONS name; CQC's own localAuthority field sends the plain form. See
+    # docs/mysociety-identifier-mappings-feasibility.md S5.
+    _seed_authority(conn, "E99999999", ons_name)
+    lookup = build_authority_lookup(conn)
+    assert lookup[normalise_authority_name(cqc_name)] == "E99999999"
 
 
 # --- location storage --------------------------------------------------------------
@@ -190,7 +205,7 @@ def _location_payload():
 def test_store_location_populates_public_fields(conn):
     _seed_authority(conn, "E08000034", "Kirklees")
     _seed_cqc_provider(conn)
-    lookup = cqc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     cqc._store_location(conn, "m05_cqc", "1-125892604", "change_grow_live",
                          _location_payload(), _FakeResult(), lookup)
 
@@ -207,7 +222,7 @@ def test_store_location_populates_public_fields(conn):
 
 def test_registered_manager_names_go_only_to_restricted_table(conn):
     _seed_cqc_provider(conn)
-    lookup = cqc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     cqc._store_location(conn, "m05_cqc", "1-125892604", "change_grow_live",
                          _location_payload(), _FakeResult(), lookup)
 
@@ -224,7 +239,7 @@ def test_registered_manager_names_go_only_to_restricted_table(conn):
 
 def test_reports_are_stored_per_location(conn):
     _seed_cqc_provider(conn)
-    lookup = cqc._build_authority_lookup(conn)
+    lookup = build_authority_lookup(conn)
     cqc._store_location(conn, "m05_cqc", "1-125892604", "change_grow_live",
                          _location_payload(), _FakeResult(), lookup)
     report = conn.execute("SELECT * FROM cqc_location_reports").fetchone()
@@ -233,7 +248,7 @@ def test_reports_are_stored_per_location(conn):
 
 def test_unmatched_local_authority_is_queued_not_guessed(conn):
     _seed_cqc_provider(conn)
-    lookup = cqc._build_authority_lookup(conn)  # empty authorities table
+    lookup = build_authority_lookup(conn)  # empty authorities table
     cqc._store_location(conn, "m05_cqc", "1-125892604", "change_grow_live",
                          _location_payload(), _FakeResult(), lookup)
 
