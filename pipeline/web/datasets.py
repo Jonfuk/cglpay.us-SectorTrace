@@ -559,6 +559,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "catalogue, query and export projections until separately approved.",
         operator_only=True,
     ),
+    Dataset(
+        "govuk-publications", "m36_govuk_publications",
+        "GOV.UK publication discovery (DHSC and OHID)",
+        "GOV.UK Search API and Content API (Government Digital Service)",
+        "https://www.gov.uk/api/search.json",
+        "accountability", "England — national (DHSC and OHID)",
+        "Continuous",
+        ("govuk_publication_documents", "govuk_document_candidates"),
+        "Discovery, not extraction: every file attachment on a DHSC or OHID "
+        "publication matching a substance misuse keyword is a candidate a "
+        "person confirms before it becomes evidence. A search hit is not "
+        "proof of relevance — 'alcohol' matches licensing guidance as often "
+        "as treatment policy.",
+    ),
 )
 
 

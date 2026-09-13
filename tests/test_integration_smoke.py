@@ -563,6 +563,21 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "directory and crawl parsers have not yet been validated against "
               "the real sites -- see the module docstring.",
     ),
+    Smoke(
+        module="m36_govuk_publications",
+        produces=("govuk_document_candidates",),
+        signal=(("govuk_document_candidates", "candidate_url"),
+                ("govuk_document_candidates", "title")),
+        limit=None,
+        note="Ignores --limit: each (organisation, keyword) query is paged to "
+              "GOV.UK's own total, capped at MAX_PAGES, which already bounds "
+              "a live run without a separate --limit knob. The keyword pass "
+              "across DHSC and OHID must find something in GOV.UK's own "
+              "search index, or the discovery vocabulary is matching nothing. "
+              "govuk_publication_documents is not a signal table -- nothing "
+              "reaches it without a person promoting a candidate, the same "
+              "shape as m09/m34.",
+    ),
 )}
 
 # Dependency order, so the shared warehouse is built up the same way `run all`

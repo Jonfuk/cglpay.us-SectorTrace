@@ -189,6 +189,7 @@ const MODULE_LICENCES = {
   m33_hse_convictions: 'hse_convictions',
   m34_icb_board_papers: 'ogl_v3',
   m35_open_jobs: 'open_jobs_cc0',
+  m36_govuk_publications: 'ogl_v3',
 };
 
 export function licenceFor(module) {

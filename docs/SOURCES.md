@@ -76,6 +76,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m33_hse_notices` | Health and Safety Executive | Safety & safeguarding | Continuous | `hse_enforcement_notices` | HSE public register — Crown copyright / OGL v3.0 |
 | `m34_icb_board_papers` | The 42 Integrated Care Boards' own websites | Accountability & scrutiny | Ad hoc | `icb_board_papers`, `integrated_care_boards` | Open Government Licence v3.0 |
 | `m35_open_jobs` | Open Jobs publication (dehnbostele) | Sector context | Daily release feed; incremental shadow capture | `open_jobs_adverts`, `open_jobs_advert_events` | CC0 1.0 (Open Jobs publication; third-party advert rights remain) |
+| `m36_govuk_publications` | GOV.UK Search API and Content API (Government Digital Service) | Accountability & scrutiny | Continuous | `govuk_publication_documents`, `govuk_document_candidates` | Open Government Licence v3.0 |
 
 <!-- END GENERATED: source-capability-matrix -->
 

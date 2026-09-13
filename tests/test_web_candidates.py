@@ -61,7 +61,8 @@ def test_counts_report_the_gap_this_screen_exists_to_close(client, seeded):
     assert cdp["undecided"] == 3
     assert cdp["evidence_rows"] == 0
     assert set(payload["kinds"]) == {
-        "cdp_document", "committee_paper", "foi_request", "companies_house_accounts"}
+        "cdp_document", "committee_paper", "foi_request",
+        "govuk_publication", "companies_house_accounts"}
 
 
 def test_the_listing_is_undecided_by_default(client, seeded):
