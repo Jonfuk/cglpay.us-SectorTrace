@@ -36,8 +36,20 @@ def limited_settings(settings):
 def client(conn, limited_settings):
     server, thread = _serve(limited_settings)
     try:
+        # 30s, not the 10s most of this file's sibling fixtures use elsewhere
+        # in the suite: test_admin_api_is_not_rate_limited round-trips
+        # /api/overview, which does a real read against the shared CI
+        # PostgreSQL instance. Under `pytest -n auto` that instance serves
+        # every xdist worker's schema at once, and 10s was observed to be
+        # tight enough to produce a spurious httpx.ReadTimeout under that
+        # contention (CI runs 34664126213 on beta itself, 34695034392 on this
+        # PR, and 34727129292/34727131516 on other branches) with no code
+        # change involved -- the same flake reproduces on multiple branches
+        # that never touch this file. 30s matches the timeout
+        # test_export_completeness.py already uses for its own real-query
+        # round trip.
         with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}",
-                           timeout=10.0) as http:
+                           timeout=30.0) as http:
             yield http
     finally:
         server.shutdown()
@@ -93,8 +105,9 @@ def unlimited_client(conn, settings):
     disabled = settings.model_copy(update={"api_rate_limit_enabled": False})
     server, thread = _serve(disabled)
     try:
+        # Same contention margin as `client` above.
         with httpx.Client(base_url=f"http://127.0.0.1:{server.server_address[1]}",
-                           timeout=10.0) as http:
+                           timeout=30.0) as http:
             yield http
     finally:
         server.shutdown()
