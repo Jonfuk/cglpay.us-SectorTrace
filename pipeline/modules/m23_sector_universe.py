@@ -48,8 +48,9 @@ from typing import Any
 import structlog
 
 from pipeline import db, providers
+from pipeline.authority_names import build_authority_lookup
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
-from pipeline.modules.m01_procurement import _build_authority_lookup, _match_buyer
+from pipeline.modules.m01_procurement import _match_buyer
 from pipeline.registry import ModuleContext, register_module
 
 log = structlog.get_logger()
@@ -499,7 +500,7 @@ def run(ctx: ModuleContext) -> None:
     conn = ctx.conn
     providers.seed_providers(conn, commit=not ctx.dry_run)
     identifiers = _provider_identifiers(conn)
-    authority_lookup = _build_authority_lookup(conn)
+    authority_lookup = build_authority_lookup(conn)
 
     rows: dict[str, dict] = {}
     stats: dict[str, dict] = {}
