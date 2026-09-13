@@ -29,7 +29,7 @@ for (const width of [1440, 375]) {
     await page.goto('/#/authorities/E08000025?lens=context')
     const card = page.getByRole('heading', { name: 'Multiple disadvantage', exact: true }).locator('..')
     await expect(card).toBeVisible()
-    await expect(page.locator('#comparators h3')).toHaveText(['Rough sleeping', 'Statutory homelessness', 'Temporary accommodation', 'Multiple disadvantage'])
+    await expect(page.locator('#comparators h3')).toHaveText(['Rough sleeping', 'Statutory homelessness', 'Temporary accommodation', 'Multiple disadvantage', 'Police recorded crime — drug offences'])
     const table = card.getByRole('table', { name: 'Multiple disadvantage observations', exact: true })
     await expect(table).toContainText('125.5%')
     await expect(table).toContainText('[z]')
