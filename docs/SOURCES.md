@@ -80,6 +80,7 @@ things a table cannot carry — endpoints, quirks, the exact coverage bound.
 | `m37_multiple_disadvantage` | Ministry of Housing, Communities and Local Government | Comparator (never combined) | Quarterly | `multiple_disadvantage_snapshot` | Open Government Licence v3.0 |
 | `m38_police_recorded_crime` | Home Office | Comparator (never combined) | Quarterly | `police_recorded_drug_offences` | Open Government Licence v3.0 |
 | `m39_360giving` | 360Giving (multiple funders, via the 360Giving API) | Public finance | Ad hoc | `three_sixty_giving_grants` | Varies by publisher (predominantly CC BY 4.0) |
+| `m40_opentender_registry` | Open Contracting Data Registry / OpenTender UK | Procurement & spend | Historical snapshot; explicitly staged package | `procurement_mirror_packages`, `procurement_mirror_observations` | CC BY-NC-SA 4.0 (OpenTender Registry publication) |
 
 <!-- END GENERATED: source-capability-matrix -->
 
