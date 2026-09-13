@@ -89,6 +89,7 @@ UNPUBLISHED = (
     "m34-icb-board-papers.md",
     "mysociety-identifier-mappings-feasibility.md",
     "ohid-ndtms-contextual-indicators.md",
+    "m30-multiple-disadvantage-feasibility.md",
     "opencorporates-parent-group-feasibility.md",
     "public-portal-ui-spec.md",
     "public-ui-refinement-backlog.md",
