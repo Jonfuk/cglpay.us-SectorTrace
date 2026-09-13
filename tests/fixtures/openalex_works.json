@@ -1,0 +1,28 @@
+{
+  "meta": {"count": 1, "next_cursor": null},
+  "results": [
+    {
+      "id": "https://openalex.org/W1234567890",
+      "doi": "https://doi.org/10.1234/example.1",
+      "title": "Evaluation of substance misuse treatment services",
+      "publication_date": "2026-01-15",
+      "type": "article",
+      "updated_date": "2026-02-01T00:00:00.000000",
+      "open_access": {"is_oa": true},
+      "primary_topic": {"id": "https://openalex.org/T100", "display_name": "Substance use", "score": 0.98},
+      "topics": [{"id": "https://openalex.org/T100", "display_name": "Substance use", "score": 0.98}],
+      "grants": [{"funder": "https://openalex.org/F200", "funder_display_name": "Example Research Funder", "award_id": "AW-1"}],
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {"id": "https://openalex.org/A300", "display_name": "Example Researcher", "orcid": "https://orcid.org/0000-0001-2345-6789"},
+          "institutions": [{"id": "https://openalex.org/I400", "display_name": "Example NHS Trust", "ror": "https://ror.org/04abcde12"}],
+          "raw_author_name": "Example Researcher",
+          "raw_affiliation_strings": ["Example NHS Trust, England"],
+          "affiliations": [{"raw_affiliation_string": "Example NHS Trust, England", "institutions": ["https://openalex.org/I400"]}],
+          "is_corresponding": true
+        }
+      ]
+    }
+  ]
+}
