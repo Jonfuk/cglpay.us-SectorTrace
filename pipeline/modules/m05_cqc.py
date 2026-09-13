@@ -51,6 +51,7 @@ import httpx
 import structlog
 
 from pipeline import cqc_bulk, db, providers
+from pipeline.authority_names import build_authority_lookup, normalise_authority_name
 from pipeline.http import PipelineHTTPClient
 from pipeline.keywords import SUPPLIER_NAME_VARIANTS
 from pipeline.registry import ModuleContext, register_module
@@ -113,23 +114,6 @@ def _provenance(result) -> dict:
         "source_system": SOURCE_SYSTEM,
         "payload_sha256": result.payload_sha256,
     }
-
-
-def _normalise_authority_name(name: str) -> str:
-    text = (name or "").lower().replace("&", "and")
-    text = re.sub(r"[^a-z0-9\s]", " ", text)
-    text = re.sub(
-        r"\b(metropolitan borough council|county council|city council|borough council|"
-        r"district council|unitary authority|royal borough of|london borough of|council)\b",
-        " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def _build_authority_lookup(conn) -> dict[str, str]:
-    lookup: dict[str, str] = {}
-    for row in conn.execute("SELECT ons_code, name FROM authorities ORDER BY ons_code"):
-        lookup.setdefault(_normalise_authority_name(row["name"]), row["ons_code"])
-    return lookup
 
 
 def _fetch_provider_index(client: PipelineHTTPClient, conn, module_name: str) -> list[dict]:
@@ -273,7 +257,7 @@ def _store_location(conn, module_name: str, provider_id: str, provider_key: str 
     service_types = [s.get("name") for s in (location.get("gacServiceTypes") or []) if s.get("name")]
 
     la_raw = location.get("localAuthority")
-    ons_code = authority_lookup.get(_normalise_authority_name(la_raw)) if la_raw else None
+    ons_code = authority_lookup.get(normalise_authority_name(la_raw)) if la_raw else None
     if la_raw and ons_code is None:
         db.record_review_item(conn, module_name, "unmatched_cqc_local_authority", la_raw,
                                json.dumps({"location_id": location_id}))
@@ -337,7 +321,7 @@ def run(ctx: ModuleContext) -> None:
     conn = ctx.conn
     key = ctx.settings.require_cqc_key()
     providers.seed_providers(conn, commit=not ctx.dry_run)
-    authority_lookup = _build_authority_lookup(conn)
+    authority_lookup = build_authority_lookup(conn)
 
     provider_rows = 0
     location_rows = 0
