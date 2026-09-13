@@ -616,6 +616,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "publish, not its total grant income, and are never summed with "
         "procurement or public health grant figures from another module.",
     ),
+    Dataset(
+        "opentender-uk-mirror", "m40_opentender_registry",
+        "OpenTender UK procurement mirror (operator-only)",
+        "Open Contracting Data Registry / OpenTender UK",
+        "https://data.open-contracting.org/en/publication/92",
+        "procurement", "United Kingdom",
+        "Historical snapshot; explicitly staged package",
+        ("procurement_mirror_packages", "procurement_mirror_observations"),
+        "A compiled/latest-value mirror used for historical gap checks and "
+        "reconciliation only. It is not the original release/record history, "
+        "is licensed under CC BY-NC-SA 4.0, and is excluded from public "
+        "catalogue, query and export projections until a human clears reuse.",
+        operator_only=True,
+    ),
 )
 
 
