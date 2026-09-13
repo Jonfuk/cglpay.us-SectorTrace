@@ -348,7 +348,7 @@ def test_multiple_disadvantage_preserves_scope_markers_and_provenance(warehouse)
             "prevention_secured_md_total, prevention_secured_md_total_text, "
             "relief_secured_md_total, relief_secured_md_total_text, "
             "source_url, retrieved_at, http_status, source_system, payload_sha256) "
-            "VALUES (%s, %s, %s, 125.5, '125.5%', 10, '10', NULL, '[x]', "
+            "VALUES (%s, %s, %s, 125.5, '125.5%%', 10, '10', NULL, '[x]', "
             "0, '0', NULL, '[z]', 'https://example.invalid/md.xlsx', "
             "'2026-09-12T00:00:00Z', 200, 'mhclg_multiple_disadvantage', 'md-hash')",
             (code, quarter, label))
