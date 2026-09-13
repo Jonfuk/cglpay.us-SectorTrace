@@ -1017,9 +1017,8 @@ every other section on the page already uses, not a missing section.*
 
 ### Multiple Disadvantage Detailed Local Authority Data (Module 37)
 
-*Not yet surfaced on the public authority page's "Comparators" section
-(BETA-017) alongside Modules 29-31 — collected and catalogued, but the
-portal wiring is a separate follow-up. See
+*Surfaced in the public authority page's Context view alongside Modules
+29–31, with published text, duty-stage categories and provenance. See
 `docs/m30-multiple-disadvantage-feasibility.md` for the source verification
 this module was built from.*
 
