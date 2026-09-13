@@ -89,6 +89,8 @@ UNPUBLISHED = (
     "mysociety-access-request.md",
     "m34-icb-board-papers.md",
     "mysociety-identifier-mappings-feasibility.md",
+    "kingfisher-ocds-procurement-feasibility.md",
+    "m39-360giving-grantnav-feasibility.md",
     "ohid-ndtms-contextual-indicators.md",
     "m30-multiple-disadvantage-feasibility.md",
     "opencorporates-parent-group-feasibility.md",
