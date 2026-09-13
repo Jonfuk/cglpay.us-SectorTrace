@@ -743,6 +743,23 @@ class Settings(BaseSettings):
     open_jobs_status_max_requests: int = 10
     open_jobs_archive_budget_bytes: int = 5 * 1024 * 1024 * 1024
 
+    # OpenAlex is a bounded, operator-only discovery adapter. It is disabled
+    # by default because its records are leads for review, not authoritative
+    # evidence of an evaluation, affiliation or collaboration.
+    openalex_enabled: bool = False
+    openalex_api_key: str | None = None
+    openalex_base_url: str = "https://api.openalex.org"
+    openalex_page_size: int = 100
+    openalex_max_records_per_query: int = 200
+    openalex_max_pages_per_query: int = 20
+    # Pipe-separated search phrases keep the setting readable while allowing
+    # operators to narrow a run without editing the module.
+    openalex_query_terms: str = (
+        "substance misuse evaluation|drug and alcohol treatment evaluation|"
+        "drug and alcohol services evaluation|health services research substance misuse|"
+        "public health service evaluation|local authority public health evaluation"
+    )
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes
