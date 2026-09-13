@@ -28,6 +28,7 @@ MODULES_HONOURING_SINCE = {
     "m16_nhs_jobs", "m29_rough_sleeping", "m30_statutory_homelessness",
     "m31_temporary_accommodation", "m34_icb_board_papers", "m35_open_jobs",
     "m37_multiple_disadvantage", "m38_police_recorded_crime",
+    "m40_opentender_registry",
 }
 
 

@@ -80,6 +80,23 @@ anyone using it.
   England geography and provider attribution remain nullable until supported
   by evidence and a reversible review decision.
 
+### OpenTender UK mirror (Module 40, operator-only)
+
+- This is the Open Contracting Data Registry's compiled/latest-value
+  publication, not the original OCDS release and record history. A row cannot
+  reconstruct a tender-to-award lifecycle, revisions, amendments or
+  transactions.
+- OpenTender observations are stored separately from contracts. Exact OCID
+  agreement is a source-identity cross-check; buyer/title/date/CPV/value
+  matches are only review candidates, never automatic joins or promotions.
+- The Registry entry advertises CC BY-NC-SA 4.0, unlike the direct OGL
+  procurement channels. The package remains operator-only and no mirror row
+  is included in the public catalogue, portal queries or exports until a
+  person makes and records a reuse decision.
+- A configured package is one bounded collection attempt. Invalid downloads
+  fail the attempt; malformed sibling records are retained as parse failures
+  and do not make the remaining valid observations disappear.
+
 ### Procurement (Modules 1)
 
 - Contract values are **estimates at notice stage** and may differ from actual

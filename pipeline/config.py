@@ -766,6 +766,17 @@ class Settings(BaseSettings):
     open_jobs_status_max_requests: int = 10
     open_jobs_archive_budget_bytes: int = 5 * 1024 * 1024 * 1024
 
+    # JON-28's OpenTender/OCP Registry mirror is a historical cross-check,
+    # not a public procurement source. It stays inert until an operator both
+    # enables it and supplies one explicitly staged package or URL. The URL
+    # path is still bounded and goes through PipelineHTTPClient so the normal
+    # robots, rate-limit and raw-byte archive rules apply.
+    opentender_enabled: bool = False
+    opentender_package_path: Path | None = None
+    opentender_package_url: str | None = None
+    opentender_ocid_prefix: str = "ocds-70d2nz"
+    opentender_max_package_bytes: int = 512 * 1024 * 1024
+
     google_service_account_json: Path | None = None
     # Railway cannot see a local credential path. Deployments may provide the
     # same JSON as base64 in this secret variable; the Sheets exporter decodes

@@ -167,6 +167,15 @@ LICENCES: dict[str, Licence] = {
         caution="CC0 does not clear third-party employer or ATS rights. Shadow "
                 "payloads remain operator-only and are not republished wholesale.",
     ),
+    "opentender_cc_by_nc_sa": Licence(
+        id="opentender_cc_by_nc_sa",
+        name="CC BY-NC-SA 4.0 (OpenTender Registry publication)",
+        url="https://creativecommons.org/licenses/by-nc-sa/4.0/",
+        attribution="OpenTender UK procurement data, via the Open Contracting Data Registry.",
+        caution="Non-commercial share-alike terms apply. The Registry publication is a "
+                "compiled/latest-value mirror, not the original OCDS release history. "
+                "This module is operator-only until a person clears any reuse.",
+    ),
     "three_sixty_giving_varies": Licence(
         id="three_sixty_giving_varies",
         name="Varies by publisher (predominantly CC BY 4.0)",
@@ -229,6 +238,7 @@ MODULE_LICENCES: dict[str, str] = {
     "m37_multiple_disadvantage": "ogl_v3",
     "m38_police_recorded_crime": "ogl_v3",
     "m39_360giving": "three_sixty_giving_varies",
+    "m40_opentender_registry": "opentender_cc_by_nc_sa",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
