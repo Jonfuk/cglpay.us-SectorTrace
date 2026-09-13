@@ -98,6 +98,7 @@ _STATED_CADENCE_DAYS: dict[str, int] = {
     "rough-sleeping": 365,          # "Annual, autumn snapshot"
     "statutory-homelessness": 91,   # "Quarterly"
     "temporary-accommodation": 91,  # "Quarterly"
+    "police-recorded-crime-drug-offences": 91,  # "Quarterly"
 }
 
 
@@ -467,6 +468,22 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "notices is not a safety rating.",
     ),
     Dataset(
+        "hse-enforcement-convictions", "m33_hse_convictions",
+        "HSE convictions",
+        "Health and Safety Executive",
+        "https://resources.hse.gov.uk/convictions/",
+        "safety", "Great Britain — HSE-prosecuted cases",
+        "Continuous",
+        ("hse_enforcement_convictions",),
+        "Breach-level entries from the public register of convictions, "
+        "matched to a tracked provider by exact name only; individuals "
+        "excluded. A distinct stream from HSE notices, never summed with "
+        "them. Breach level, not case level — address, industry and HSE "
+        "division are not collected. The register carries a conviction for "
+        "one year and a further nine on its history register before "
+        "removal, so an absence is not a clean record.",
+    ),
+    Dataset(
         "sab-site-reviews", "m32_sab_site_reviews",
         "SARs on Safeguarding Adults Board websites",
         "Safeguarding Adults Boards' own websites",
@@ -516,6 +533,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "own evidence.",
     ),
     Dataset(
+        "multiple-disadvantage", "m37_multiple_disadvantage",
+        "Multiple Disadvantage Detailed Local Authority Data",
+        "Ministry of Housing, Communities and Local Government",
+        "https://www.gov.uk/government/collections/homelessness-statistics",
+        "comparator", "England — local authority",
+        "Quarterly",
+        ("multiple_disadvantage_snapshot",),
+        "A comparator only, despite one column reading 'substance "
+        "dependency': this is H-CLIC housing-assessment data, not clinical "
+        "or treatment data, and is never combined with the sector's own "
+        "evidence. The five disadvantage-category totals are not mutually "
+        "exclusive and sum to several times the qualifying total.",
+    ),
+    Dataset(
         "icb-board-papers", "m34_icb_board_papers",
         "Integrated Care Board governance documents",
         "The 42 Integrated Care Boards' own websites",
@@ -531,6 +562,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "incident detail are held in restricted_ tables.",
     ),
     Dataset(
+        "police-recorded-crime-drug-offences", "m38_police_recorded_crime",
+        "Police recorded crime — drug offences (Community Safety Partnership)",
+        "Home Office",
+        "https://www.gov.uk/government/statistical-data-sets/"
+        "police-recorded-crime-and-outcomes-open-data-tables",
+        "comparator", "England — Community Safety Partnership matched to local authority",
+        "Quarterly",
+        ("police_recorded_drug_offences",),
+        "A comparator only. Recorded drug offences reflect police activity and "
+        "priorities, not levels of drug use — never a proxy for treatment need. "
+        "Community Safety Partnerships not matching a single local authority "
+        "by name are not covered. Never combined with the sector's own evidence.",
+    ),
+    Dataset(
         "open-jobs-shadow", "m35_open_jobs",
         "Open Jobs vacancy observations (operator-only shadow)",
         "Open Jobs publication (dehnbostele)",
@@ -542,6 +587,20 @@ _DATASETS_RAW: tuple[Dataset, ...] = (
         "This dataset is disabled by default and excluded from all public "
         "catalogue, query and export projections until separately approved.",
         operator_only=True,
+    ),
+    Dataset(
+        "govuk-publications", "m36_govuk_publications",
+        "GOV.UK publication discovery (DHSC and OHID)",
+        "GOV.UK Search API and Content API (Government Digital Service)",
+        "https://www.gov.uk/api/search.json",
+        "accountability", "England — national (DHSC and OHID)",
+        "Continuous",
+        ("govuk_publication_documents", "govuk_document_candidates"),
+        "Discovery, not extraction: every file attachment on a DHSC or OHID "
+        "publication matching a substance misuse keyword is a candidate a "
+        "person confirms before it becomes evidence. A search hit is not "
+        "proof of relevance — 'alcohol' matches licensing guidance as often "
+        "as treatment policy.",
     ),
     Dataset(
         "360giving-grants", "m39_360giving",
