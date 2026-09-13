@@ -1,6 +1,7 @@
 """Explicit buyer-name -> ons_code overrides for procurement notices whose
-buyer name deterministic normalisation (see m01_procurement._normalise_authority_name)
-can't resolve against pipeline.db's authorities table.
+buyer name deterministic normalisation (see
+pipeline.authority_names.normalise_authority_name) can't resolve against
+pipeline.db's authorities table.
 
 Add entries here as they're discovered via review_queue (item_type =
 'unmatched_buyer_name') — a human decision, never a fuzzy match. Keys may
