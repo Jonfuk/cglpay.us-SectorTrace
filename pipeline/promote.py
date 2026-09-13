@@ -99,6 +99,25 @@ KINDS: dict[str, dict] = {
         "requires": (),
         "title_column": "title",
     },
+    # JON-36: a filing m04_companies's filing-history stream tagged 'accounts'
+    # is a pointer nobody has opened, exactly like the three kinds above --
+    # Companies House's own category is not evidence of what the document
+    # says. source_system is deliberately "companies_house_filed_accounts",
+    # matching the target table's own provenance rows, so this evidence layer
+    # is never mistaken for -- or merged with -- m03's
+    # "charity_commission_filed_accounts" (see docs/CAVEATS.md).
+    "companies_house_accounts": {
+        "candidate_table": "companies_house_accounts_candidates",
+        "target_table": "companies_house_accounts_documents",
+        "authority_column": "company_number",
+        "candidate_url_column": "candidate_url",
+        "target_url_column": "document_url",
+        "source_system": "companies_house_filed_accounts",
+        # Companies House's own filing category/subcategory already types the
+        # candidate; there is nothing here a reviewer must additionally confirm.
+        "requires": (),
+        "title_column": "description",
+    },
 }
 
 
@@ -171,6 +190,31 @@ def _fetch_document(url: str, spec: dict, settings: Settings,
                 conn, "m15_foi", "wdtk_web_unlocker_in_use", url,
                 json.dumps({"transport": transport,
                             "note": "explicit m15-only transport used for human promotion"}))
+        elif spec["source_system"] == "companies_house_filed_accounts":
+            # A two-step fetch the other three kinds don't need: `url` here is
+            # the Document API *metadata* URL (candidate_url), not the filed
+            # accounts themselves. The metadata names the actual content link
+            # and what formats it is available in; a filing submitted as a
+            # scanned PDF has no iXBRL, so this reads what the source actually
+            # offers rather than assuming PDF is always there.
+            with PipelineHTTPClient(spec["source_system"], settings=settings,
+                                    conn=conn, guard_destination=True,
+                                    resolver=resolver) as client:
+                meta_result = client.get(url)
+                if not meta_result.ok:
+                    raise PromotionError(
+                        f"{url} answered {meta_result.status_code} fetching the "
+                        "Companies House document metadata.")
+                metadata = json.loads(meta_result.body)
+                content_url = (metadata.get("links") or {}).get("document")
+                if not content_url:
+                    raise PromotionError(
+                        f"{url} carries no links.document — the filed accounts "
+                        "themselves cannot be fetched.")
+                resources = metadata.get("resources") or {}
+                accept = ("application/pdf" if "application/pdf" in resources
+                          else "application/xhtml+xml")
+                result = client.get(content_url, headers={"Accept": accept})
         else:
             with PipelineHTTPClient(spec["source_system"], settings=settings,
                                     conn=conn, guard_destination=True,
@@ -303,7 +347,7 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
             "source_system": spec["source_system"],
             "payload_sha256": result.payload_sha256,
         }
-        row.update(_target_fields(kind, found, fields))
+        row.update(_target_fields(kind, found, fields, result))
         if foi_detail:
             for field in ("subject", "request_date", "status", "response_text"):
                 if foi_detail.get(field) is not None:
@@ -328,7 +372,7 @@ def promote(conn: sqlite3.Connection, kind: str, url: str, promoted_by: str,
              "http_status": result.status_code}
 
 
-def _target_fields(kind: str, found: dict, fields: dict) -> dict:
+def _target_fields(kind: str, found: dict, fields: dict, result=None) -> dict:
     """The columns that differ per kind, from the candidate and the reviewer.
 
     Candidate values are carried across where they describe the document
@@ -336,6 +380,11 @@ def _target_fields(kind: str, found: dict, fields: dict) -> dict:
     *search* that found it (`matched_terms`, `match_quality`, `confidence`):
     those are properties of the discovery, and the evidence table deliberately
     has nowhere to put them.
+
+    `result` is the fetch this promotion just made -- optional and ignored by
+    every existing kind, read only by `companies_house_accounts` to record
+    what content type was actually retrieved (PDF vs iXBRL), which is not
+    knowable before the fetch happens.
     """
     if kind == "cdp_document":
         return {"title": found.get("title"),
@@ -346,6 +395,12 @@ def _target_fields(kind: str, found: dict, fields: dict) -> dict:
                  "meeting_date": found.get("meeting_date"),
                  "agenda_item_title": found.get("agenda_item_title"),
                  "report_title": found.get("report_title")}
+    if kind == "companies_house_accounts":
+        return {"description": found.get("description"),
+                 "transaction_id": found.get("transaction_id"),
+                 "filing_date": found.get("filing_date"),
+                 "accounts_type": found.get("accounts_type"),
+                 "content_type": result.content_type if result is not None else None}
     return {"subject": found.get("title"),
              "request_date": found.get("request_date"),
              "status": found.get("wdtk_status"),

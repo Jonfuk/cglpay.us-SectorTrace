@@ -1,16 +1,21 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 
 import httpx
 import pytest
+from pytest_httpx import IteratorStream
 
 from pipeline import db
 from pipeline.http import (
     PipelineHTTPClient,
     RobotsDisallowed,
     RobotsRules,
+    StreamCursorStale,
+    StreamRateLimited,
+    StreamTransientError,
     _RateLimiter,
     _wait_respecting_retry_after,
 )
@@ -470,3 +475,203 @@ def test_wait_respecting_retry_after_falls_back_without_header():
 def test_wait_respecting_retry_after_falls_back_for_non_http_errors():
     exc = ConnectionError("boom")
     assert _wait_respecting_retry_after(_FakeRetryState(exc)) > 0
+
+
+# --- stream_events (JON-36) --------------------------------------------------
+#
+# Companies House's Streaming API is a single long-lived connection emitting
+# newline-delimited JSON, not a normal request/response -- nothing above this
+# handles that shape.
+
+def _ndjson(*events: dict) -> bytes:
+    return b"".join(json.dumps(event).encode() + b"\n" for event in events)
+
+
+def test_stream_events_yields_raw_bytes_and_parsed_dict(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(
+        url="https://example.com/stream",
+        stream=IteratorStream([_ndjson({"a": 1}, {"a": 2})]))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events("https://example.com/stream"))
+    client.close()
+
+    assert [e.data for e in events] == [{"a": 1}, {"a": 2}]
+    assert events[0].raw == json.dumps({"a": 1}).encode()
+    assert events[0].parse_error is None
+    assert events[0].received_at is not None
+
+
+def test_stream_events_skips_blank_keepalive_lines(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(
+        url="https://example.com/stream",
+        stream=IteratorStream([b'{"a": 1}\n\n\n{"a": 2}\n']))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events("https://example.com/stream"))
+    client.close()
+
+    assert len(events) == 2
+
+
+def test_stream_events_yields_unparseable_lines_with_a_parse_error_not_a_raise(httpx_mock, settings):
+    """NULL-first, the same discipline as everywhere else in this pipeline:
+    one malformed line must not lose the rest of the connection."""
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(
+        url="https://example.com/stream",
+        stream=IteratorStream([b'not json\n{"a": 2}\n']))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events("https://example.com/stream"))
+    client.close()
+
+    assert events[0].data is None
+    assert events[0].parse_error is not None
+    assert events[1].data == {"a": 2}
+
+
+def test_stream_events_stops_after_max_events(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(
+        url="https://example.com/stream",
+        stream=IteratorStream([_ndjson({"a": 1}, {"a": 2}, {"a": 3})]))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events("https://example.com/stream", max_events=2))
+    client.close()
+
+    assert len(events) == 2
+
+
+def test_stream_events_stops_after_max_seconds(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+
+    def slow_chunks():
+        for n in (1, 2, 3):
+            yield json.dumps({"a": n}).encode() + b"\n"
+            time.sleep(0.15)
+
+    httpx_mock.add_response(url="https://example.com/stream", stream=IteratorStream(slow_chunks()))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events("https://example.com/stream", max_seconds=0.1))
+    client.close()
+
+    assert len(events) < 3
+
+
+def test_stream_events_raises_stream_cursor_stale_on_416(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(url="https://example.com/stream", status_code=416)
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(StreamCursorStale):
+        list(client.stream_events("https://example.com/stream"))
+    client.close()
+
+
+def test_stream_events_raises_stream_rate_limited_on_429_and_carries_retry_after(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(url="https://example.com/stream", status_code=429,
+                             headers={"Retry-After": "60"})
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(StreamRateLimited) as exc_info:
+        list(client.stream_events("https://example.com/stream"))
+    client.close()
+    assert exc_info.value.retry_after == 60.0
+
+
+def test_stream_events_rate_limited_without_a_retry_after_header_is_still_raised(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_response(url="https://example.com/stream", status_code=429)
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(StreamRateLimited) as exc_info:
+        list(client.stream_events("https://example.com/stream"))
+    client.close()
+    assert exc_info.value.retry_after is None
+
+
+def test_stream_events_retries_transient_connect_failure_then_succeeds(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    httpx_mock.add_exception(httpx.ConnectError("boom"), url="https://example.com/stream")
+    httpx_mock.add_response(
+        url="https://example.com/stream", stream=IteratorStream([_ndjson({"a": 1})]))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    events = list(client.stream_events(
+        "https://example.com/stream", connect_retry_wait_seconds=0.01))
+    client.close()
+
+    assert [e.data for e in events] == [{"a": 1}]
+
+
+def test_stream_events_raises_stream_transient_error_after_exhausting_connect_retries(httpx_mock, settings):
+    _allow_all_robots(httpx_mock)
+    for _ in range(3):
+        httpx_mock.add_exception(httpx.ConnectError("boom"), url="https://example.com/stream")
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(StreamTransientError):
+        list(client.stream_events(
+            "https://example.com/stream", connect_retry_attempts=3,
+            connect_retry_wait_seconds=0.01))
+    client.close()
+
+
+def test_stream_events_raises_stream_transient_error_on_mid_body_disconnect_without_retrying(
+        httpx_mock, settings):
+    """Deliberately no retry once inside the body -- only the caller knows
+    the last confirmed-processed timepoint to reconnect from. Asserted here
+    as exactly one request having been made."""
+    _allow_all_robots(httpx_mock)
+
+    def breaking_chunks():
+        yield json.dumps({"a": 1}).encode() + b"\n"
+        raise httpx.ReadError("connection reset")
+
+    httpx_mock.add_response(url="https://example.com/stream", stream=IteratorStream(breaking_chunks()))
+
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(StreamTransientError):
+        list(client.stream_events("https://example.com/stream"))
+    client.close()
+
+    stream_requests = [r for r in httpx_mock.get_requests() if str(r.url) == "https://example.com/stream"]
+    assert len(stream_requests) == 1
+
+
+def test_stream_events_respects_robots(httpx_mock, settings):
+    httpx_mock.add_response(url="https://example.com/robots.txt", status_code=200,
+                             text="User-agent: *\nDisallow: /private/")
+    client = PipelineHTTPClient("test_source", settings=settings)
+    with pytest.raises(RobotsDisallowed):
+        list(client.stream_events("https://example.com/private/stream"))
+    client.close()
+
+
+# --- archive_line (JON-36) ----------------------------------------------------
+
+def test_archive_line_hashes_and_archives_through_the_same_backend_as_get(settings):
+    client = PipelineHTTPClient("test_source", settings=settings)
+    raw = b'{"a": 1}'
+    sha256, archived_ref = client.archive_line(raw)
+    client.close()
+
+    assert sha256 == hashlib.sha256(raw).hexdigest()
+    archived_path = settings.raw_archive_dir / archived_ref.removeprefix("data/raw/")
+    assert archived_path.read_bytes() == raw
+
+
+def test_archive_line_writes_no_conditional_cache_entry(settings, conn):
+    """An event carries no ETag to revalidate against -- unlike get()/
+    get_streaming(), there is nothing here for http_cache to hold."""
+    client = PipelineHTTPClient("test_source", settings=settings, conn=conn)
+    client.archive_line(b'{"a": 1}')
+    client.close()
+
+    assert conn.execute("SELECT COUNT(*) c FROM http_cache").fetchone()["c"] == 0
