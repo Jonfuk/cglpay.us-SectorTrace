@@ -3,6 +3,35 @@ from __future__ import annotations
 from pipeline import db
 
 
+def test_missing_postgres_extension_does_not_block_migration():
+    """Managed PostgreSQL may not ship every optional accelerator.
+
+    Railway's stock service lacks PostGIS, while migration 0070 and the
+    public GeoJSON path already guard and replace its derived geometry work.
+    One unavailable extension must not make the web container fail before it
+    binds its health endpoint.
+    """
+    class MissingExtensionConnection:
+        def __init__(self):
+            self.rollbacks = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def execute(self, _sql):
+            raise RuntimeError("extension is not available")
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    conn = MissingExtensionConnection()
+    assert db.ensure_extensions(conn, ("postgis",)) == []
+    assert conn.rollbacks == 1
+
+
 def test_apply_migrations_is_idempotent(settings):
     conn = db.get_connection(settings)
     first = db.apply_migrations(conn, settings.migrations_dir)
