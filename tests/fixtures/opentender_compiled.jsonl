@@ -1,0 +1,4 @@
+{"id":"release-1","ocid":"ocds-70d2nz-1","date":"2024-01-15T09:00:00Z","buyer":{"name":"Northshire Council"},"tender":{"title":"Community treatment services","value":{"amount":1000,"currency":"GBP"},"items":[{"classification":{"id":"85000000"}}]}}
+{"id":"release-2","ocid":"ocds-70d2nz-2","date":"2024-02-15","buyer":{"name":"Southshire Council"},"tender":{"title":"Recovery support","value":{"amount":2000,"currency":"GBP"},"items":[{"classification":{"id":"85100000"}}]}}
+{"id":"release-wrong","ocid":"ocds-other-3","date":"2024-03-01","tender":{"title":"Not OpenTender"}}
+not-json
