@@ -134,6 +134,20 @@ LICENCES: dict[str, Licence] = {
                 "or withdrawn. The register's own `result` field travels with "
                 "every notice; check it, and the register, before republishing.",
     ),
+    "hse_convictions": Licence(
+        id="hse_convictions",
+        name="HSE public register — Crown copyright / OGL v3.0",
+        url=OGL_URL,
+        attribution="Breach-level entries from the Health and Safety "
+                    "Executive public register of convictions, Crown "
+                    "copyright.",
+        caution="Breach level, not case level: fine, hearing date and result "
+                "are the breach's own; the case file's address, industry and "
+                "HSE division are not collected. The register carries a "
+                "conviction for one year and then a further nine on its "
+                "history register before removal — an absence is not a "
+                "clean record.",
+    ),
     "skills_for_care": Licence(
         id="skills_for_care",
         name="OGL v3.0 (ASC-WDS data, per the data.gov.uk catalogue)",
@@ -152,6 +166,20 @@ LICENCES: dict[str, Licence] = {
         attribution="Open Jobs public data release.",
         caution="CC0 does not clear third-party employer or ATS rights. Shadow "
                 "payloads remain operator-only and are not republished wholesale.",
+    ),
+    "three_sixty_giving_varies": Licence(
+        id="three_sixty_giving_varies",
+        name="Varies by publisher (predominantly CC BY 4.0)",
+        url=None,
+        attribution="Grants data published by individual funders using the "
+                    "360Giving Data Standard, via the 360Giving API.",
+        caution="Each grant carries its own licence field (CC BY 4.0, OGL "
+                "v3.0, CC BY-SA 4.0 or CC0 seen live — counted directly "
+                "against the 360Giving Data Registry on 2026-09-12: 702, "
+                "123, 36 and 22 datasets respectively). Stored per row in "
+                "data_license_name/data_license_url; check the row before "
+                "republishing rather than assuming one licence for the "
+                "whole table.",
     ),
 }
 
@@ -194,8 +222,13 @@ MODULE_LICENCES: dict[str, str] = {
     "m31_temporary_accommodation": "ogl_v3",
     "m32_sab_site_reviews": "authority_varies",
     "m33_hse_notices": "hse_notices",
+    "m33_hse_convictions": "hse_convictions",
     "m34_icb_board_papers": "ogl_v3",
     "m35_open_jobs": "open_jobs_cc0",
+    "m36_govuk_publications": "ogl_v3",
+    "m37_multiple_disadvantage": "ogl_v3",
+    "m38_police_recorded_crime": "ogl_v3",
+    "m39_360giving": "three_sixty_giving_varies",
 }
 
 # Which modules' material an exported endpoint can contain. Over-inclusive by
@@ -218,7 +251,7 @@ ENDPOINT_MODULES: dict[str, tuple[str, ...]] = {
     # not the SAR half of the same page's payload (m28_sar_reports, a
     # different licence -- "authority_varies" -- and not exported here).
     "pfd": ("m08_pfd_reports",),
-    "safety": ("m33_hse_notices",),
+    "safety": ("m33_hse_notices", "m33_hse_convictions"),
 }
 
 

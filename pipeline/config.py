@@ -631,6 +631,29 @@ class Settings(BaseSettings):
     companies_house_api_key: str | None = None
     cqc_subscription_key: str | None = None
 
+    # JON-36: Companies House's Streaming API. A separate registered
+    # application from `companies_house_api_key` -- Companies House states
+    # streaming and REST keys are not interchangeable -- so it gets its own
+    # setting rather than reusing the REST key. Off by default, same posture
+    # as scrapy_enabled/open_jobs_enabled: an experimental collection path
+    # stays inert until a deliberate deployment choice turns it on, and a
+    # checkout with it off never needs the key set at all.
+    companies_house_streaming_api_key: str | None = None
+    companies_house_streaming_enabled: bool = False
+    # Per-stream, per-invocation budget (m04_companies consumes four streams
+    # per run when enabled, so a full pass costs at most ~4x these numbers in
+    # wall time). Reaching either is a normal stop, not a failure -- see
+    # PipelineHTTPClient.stream_events.
+    companies_house_stream_max_events: int = 5000
+    companies_house_stream_max_seconds: float = 120.0
+    companies_house_stream_connect_retry_attempts: int = 3
+    companies_house_stream_connect_retry_wait_seconds: float = 10.0
+    # Bounded reconnects within one run after a mid-body StreamTransientError,
+    # each resuming from the last checkpointed timepoint. Exhausting this
+    # stops that stream for the run; the next scheduled run resumes from the
+    # checkpoint rather than blocking this one indefinitely.
+    companies_house_stream_max_reconnects: int = 3
+
     # m01's --kag channel: a third-party (not the publisher) re-hosting of
     # Contracts Finder notices on Kaggle, downloaded via Kaggle's API rather
     # than an anonymous fetch — see the module docstring for why this channel
@@ -994,6 +1017,16 @@ class Settings(BaseSettings):
                 "free key and set it before running m04_companies."
             )
         return self.companies_house_api_key
+
+    def require_companies_house_streaming_key(self) -> str:
+        if not self.companies_house_streaming_api_key:
+            raise RuntimeError(
+                "COMPANIES_HOUSE_STREAMING_API_KEY is not set in .env. Register "
+                "a separate streaming-API application at the Companies House "
+                "developer hub (distinct from the REST key) and set it before "
+                "enabling COMPANIES_HOUSE_STREAMING_ENABLED."
+            )
+        return self.companies_house_streaming_api_key
 
     def require_cqc_key(self) -> str:
         if not self.cqc_subscription_key:

@@ -2535,6 +2535,12 @@ def run(
     all_sources: bool = typer.Option(
         False, "--all", help="m01 only: run every channel that writes contracts "
                               "(live APIs + CSV archive) -- not --kag, see --kag's help"),
+    stream_only: bool = typer.Option(
+        False, "--stream-only",
+        help="m04_companies only: run just the bounded Companies House streaming "
+              "catch-up (companies/filings/insolvency/charges), skip the full "
+              "REST sweep. Intended for a more frequent schedule alongside the "
+              "normal run -- see the module docstring's STREAMING section."),
     origin: str = typer.Option(
         "cli", "--origin", hidden=True,
         help="How this run was started, for the run ledger (BETA-058). A cron "
@@ -2555,8 +2561,12 @@ def run(
         ui.error("--api, --csv, --kag and --all are mutually exclusive; got "
                   + ", ".join(f"--{name}" for name in chosen_sources) + ".")
         raise typer.Exit(code=1)
+    if stream_only and chosen_sources:
+        ui.error("--stream-only cannot be combined with --api/--csv/--kag/--all "
+                  "(different modules' vocabularies).")
+        raise typer.Exit(code=1)
     # csv is the default: m01's live-API channels are only walked on request.
-    source = chosen_sources[0] if chosen_sources else "csv"
+    source = "stream" if stream_only else (chosen_sources[0] if chosen_sources else "csv")
 
     configure_logging(module)
     settings = get_settings()

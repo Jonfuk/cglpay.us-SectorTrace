@@ -497,6 +497,26 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "spec above.",
     ),
     Smoke(
+        module="m37_multiple_disadvantage",
+        produces=("multiple_disadvantage_snapshot",),
+        signal=(("multiple_disadvantage_snapshot", "quarter_label"),
+                ("multiple_disadvantage_snapshot", "assessed_md_total_text")),
+        limit=2,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match ONS codes against",
+        note="A separate attachment on the same evergreen page m30 already "
+              "fetches, not a sheet in m30's own Table A1 workbook -- "
+              "discovery is shared code (imported from "
+              "m30_statutory_homelessness, passed this module's own title "
+              "regex), so this smoke test also indirectly exercises that "
+              "parameterisation. assessed_md_total_text is the signal, not "
+              "the numeric column, for the same [x]/[z]-placeholder reason "
+              "as m30's own smoke spec above. This is a very recently "
+              "launched product (13 August 2026) with only three published "
+              "editions at the time this was written, so --limit 2 covers "
+              "most of its current history rather than a small slice of it.",
+    ),
+    Smoke(
         module="m32_sab_site_reviews",
         produces=("sab_site_crawls", "review_queue"),
         signal=(("sab_site_crawls", "status"), ("sab_site_crawls", "pages_fetched")),
@@ -530,6 +550,24 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "against real HSE HTML -- see the module docstring.",
     ),
     Smoke(
+        module="m33_hse_convictions",
+        produces=("hse_enforcement_convictions", "review_queue"),
+        signal=(("hse_enforcement_convictions", "result"),
+                ("hse_enforcement_convictions", "legislation")),
+        limit=None,
+        note="The provider-name shape (m18, m33_hse_notices): one HSE "
+              "convictions-register breach-list search per tracked-provider "
+              "name variant. A --limit run does not make sense -- the "
+              "register returns the whole match set per name -- so this "
+              "ignores it. Whether it writes any hse_enforcement_convictions "
+              "row at all depends on whether any tracked provider has ever "
+              "been convicted, so a run that only produces review_queue "
+              "near-miss items is still a working run. Neither the live-fetch "
+              "path nor the defendant-name search field code has been "
+              "validated against the real register -- see the module "
+              "docstring.",
+    ),
+    Smoke(
         module="m34_icb_board_papers",
         produces=("integrated_care_boards", "icb_site_crawls", "review_queue"),
         signal=(("integrated_care_boards", "name"),
@@ -544,6 +582,67 @@ SMOKE_SPECS: dict[str, Smoke] = {spec.module: spec for spec in (
               "icb_board_paper_candidates and icb_site_crawls rows. The "
               "directory and crawl parsers have not yet been validated against "
               "the real sites -- see the module docstring.",
+    ),
+    Smoke(
+        module="m36_govuk_publications",
+        produces=("govuk_document_candidates",),
+        signal=(("govuk_document_candidates", "candidate_url"),
+                ("govuk_document_candidates", "title")),
+        limit=None,
+        note="Ignores --limit: each (organisation, keyword) query is paged to "
+              "GOV.UK's own total, capped at MAX_PAGES, which already bounds "
+              "a live run without a separate --limit knob. The keyword pass "
+              "across DHSC and OHID must find something in GOV.UK's own "
+              "search index, or the discovery vocabulary is matching nothing. "
+              "govuk_publication_documents is not a signal table -- nothing "
+              "reaches it without a person promoting a candidate, the same "
+              "shape as m09/m34.",
+    ),
+    Smoke(
+        module="m38_police_recorded_crime",
+        produces=("police_recorded_drug_offences",),
+        signal=(("police_recorded_drug_offences", "csp_name"),
+                ("police_recorded_drug_offences", "offence_count_text")),
+        limit=None,
+        precondition="SELECT COUNT(*) FROM authorities",
+        precondition_note="m00 produced no authorities to match CSP names against",
+        note="Ignores --limit, like m29: the current CSP-level file is one "
+              "fetch and --since only filters which financial-year sheets "
+              "are written, not how much of the fetched workbook is read. "
+              "offence_count_text is the signal, not the numeric column, for "
+              "the same reason as m29/m30's own smoke specs -- an "
+              "unparseable published cell leaves offence_count NULL "
+              "correctly while offence_count_text proves the row was "
+              "actually read. Most current CSPs are exact-matched to the "
+              "authorities table, so a real run should write rows for at "
+              "least some of them; a run producing only review_queue "
+              "entries here would mean the whole current edition's naming "
+              "had drifted, which is itself worth surfacing.",
+    ),
+    Smoke(
+        module="m39_360giving",
+        produces=("three_sixty_giving_grants",),
+        signal=(("three_sixty_giving_grants", "amount_awarded"),
+                ("three_sixty_giving_grants", "counterparty_name"),
+                ("three_sixty_giving_grants", "award_date_raw")),
+        precondition="SELECT COUNT(*) FROM provider_identifiers "
+                     "WHERE scheme IN ('charity_number', 'company_number')",
+        precondition_note="no provider has a charity_number or company_number "
+                           "on file, so there is no 360Giving org id to look up",
+        limit=None,
+        note="Ignores --limit: already bounded to the tracked providers' own "
+              "identifiers (docs/m39-360giving-grantnav-feasibility.md), not a "
+              "corpus-wide crawl -- roughly 13 providers x up to 2 identifier "
+              "schemes x 2 directions, not thousands of pages. Verified live "
+              "2026-09-12 that Change Grow Live has 21 real grants received "
+              "under GB-CHC-1079327 (see the feasibility doc), so an empty "
+              "three_sixty_giving_grants table on a real run is a genuine "
+              "signal something changed, not an expected outcome the way a "
+              "pure-discovery module's empty evidence table can be. The "
+              "live-fetch path has not yet been watched end-to-end against the "
+              "real API by a person -- the manual checks behind the "
+              "feasibility doc used curl, not this module -- per the "
+              "reduced-testing policy for a new source.",
     ),
 )}
 
