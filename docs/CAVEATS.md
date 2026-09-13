@@ -674,6 +674,31 @@ anyone using it.
   client retries a 5xx and then fails the run loudly, so a run against the
   broken endpoint reports a failed module rather than a quiet empty table.
 
+### Nomis labour-market context (Module 42)
+
+- M42 collects the Nomis ASHE resident (ASHER) and workplace (ASHE) datasets
+  for the current local-authority selector, total sex, median item, hourly pay
+  excluding overtime, and total hours worked. It retains the source's
+  geography name/code, reference period, measure labels, status/confidence
+  fields and exact retrieval provenance.
+- This is labour-market context, not advertised provider pay. It must not be
+  used to assert what a named provider pays, and no ratio, ranking or "below
+  market" claim is computed from it. The direct ONS ASHE module remains the
+  source for occupation and industry slices that Nomis does not publish at
+  local-authority level.
+- ASHE is a sample survey of employee jobs, excludes self-employed people and
+  armed forces, and local-authority estimates can be suppressed or revised. A
+  NULL value with the original `value_text` is not zero; parse failures and
+  source fetch failures are quarantined for review.
+- Nomis's APSNEW dataset is deliberately deferred from M42: its catalogue has
+  thousands of variables and the product has not yet approved one named
+  labour-market slice. No APSNEW absence should be read as evidence of no
+  employment, unemployment or qualification data.
+- Nomis is a delivery service for official ONS statistics. Keep the dataset
+  identity, reference period, geography selector, measure and retrieval time
+  with any reuse; the Nomis terms and ONS source definitions remain
+  authoritative.
+
 ### Provider career and reward pages (Module 22)
 
 - **The pages are the provider's own site, so attribution is exact** — there
@@ -1498,12 +1523,3 @@ A head whose held-out precision is below `MIN_HEAD_PRECISION` (0.80) is
 `quarantined`: it is trained and its metrics recorded, but it never writes a
 prediction. Changing that bar is a tracked commit, argued for — not a knob to
 turn to make more heads pass.
-
-
-### Nomis labour-market context (Module 42)
-
-- M42 collects the Nomis ASHE resident (ASHER) and workplace (ASHE) datasets for the current local-authority selector, total sex, median item, hourly pay excluding overtime, and total hours worked. It retains the source's geography name/code, reference period, measure labels, status/confidence fields and exact retrieval provenance.
-- This is labour-market context, not advertised provider pay. It must not be used to assert what a named provider pays, and no ratio, ranking or "below market" claim is computed from it. The direct ONS ASHE module remains the source for occupation and industry slices that Nomis does not publish at local-authority level.
-- ASHE is a sample survey of employee jobs, excludes self-employed people and armed forces, and local-authority estimates can be suppressed or revised. A NULL value with the original value_text is not zero; parse failures and source fetch failures are quarantined for review.
-- Nomis's APSNEW dataset is deliberately deferred from M42: its catalogue has thousands of variables and the product has not yet approved one named labour-market slice. No APSNEW absence should be read as evidence of no employment, unemployment or qualification data.
-- Nomis is a delivery service for official ONS statistics. Keep the dataset identity, reference period, geography selector, measure and retrieval time with any reuse; the Nomis terms and ONS source definitions remain authoritative.
