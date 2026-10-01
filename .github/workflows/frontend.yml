@@ -35,7 +35,7 @@ jobs:
       # Pinned by tag and managed by Dependabot alongside the other actions in
       # this repo (see tests.yml); Dependabot rewrites it to a commit SHA.
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '22'
 
